@@ -1,0 +1,50 @@
+# Node modules
+node_modules/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Supabase secrets
+supabase/.temp/
+supabase/.branches/
+supabase/.dev/
+supabase/.functions/_shared/
+supabase/.functions/**/node_modules/
+supabase/.env*
+
+# Docker
+docker-compose.override.yml
+docker-data/
+*.pid
+*.seed
+
+# Build output
+dist/
+build/
+.cache/
+.tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+.history/
+
+# Coverage
+coverage/
+
+# Temporary files
+*.tgz
+*.swp
+*.sw*
