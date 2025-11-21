@@ -1,12 +1,7 @@
-import express from "express";
+import app from "./app.js";
 
-const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 8000;
 
-app.get("/", (req, res) => {
-  res.json({ message: "BelDetailing Backend is running 🔥" });
-});
-
-app.listen(8000, () => {
-  console.log("Server running on http://localhost:8000");
+app.listen(PORT, () => {
+  console.log(`BelDetailing API running on http://localhost:${PORT}`);
 });
