@@ -1,3 +1,4 @@
+// src/middlewares/auth.middleware.js
 import { supabase } from "../config/supabase.js";
 
 export const requireAuth = async (req, res, next) => {
@@ -11,7 +12,7 @@ export const requireAuth = async (req, res, next) => {
 
     const token = authHeader.replace("Bearer ", "").trim();
 
-    // 🔥 La SEULE façon valide de vérifier un JWT Supabase
+    // 🔥 Vérifier le JWT Supabase
     const { data, error } = await supabase.auth.getUser(token);
 
     if (error || !data?.user) {
@@ -19,12 +20,15 @@ export const requireAuth = async (req, res, next) => {
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
-    // 🔥 On injecte l'user dans req.user
+    const user = data.user;
+
+    // 👇 IMPORTANT : on met **sub** + id
     req.user = {
-      id: data.user.id,
-      email: data.user.email,
-      phone: data.user.user_metadata?.phone || null,
-      role: data.user.user_metadata?.role || null,
+      sub: user.id,                 // pour auth.controller.getProfile
+      id: user.id,                  // si tu l'utilises ailleurs
+      email: user.email,
+      phone: user.user_metadata?.phone || null,
+      role: user.user_metadata?.role || null,
     };
 
     next();
