@@ -3,6 +3,8 @@ import { requireAuth } from "../middlewares/auth.middleware.js";
 import {
   listProviders,
   getProvider,
+  updateMyProviderProfile,
+  createService,
   getProviderServicesController,
   getProviderReviewsController,
   getProviderStatsController,
@@ -13,6 +15,10 @@ const router = Router();
 
 // ⭐ Services d’un prestataire
 router.get("/:id/services", getProviderServicesController);
+
+router.patch("/me", requireAuth, updateMyProviderProfile);
+
+router.post("/services", requireAuth, createService);
 
 // ⭐ Avis d’un prestataire
 router.get("/:id/reviews", getProviderReviewsController);

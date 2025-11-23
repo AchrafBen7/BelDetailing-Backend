@@ -178,36 +178,6 @@ export async function register(req, res) {
   }
 
   // ============================================================
-  // 4) Création LIGNE DANS TABLE providers (liste publique)
-  // ============================================================
-
-  if (finalRole === "provider") {
-    const { error: providerInsertError } = await supabase
-      .from("providers")
-      .insert({
-        user_id: authUser.id,
-        display_name: authUser.email.split("@")[0],
-        company_name: null,
-        city: "",
-        postal_code: "",
-        lat: 0,
-        lng: 0,
-        min_price: 0,
-        rating: 0,
-        review_count: 0,
-        has_mobile_service: false,
-        logo_url: null,
-        banner_url: null,
-        team_size: 1,
-        years_of_experience: 0
-      });
-
-    if (providerInsertError) {
-      return res.status(500).json({ error: providerInsertError.message });
-    }
-  }
-
-  // ============================================================
   // 5) ENVOI FINAL
   // ============================================================
   return res.status(201).json({

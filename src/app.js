@@ -5,6 +5,7 @@ import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
 import providerRoutes from "./routes/provider.route.js";
+import bookingsRoutes from "./routes/booking.routes.js";
 
 const app = express();
 
@@ -18,6 +19,8 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/profile", profileRoutes);
 
 app.use("/api/v1/providers", providerRoutes);
+
+app.use("/api/v1/bookings", bookingsRoutes);
 
 // Healthcheck
 app.get("/api/v1/health", (req, res) => {

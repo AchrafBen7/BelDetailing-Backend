@@ -1,31 +1,34 @@
-// src/controllers/provider.controller.js
 import {
   getAllProviders,
   getProviderById,
+  updateProviderProfile,
+  createProviderService,
   getProviderServices,
   getProviderReviews,
   getProviderStats,
 } from "../services/provider.service.js";
 
+// List all providers
 export async function listProviders(req, res) {
   try {
     const providers = await getAllProviders();
-    // iOS: APIResponse<[Detailer]> → on renvoie un array direct
-   return res.json({ data: providers });
+    return res.json({ data: providers });
   } catch (err) {
     console.error("[PROVIDERS] listProviders error:", err);
     return res.status(500).json({ error: "Could not fetch providers" });
   }
-}  
+}
 
+// Get provider by id
 export async function getProvider(req, res) {
   try {
     const { id } = req.params;
     const provider = await getProviderById(id);
+
     if (!provider) {
       return res.status(404).json({ error: "Provider not found" });
     }
-    // iOS: APIResponse<Detailer>
+
     return res.json(provider);
   } catch (err) {
     console.error("[PROVIDERS] getProvider error:", err);
@@ -33,6 +36,37 @@ export async function getProvider(req, res) {
   }
 }
 
+// Update provider profile
+export async function updateMyProviderProfile(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can update profile" });
+    }
+
+    const updated = await updateProviderProfile(req.user.id, req.body);
+    return res.json(updated);
+  } catch (err) {
+    console.error("[PROVIDERS] updateMyProviderProfile error:", err);
+    return res.status(500).json({ error: "Could not update provider profile" });
+  }
+}
+
+// Create a service
+export async function createService(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can create services" });
+    }
+
+    const created = await createProviderService(req.user.id, req.body);
+    return res.status(201).json(created);
+  } catch (err) {
+    console.error("[PROVIDERS] createService error:", err);
+    return res.status(500).json({ error: "Could not create service" });
+  }
+}
+
+// List provider services
 export async function getProviderServicesController(req, res) {
   try {
     const { id } = req.params;
@@ -44,6 +78,7 @@ export async function getProviderServicesController(req, res) {
   }
 }
 
+// List provider reviews
 export async function getProviderReviewsController(req, res) {
   try {
     const { id } = req.params;
@@ -55,26 +90,13 @@ export async function getProviderReviewsController(req, res) {
   }
 }
 
+// Provider stats
 export async function getProviderStatsController(req, res) {
   try {
-    const { id } = req.params;
-    const stats = await getProviderStats(id);
-
-    if (!stats) {
-      return res.json({
-        monthlyEarnings: 0,
-        variationPercent: 0,
-        reservationsCount: 0,
-        rating: 0,
-        clientsCount: 0
-      });
-    }
-
+    const stats = await getProviderStats(req.params.id);
     return res.json(stats);
-
   } catch (err) {
     console.error("[PROVIDERS] getProviderStats error:", err);
     return res.status(500).json({ error: "Could not fetch stats" });
   }
 }
-
