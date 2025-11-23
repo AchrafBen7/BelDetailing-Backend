@@ -1,7 +1,9 @@
 // src/controllers/auth.controller.js
 import { supabase } from "../config/supabase.js";
 
-// Petit helper pour mapper la ligne SQL → modèle iOS User
+/* ============================================================
+   Helper : Map row SQL → DTO User pour iOS
+============================================================ */
 function mapUserRowToDto(row) {
   if (!row) return null;
 
@@ -50,23 +52,36 @@ function mapUserRowToDto(row) {
   };
 }
 
+/* ============================================================
+   REGISTER
+============================================================ */
 // ========= REGISTER =========
 export async function register(req, res) {
-  const { email, password, role, phone } = req.body;
+  const { email, password, role, phone, vat_number } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ error: "Missing email or password" });
   }
 
-  // 1) création Supabase Auth user
+  const finalRole = (role || "customer").toLowerCase();
+
+  // 🌟 RÈGLE : VAT obligatoire pour provider/company
+  if ((finalRole === "provider" || finalRole === "company") && !vat_number) {
+    return res.status(400).json({
+      error: "VAT number is required for providers and companies."
+    });
+  }
+
+  // 1) Création Supabase Auth user
   const { data: signUpData, error: signUpError } =
     await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
-          role: role || "customer",
+          role: finalRole,
           phone: phone || "",
+          vat_number: vat_number || null,
         },
       },
     });
@@ -80,29 +95,134 @@ export async function register(req, res) {
     return res.status(500).json({ error: "No user returned from Supabase" });
   }
 
-  // 2) ligne dans table public.users
+  // 2) Ligne dans public.users
   const { error: insertError } = await supabase.from("users").insert({
     id: authUser.id,
     email: authUser.email,
     phone: phone || "",
-    role: role || "customer",
+    role: finalRole,
+    vat_number: finalRole !== "customer" ? vat_number : null,
+    is_vat_valid: finalRole !== "customer" ? false : null,
   });
 
   if (insertError) {
-    // rollback soft possible (pas obligatoire pour MVP)
     return res.status(500).json({ error: insertError.message });
   }
 
+  // ============================================================
+  // 3) Création des PROFILES
+  // ============================================================
+
+  // CUSTOMER
+  if (finalRole === "customer") {
+    const { error: custError } = await supabase
+      .from("customer_profiles")
+      .insert({
+        user_id: authUser.id,
+        first_name: "",
+        last_name: "",
+        default_address: "",
+        preferred_city_id: null,
+      });
+
+    if (custError) {
+      return res.status(500).json({ error: custError.message });
+    }
+  }
+
+  // COMPANY
+  if (finalRole === "company") {
+    const { error: companyError } = await supabase
+      .from("company_profiles")
+      .insert({
+        user_id: authUser.id,
+        legal_name: authUser.email.split("@")[0],
+        company_type_id: "default",
+        city: "",
+        postal_code: "",
+        contact_name: "",
+        logo_url: null,
+      });
+
+    if (companyError) {
+      return res.status(500).json({ error: companyError.message });
+    }
+  }
+
+  // PROVIDER (profile)
+  if (finalRole === "provider") {
+    const { error: provProfileErr } = await supabase
+      .from("provider_profiles")
+      .insert({
+        user_id: authUser.id,
+        display_name: authUser.email.split("@")[0],
+        bio: "",
+        base_city: "",
+        postal_code: "",
+        lat: 0,
+        lng: 0,
+        has_mobile_service: false,
+        min_price: 0,
+        rating: 0,
+        review_count: 0,
+        services: [],
+        team_size: 1,
+        years_of_experience: 0,
+        logo_url: null,
+        banner_url: null,
+      });
+
+    if (provProfileErr) {
+      return res.status(500).json({ error: provProfileErr.message });
+    }
+  }
+
+  // ============================================================
+  // 4) Création LIGNE DANS TABLE providers (liste publique)
+  // ============================================================
+
+  if (finalRole === "provider") {
+    const { error: providerInsertError } = await supabase
+      .from("providers")
+      .insert({
+        user_id: authUser.id,
+        display_name: authUser.email.split("@")[0],
+        company_name: null,
+        city: "",
+        postal_code: "",
+        lat: 0,
+        lng: 0,
+        min_price: 0,
+        rating: 0,
+        review_count: 0,
+        has_mobile_service: false,
+        logo_url: null,
+        banner_url: null,
+        team_size: 1,
+        years_of_experience: 0
+      });
+
+    if (providerInsertError) {
+      return res.status(500).json({ error: providerInsertError.message });
+    }
+  }
+
+  // ============================================================
+  // 5) ENVOI FINAL
+  // ============================================================
   return res.status(201).json({
     user: {
       id: authUser.id,
       email: authUser.email,
-      role: role || "customer",
+      role: finalRole,
     },
   });
 }
 
-// ========= LOGIN =========
+
+/* ============================================================
+   LOGIN
+============================================================ */
 export async function login(req, res) {
   const { email, password } = req.body;
 
@@ -116,23 +236,41 @@ export async function login(req, res) {
   });
 
   if (error) {
-    if (error.message.includes("Email not confirmed")) {
-      return res.status(401).json({ error: "Email not confirmed" });
-    }
     return res.status(401).json({ error: error.message });
   }
 
   const { session, user } = data;
 
-  // On récupère aussi user app (role + phone) depuis table users
-  const { data: userRow, error: userError } = await supabase
+  // Lecture public.users
+  let { data: userRow, error: userError } = await supabase
     .from("users")
     .select("*")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
 
-  if (userError) {
-    return res.status(500).json({ error: userError.message });
+  if (userError) return res.status(500).json({ error: userError.message });
+
+  // Si absent → recreate automatiquement
+  if (!userRow) {
+    const { data: upserted, error: upsertError } = await supabase
+      .from("users")
+      .upsert(
+        {
+          id: user.id,
+          email: user.email,
+          phone: user.user_metadata?.phone || "",
+          role: user.user_metadata?.role || "customer",
+        },
+        { onConflict: "id" }
+      )
+      .select("*")
+      .single();
+
+    if (upsertError) {
+      return res.status(500).json({ error: upsertError.message });
+    }
+
+    userRow = upserted;
   }
 
   return res.json({
@@ -151,7 +289,9 @@ export async function login(req, res) {
   });
 }
 
-// ========= REFRESH =========
+/* ============================================================
+   REFRESH TOKEN
+============================================================ */
 export async function refreshToken(req, res) {
   const { refreshToken } = req.body;
 
@@ -169,7 +309,6 @@ export async function refreshToken(req, res) {
 
   const { session, user } = data;
 
-  // On relit notre user app
   const { data: userRow, error: userError } = await supabase
     .from("users")
     .select("*")
@@ -194,165 +333,4 @@ export async function refreshToken(req, res) {
     tokenType: session.token_type,
     expiresIn: session.expires_in,
   });
-}
-
-// ========= GET PROFILE =========
-export async function getProfile(req, res) {
-  // req.user vient du middleware requireAuth (JWT Supabase)
-  const userId = req.user?.sub;
-  if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  const { data, error } = await supabase
-    .from("users")
-    .select(
-      `
-      id, email, phone, role, vat_number, is_vat_valid,
-      created_at, updated_at,
-      customer_profiles ( first_name, last_name, default_address, preferred_city_id ),
-      company_profiles  ( legal_name, company_type_id, city, postal_code, contact_name, logo_url ),
-      provider_profiles ( display_name, bio, base_city, postal_code, has_mobile_service, min_price, rating, services )
-    `
-    )
-    .eq("id", userId)
-    .single();
-
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
-
-  const userDto = mapUserRowToDto(data);
-  return res.json({ user: userDto });
-}
-
-// ========= UPDATE PROFILE =========
-export async function updateProfile(req, res) {
-  const userId = req.user?.sub;
-  if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  const {
-    phone,
-    role,
-    vatNumber,
-    isVatValid,
-    customerProfile,
-    companyProfile,
-    providerProfile,
-  } = req.body;
-
-  // 1) Update table users
-  const userUpdate = {};
-  if (phone !== undefined) userUpdate.phone = phone;
-  if (role !== undefined) userUpdate.role = role;
-  if (vatNumber !== undefined) userUpdate.vat_number = vatNumber;
-  if (isVatValid !== undefined) userUpdate.is_vat_valid = isVatValid;
-
-  if (Object.keys(userUpdate).length > 0) {
-    const { error: userError } = await supabase
-      .from("users")
-      .update(userUpdate)
-      .eq("id", userId);
-
-    if (userError) {
-      return res.status(500).json({ error: userError.message });
-    }
-  }
-
-  // 2) Update / upsert customer_profile
-  if (customerProfile) {
-    const {
-      firstName,
-      lastName,
-      defaultAddress,
-      preferredCityId,
-    } = customerProfile;
-
-    const { error: customerError } = await supabase
-      .from("customer_profiles")
-      .upsert(
-        {
-          user_id: userId,
-          first_name: firstName,
-          last_name: lastName,
-          default_address: defaultAddress,
-          preferred_city_id: preferredCityId,
-        },
-        { onConflict: "user_id" }
-      );
-
-    if (customerError) {
-      return res.status(500).json({ error: customerError.message });
-    }
-  }
-
-  // 3) Update / upsert company_profile
-  if (companyProfile) {
-    const {
-      legalName,
-      companyTypeId,
-      city,
-      postalCode,
-      contactName,
-      logoUrl,
-    } = companyProfile;
-
-    const { error: companyError } = await supabase
-      .from("company_profiles")
-      .upsert(
-        {
-          user_id: userId,
-          legal_name: legalName,
-          company_type_id: companyTypeId,
-          city,
-          postal_code: postalCode,
-          contact_name: contactName,
-          logo_url: logoUrl,
-        },
-        { onConflict: "user_id" }
-      );
-
-    if (companyError) {
-      return res.status(500).json({ error: companyError.message });
-    }
-  }
-
-  // 4) Update / upsert provider_profile
-  if (providerProfile) {
-    const {
-      displayName,
-      bio,
-      baseCity,
-      postalCode,
-      hasMobileService,
-      minPrice,
-      services,
-    } = providerProfile;
-
-    const { error: providerError } = await supabase
-      .from("provider_profiles")
-      .upsert(
-        {
-          user_id: userId,
-          display_name: displayName,
-          bio,
-          base_city: baseCity,
-          postal_code: postalCode,
-          has_mobile_service: hasMobileService,
-          min_price: minPrice,
-          // rating : calculé côté système → on ne le touche pas ici
-          services,
-        },
-        { onConflict: "user_id" }
-      );
-
-    if (providerError) {
-      return res.status(500).json({ error: providerError.message });
-    }
-  }
-
-  // 5) Renvoi le profil à jour
-  return await getProfile(req, res);
 }
