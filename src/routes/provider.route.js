@@ -32,7 +32,4 @@ router.get("/:id", getProvider);
 // ⭐ Liste de tous les prestataires
 router.get("/", listProviders);
 
-// ⭐ Création d’un avis
-router.post("/reviews", requireAuth, createReview);
-
 export default router;
