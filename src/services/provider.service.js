@@ -58,13 +58,17 @@ export async function createProviderService(userId, service) {
       duration_minutes: service.duration_minutes,
       description: service.description,
       is_available: service.is_available,
-      image_url: service.image_url
+      image_url: service.image_url,
+      currency: service.currency || "eur",
     })
     .select()
     .single();
 
   if (error) throw error;
-  return data;
+
+  // 🧠 ICI : on ajoute directement Stripe product + price
+  const withStripe = await ensureStripeProductForService(data);
+  return withStripe;
 }
 
 // 🟦 Détail d’un prestataire

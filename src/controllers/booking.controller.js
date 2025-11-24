@@ -7,6 +7,10 @@ import {
   updateBookingStatus,
 } from "../services/booking.service.js";
 
+import { supabase } from "..//config/supabase.js";
+
+const COMMISSION_RATE = 0.10;
+
 export async function listBookings(req, res) {
   try {
     const { scope, status } = req.query;
@@ -34,10 +38,82 @@ export async function getBooking(req, res) {
 
 export async function createBooking(req, res) {
   try {
-    const booking = await createBookingService(req.body, req.user);
-    return res.status(201).json(booking);
+    const customerId = req.user.id; // user connecté (customer)
+    const {
+      provider_id,
+      service_id,
+      date,
+      start_time,
+      end_time,
+      address,
+    } = req.body;
+
+    // 1) On récupère le service
+    const { data: service, error: serviceError } = await supabase
+      .from("services")
+      .select("*")
+      .eq("id", service_id)
+      .single();
+
+    if (serviceError || !service) {
+      return res.status(404).json({ error: "Service not found" });
+    }
+
+    // sécurité : on vérifie que le service appartient bien à ce provider
+    if (service.provider_id !== provider_id) {
+      return res
+        .status(400)
+        .json({ error: "Service does not belong to this provider" });
+    }
+
+    // 2) On récupère le provider (nom, bannière, stripe_account_id, etc.)
+    const { data: provider, error: providerError } = await supabase
+      .from("provider_profiles")
+      .select("display_name, banner_url, stripe_account_id")
+      .eq("user_id", provider_id)
+      .single();
+
+    if (providerError || !provider) {
+      return res.status(404).json({ error: "Provider not found" });
+    }
+
+    const price = service.price;
+    const currency = service.currency || "eur";
+
+    // 3) On insère la booking en base
+    const { data: booking, error: bookingError } = await supabase
+      .from("bookings")
+      .insert({
+        provider_id,
+        customer_id: customerId,
+        service_id,
+
+        provider_name: provider.display_name,
+        service_name: service.name,
+        price,
+        currency,
+
+        date,
+        start_time,
+        end_time,
+        address,
+
+        status: "pending",
+        payment_status: "pending",
+        payment_intent_id: null,
+        commission_rate: COMMISSION_RATE,
+        invoice_sent: false,
+
+        provider_banner_url: provider.banner_url ?? null,
+      })
+      .select()
+      .single();
+
+    if (bookingError) throw bookingError;
+
+    return res.status(201).json({ data: booking });
   } catch (err) {
-    console.error("[BOOKINGS] create error:", err);
+    console.error("[BOOKINGS] createBooking error:", err);
     return res.status(500).json({ error: "Could not create booking" });
   }
 }
