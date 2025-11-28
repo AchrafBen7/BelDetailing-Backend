@@ -5,6 +5,7 @@ import {
   createOrGetAccountController,
   createOnboardingLinkController,
   getAccountStatusController,
+  getPayoutSummaryController,
 } from "../controllers/stripeConnect.controller.js";
 
 const router = Router();
@@ -17,5 +18,8 @@ router.post("/connect/onboarding-link", requireAuth, createOnboardingLinkControl
 
 // Voir le status actuel du compte (charges_enabled, payouts_enabled…)
 router.get("/connect/account-status", requireAuth, getAccountStatusController);
+
+// 💸 Résumé des payouts & soldes
+router.get("/connect/payouts-summary", requireAuth, getPayoutSummaryController);
 
 export default router;

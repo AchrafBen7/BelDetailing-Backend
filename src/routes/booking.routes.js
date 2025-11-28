@@ -10,6 +10,7 @@ import {
   cancelBooking,
   confirmBooking,
   declineBooking,
+  refundBooking,
 } from "../controllers/booking.controller.js";
 
 const router = Router();
@@ -22,5 +23,7 @@ router.patch("/:id", requireAuth, updateBooking);
 router.post("/:id/cancel", requireAuth, cancelBooking);
 router.post("/:id/confirm", requireAuth, confirmBooking);
 router.post("/:id/decline", requireAuth, declineBooking);
+
+router.post("/:id/refund", requireAuth, refundBooking);
 
 export default router;

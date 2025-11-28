@@ -106,3 +106,26 @@ export async function getConnectedAccountStatus(stripeAccountId) {
     },
   };
 }
+
+export async function getProviderBalanceAndPayouts(stripeAccountId) {
+  // Solde du compte connecté
+  const balance = await stripe.balance.retrieve({
+    stripeAccount: stripeAccountId,
+  });
+
+  // Prochains payouts
+  const payouts = await stripe.payouts.list(
+    {
+      limit: 5,
+    },
+    {
+      stripeAccount: stripeAccountId,
+    }
+  );
+
+  return {
+    available: balance.available ?? [],
+    pending: balance.pending ?? [],
+    payouts: payouts.data ?? [],
+  };
+}

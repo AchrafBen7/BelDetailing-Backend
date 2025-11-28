@@ -6,6 +6,7 @@ import {
   updateBookingService,
   updateBookingStatus,
 } from "../services/booking.service.js";
+import { refundPayment } from "../services/payment.service.js";
 
 import { supabase } from "..//config/supabase.js";
 
@@ -223,6 +224,57 @@ export async function declineBooking(req, res) {
   } catch (err) {
     console.error("[BOOKINGS] decline error:", err);
     return res.status(500).json({ error: "Could not decline booking" });
+  }
+}
+
+
+export async function refundBooking(req, res) {
+  try {
+    const bookingId = req.params.id;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Seul le provider ou un admin peut rembourser
+    if (userRole !== "provider" && userRole !== "admin") {
+      return res.status(403).json({
+        error: "Only providers or admins can refund bookings",
+      });
+    }
+
+    // On récupère la booking
+    const booking = await getBookingDetail(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    // Si provider → doit être le bon provider
+    if (userRole === "provider" && booking.provider_id !== userId) {
+      return res.status(403).json({
+        error: "You are not allowed to refund this booking",
+      });
+    }
+
+    if (!booking.payment_intent_id) {
+      return res
+        .status(400)
+        .json({ error: "No payment_intent linked to this booking" });
+    }
+
+    // Appel Stripe → refund
+    const ok = await refundPayment(booking.payment_intent_id);
+
+    if (!ok) {
+      return res.status(500).json({ error: "Stripe refund failed" });
+    }
+
+    // On met à jour la DB
+    await updateBookingStatus(bookingId, "cancelled"); // ou "refunded" si tu crées ce statut
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[BOOKINGS] refund error:", err);
+    return res.status(500).json({ error: "Could not refund booking" });
   }
 }
 

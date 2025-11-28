@@ -1,13 +1,22 @@
+// src/routes/stripeWebhook.routes.js
 import express from "express";
 import Stripe from "stripe";
 import { supabase } from "../config/supabase.js";
 
 const router = express.Router();
 
+if (!process.env.STRIPE_SECRET_KEY) {
+  throw new Error("Missing STRIPE_SECRET_KEY for webhooks");
+}
+if (!process.env.STRIPE_WEBHOOK_SECRET) {
+  console.warn("⚠️ STRIPE_WEBHOOK_SECRET is not set – webhooks won't be verified!");
+}
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2025-11-17.clover",
 });
 
+// IMPORTANT : express.raw() uniquement sur ce endpoint
 router.post(
   "/webhook",
   express.raw({ type: "application/json" }),
@@ -34,76 +43,117 @@ router.post(
 
     console.log("📡 Webhook received:", event.type);
 
-    /* ===========================================================
-       1) CHECKOUT SESSION COMPLETED
-    ============================================================ */
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
+    try {
+      switch (event.type) {
+        case "checkout.session.completed": {
+          const session = event.data.object;
 
-      // metadata.bookingId est envoyé dans createCheckoutSessionForBooking()
-      const bookingId = session.metadata?.bookingId;
-      const paymentIntent = session.payment_intent;
+          const bookingId = session.metadata?.bookingId;
+          const paymentIntentId =
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : session.payment_intent?.id ?? null;
 
-      if (!bookingId) {
-        console.error("❌ No bookingId found in session metadata");
-        return res.json({ received: true });
+          if (!bookingId) {
+            console.warn("⚠️ checkout.session.completed without bookingId");
+            break;
+          }
+
+          console.log(
+            `✅ Mark booking ${bookingId} as paid (PI=${paymentIntentId})`
+          );
+
+          await supabase
+            .from("bookings")
+            .update({
+              payment_status: "paid",
+              status: "paid",
+              payment_intent_id: paymentIntentId,
+            })
+            .eq("id", bookingId);
+
+          break;
+        }
+
+        case "payment_intent.succeeded": {
+          const intent = event.data.object;
+          const bookingId = intent.metadata?.bookingId;
+
+          if (!bookingId) {
+            console.log("payment_intent.succeeded (no bookingId), skipping");
+            break;
+          }
+
+          console.log(`✅ PI succeeded for booking ${bookingId}`);
+
+          await supabase
+            .from("bookings")
+            .update({
+              payment_status: "paid",
+              payment_intent_id: intent.id,
+            })
+            .eq("id", bookingId);
+
+          break;
+        }
+
+        case "payment_intent.payment_failed": {
+          const intent = event.data.object;
+          const bookingId = intent.metadata?.bookingId;
+
+          if (!bookingId) {
+            console.log("payment_intent.failed (no bookingId), skipping");
+            break;
+          }
+
+          console.log(`❌ PI failed for booking ${bookingId}`);
+
+          await supabase
+            .from("bookings")
+            .update({
+              payment_status: "failed",
+            })
+            .eq("id", bookingId);
+
+          break;
+        }
+
+        case "charge.refunded":
+        case "charge.refund.updated":
+        case "refund.succeeded": {
+          // Selon l’event que tu actives
+          const chargeOrRefund = event.data.object;
+          const paymentIntentId = chargeOrRefund.payment_intent;
+
+          if (!paymentIntentId) {
+            console.log("refund event without payment_intent, skipping");
+            break;
+          }
+
+          console.log(
+            `💸 Refund detected for payment_intent ${paymentIntentId}`
+          );
+
+          await supabase
+            .from("bookings")
+            .update({
+              payment_status: "refunded",
+              status: "cancelled", // ou "refunded" selon ta logique
+            })
+            .eq("payment_intent_id", paymentIntentId);
+
+          break;
+        }
+
+        default:
+          console.log(`ℹ️ Unhandled event type ${event.type}`);
       }
 
-      console.log(`🔄 Updating booking ${bookingId} → paid`);
-
-      await supabase
-        .from("bookings")
-        .update({
-          payment_status: "paid",
-          payment_intent_id:
-            typeof paymentIntent === "string"
-              ? paymentIntent
-              : paymentIntent?.id,
-          status: "paid", // si tu veux que le provider voie "paid"
-        })
-        .eq("id", bookingId);
+      res.json({ received: true });
+    } catch (err) {
+      console.error("💥 Webhook handler error:", err);
+      res.status(500).send("Webhook handler error");
     }
-
-    /* ===========================================================
-       2) PAYMENT INTENT SUCCEEDED (backup)
-    ============================================================ */
-    if (event.type === "payment_intent.succeeded") {
-      const intent = event.data.object;
-      const bookingId = intent.metadata?.bookingId;
-
-      if (bookingId) {
-        console.log(`💰 PaymentIntent succeeded for booking ${bookingId}`);
-
-        await supabase
-          .from("bookings")
-          .update({
-            payment_status: "paid",
-            payment_intent_id: intent.id,
-          })
-          .eq("id", bookingId);
-      }
-    }
-
-    /* ===========================================================
-       3) PAYMENT FAILED
-    ============================================================ */
-    if (event.type === "payment_intent.payment_failed") {
-      const intent = event.data.object;
-      const bookingId = intent.metadata?.bookingId;
-
-      if (bookingId) {
-        console.log(`❌ Payment failed for booking ${bookingId}`);
-
-        await supabase
-          .from("bookings")
-          .update({
-            payment_status: "failed",
-          })
-          .eq("id", bookingId);
-      }
-    }
-
-    return res.json({ received: true });
   }
 );
 

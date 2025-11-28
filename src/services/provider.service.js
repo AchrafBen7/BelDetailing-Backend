@@ -46,8 +46,8 @@ export async function getProviderServices(providerId) {
   return data;
 }
 
-// 🟦 Création d’un service
 export async function createProviderService(userId, service) {
+  // 1️⃣ Insert dans Supabase
   const { data, error } = await supabase
     .from("services")
     .insert({
@@ -66,9 +66,27 @@ export async function createProviderService(userId, service) {
 
   if (error) throw error;
 
-  // 🧠 ICI : on ajoute directement Stripe product + price
-  const withStripe = await ensureStripeProductForService(data);
-  return withStripe;
+  // 2️⃣ Création auto du produit Stripe (Marketplace)
+  try {
+    const updatedService = await ensureStripeProductForService(data.id);
+
+    return {
+      ...data,
+      stripe_product_id: updatedService.productId,
+      stripe_price_id: updatedService.priceId,
+    };
+  } catch (stripeError) {
+    console.error("[SERVICE] Stripe product creation failed:", stripeError);
+
+    // ❗ Très important :
+    // On ne bloque JAMAIS la création d’un service si Stripe tombe
+    return {
+      ...data,
+      stripe_product_id: null,
+      stripe_price_id: null,
+      stripeError: true,
+    };
+  }
 }
 
 // 🟦 Détail d’un prestataire

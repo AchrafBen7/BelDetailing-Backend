@@ -3,6 +3,7 @@ import {
   createOrGetConnectedAccount,
   createOnboardingLink,
   getConnectedAccountStatus,
+  getProviderBalanceAndPayouts,
 } from "../services/stripeConnect.service.js";
 
 /**
@@ -64,5 +65,24 @@ export async function getAccountStatusController(req, res) {
   } catch (err) {
     console.error("[STRIPE CONNECT] accountStatus error:", err);
     return res.status(500).json({ error: "Could not fetch Stripe account status" });
+  }
+}
+
+export async function getPayoutSummaryController(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res
+        .status(403)
+        .json({ error: "Only providers can view payouts" });
+    }
+
+    const { stripeAccountId } = await createOrGetConnectedAccount(req.user.id);
+
+    const summary = await getProviderBalanceAndPayouts(stripeAccountId);
+
+    return res.json(summary);
+  } catch (err) {
+    console.error("[STRIPE CONNECT] payoutSummary error:", err);
+    return res.status(500).json({ error: "Could not fetch payouts summary" });
   }
 }

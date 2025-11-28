@@ -5,6 +5,10 @@ import {
   login,
   refreshToken,
 } from "../controllers/auth.controller.js";
+import {
+  loginWithApple,
+  loginWithGoogle,
+} from "../controllers/authSocial.controller.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
 const router = Router();
@@ -14,5 +18,8 @@ router.post("/register", register);
 router.post("/login", login);
 router.post("/refresh", refreshToken);
 
+// === SOCIAL AUTH ===
+router.post("/apple", loginWithApple);
+router.post("/google", loginWithGoogle);
 
 export default router;
