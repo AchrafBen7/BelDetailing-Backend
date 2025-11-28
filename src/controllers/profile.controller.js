@@ -1,5 +1,6 @@
 
 import { mapUserRowToDto } from "../mappers/user.mapper.js";
+import { supabase } from "../config/supabase.js";
 
 
 // ========= GET PROFILE =========

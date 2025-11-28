@@ -1,6 +1,11 @@
 export function mapUserRowToDto(row) {
   if (!row) return null;
 
+  // Les relations Supabase reviennent en tableau
+  const c = Array.isArray(row.customer_profiles) ? row.customer_profiles[0] : null;
+  const co = Array.isArray(row.company_profiles) ? row.company_profiles[0] : null;
+  const p = Array.isArray(row.provider_profiles) ? row.provider_profiles[0] : null;
+
   return {
     id: row.id,
     email: row.email,
@@ -11,44 +16,44 @@ export function mapUserRowToDto(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
 
-    customerProfile: row.customer_profiles
+    customerProfile: c
       ? {
-          firstName: row.customer_profiles.first_name,
-          lastName: row.customer_profiles.last_name,
-          defaultAddress: row.customer_profiles.default_address,
-          preferredCityId: row.customer_profiles.preferred_city_id,
+          firstName: c.first_name ?? null,
+          lastName: c.last_name ?? null,
+          defaultAddress: c.default_address ?? null,
+          preferredCityId: c.preferred_city_id ?? null,
         }
       : null,
 
-    companyProfile: row.company_profiles
+    companyProfile: co
       ? {
-          legalName: row.company_profiles.legal_name,
-          companyTypeId: row.company_profiles.company_type_id,
-          city: row.company_profiles.city,
-          postalCode: row.company_profiles.postal_code,
-          contactName: row.company_profiles.contact_name,
-          logoUrl: row.company_profiles.logo_url,
+          legalName: co.legal_name ?? null,
+          companyTypeId: co.company_type_id ?? null,
+          city: co.city ?? null,
+          postalCode: co.postal_code ?? null,
+          contactName: co.contact_name ?? null,
+          logoUrl: co.logo_url ?? null,
         }
       : null,
 
-    providerProfile: row.provider_profiles
+    providerProfile: p
       ? {
-          displayName: row.provider_profiles.display_name,
-          bio: row.provider_profiles.bio,
-          baseCity: row.provider_profiles.base_city,
-          postalCode: row.provider_profiles.postal_code,
-          hasMobileService: row.provider_profiles.has_mobile_service,
-          minPrice: row.provider_profiles.min_price,
-          rating: row.provider_profiles.rating,
-          services: row.provider_profiles.services,
-          companyName: row.provider_profiles.company_name,
-          lat: row.provider_profiles.lat,
-          lng: row.provider_profiles.lng,
-          reviewCount: row.provider_profiles.review_count,
-          teamSize: row.provider_profiles.team_size,
-          yearsOfExperience: row.provider_profiles.years_of_experience,
-          logoUrl: row.provider_profiles.logo_url,
-          bannerUrl: row.provider_profiles.banner_url,
+          displayName: p.display_name ?? null,
+          bio: p.bio ?? null,
+          baseCity: p.base_city ?? null,
+          postalCode: p.postal_code ?? null,
+          hasMobileService: p.has_mobile_service ?? false,
+          minPrice: p.min_price ?? null,
+          rating: p.rating ?? null,
+          services: p.services ?? [],
+          companyName: p.company_name ?? null,
+          lat: p.lat ?? null,
+          lng: p.lng ?? null,
+          reviewCount: p.review_count ?? null,
+          teamSize: p.team_size ?? null,
+          yearsOfExperience: p.years_of_experience ?? null,
+          logoUrl: p.logo_url ?? null,
+          bannerUrl: p.banner_url ?? null,
         }
       : null,
   };
