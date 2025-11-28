@@ -1,4 +1,7 @@
 
+import { mapUserRowToDto } from "../mappers/user.mapper.js";
+
+
 // ========= GET PROFILE =========
 export async function getProfile(req, res) {
   // req.user vient du middleware requireAuth (JWT Supabase)
@@ -59,8 +62,16 @@ export async function getProfile(req, res) {
     return res.status(500).json({ error: error.message });
   }
 
+try {
   const userDto = mapUserRowToDto(data);
   return res.json({ user: userDto });
+} catch (err) {
+  console.error("❌ DTO MAPPING ERROR:", err);
+  return res.status(500).json({ error: "Mapping failed" });
+}
+
+
+  
 }
 
 // ========= UPDATE PROFILE =========
