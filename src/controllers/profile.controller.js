@@ -8,18 +8,52 @@ export async function getProfile(req, res) {
   }
 
   const { data, error } = await supabase
-    .from("users")
-    .select(
-      `
-      id, email, phone, role, vat_number, is_vat_valid,
-      created_at, updated_at,
-      customer_profiles ( first_name, last_name, default_address, preferred_city_id ),
-      company_profiles  ( legal_name, company_type_id, city, postal_code, contact_name, logo_url ),
-      provider_profiles ( display_name, bio, base_city, postal_code, has_mobile_service, min_price, rating, services )
-    `
+  .from("users")
+  .select(`
+    id,
+    email,
+    phone,
+    role,
+    vat_number,
+    is_vat_valid,
+    created_at,
+    updated_at,
+    customer_profiles (
+      first_name,
+      last_name,
+      default_address,
+      preferred_city_id
+    ),
+    company_profiles (
+      legal_name,
+      company_type_id,
+      city,
+      postal_code,
+      contact_name,
+      logo_url
+    ),
+    provider_profiles (
+      display_name,
+      bio,
+      base_city,
+      postal_code,
+      has_mobile_service,
+      min_price,
+      rating,
+      services,
+      company_name,
+      lat,
+      lng,
+      review_count,
+      team_size,
+      years_of_experience,
+      logo_url,
+      banner_url
     )
-    .eq("id", userId)
-    .single();
+  `)
+  .eq("id", userId)
+  .single();
+
 
   if (error) {
     return res.status(500).json({ error: error.message });
