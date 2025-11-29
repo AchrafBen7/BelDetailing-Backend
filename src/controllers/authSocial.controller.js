@@ -16,11 +16,10 @@ export async function loginWithApple(req, res) {
       email,
     });
 
-    // result = { user, accessToken }
     return res.status(200).json(result);
   } catch (err) {
     console.error("❌ loginWithApple error:", err);
-    return res.status(401).json({ error: "Apple login failed" });
+    return res.status(401).json({ error: err.message || "Apple login failed" });
   }
 }
 
@@ -34,10 +33,12 @@ export async function loginWithGoogle(req, res) {
 
     const result = await socialAuthLoginGoogle({ idToken });
 
-    // result = { user, accessToken }
     return res.status(200).json(result);
   } catch (err) {
     console.error("❌ loginWithGoogle error:", err);
-    return res.status(401).json({ error: "Google login failed" });
+    // ⚠️ très important : on renvoie le vrai message Supabase pour debug
+    return res.status(401).json({
+      error: err.message || err.error_description || "Google login failed",
+    });
   }
 }
