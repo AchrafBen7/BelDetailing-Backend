@@ -6,7 +6,7 @@ import { supabase } from "../config/supabase.js";
 // ========= GET PROFILE =========
 export async function getProfile(req, res) {
   // req.user vient du middleware requireAuth (JWT Supabase)
-  const userId = req.user?.sub;
+  const userId = req.user?.id;
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -77,7 +77,7 @@ try {
 
 // ========= UPDATE PROFILE =========
 export async function updateProfile(req, res) {
-  const userId = req.user?.sub;
+  const userId = req.user?.id;
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
