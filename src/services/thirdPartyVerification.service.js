@@ -9,7 +9,7 @@ export async function verifyAppleToken({ identityToken }) {
       {
         algorithms: ["RS256"],
         issuer: "https://appleid.apple.com",
-        audience: APPLE_BUNDLE_ID, // ✅ important pour sécu
+        audience: APPLE_BUNDLE_ID,
       },
       (err, payload) => {
         if (err) {

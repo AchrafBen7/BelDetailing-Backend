@@ -1,5 +1,5 @@
 // src/middlewares/auth.middleware.js
-import { supabase } from "../config/supabase.js";
+import jwt from "jsonwebtoken";
 
 export const requireAuth = async (req, res, next) => {
   try {
@@ -12,28 +12,24 @@ export const requireAuth = async (req, res, next) => {
 
     const token = authHeader.replace("Bearer ", "").trim();
 
-    // 🔥 Vérifier le JWT Supabase
-    const { data, error } = await supabase.auth.getUser(token);
+    // ---------------------------------------------------------
+    // 🔥 Vérification JWT locale (compatible email + Google + Apple)
+    // ---------------------------------------------------------
+    const payload = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
 
-    if (error || !data?.user) {
-      console.error("Supabase error:", error);
-      return res.status(401).json({ error: "Invalid or expired token" });
-    }
-
-    const user = data.user;
-
-    // 👇 IMPORTANT : on met **sub** + id
+    // 🔥 payload.sub = UUID du user SUPABASE
+    // 🔥 payload.email = email du user
+    // 🔥 payload.role = metadata.role (si tu l’as mis dans signUp)
     req.user = {
-      sub: user.id,                 // pour auth.controller.getProfile
-      id: user.id,                  // si tu l'utilises ailleurs
-      email: user.email,
-      phone: user.user_metadata?.phone || null,
-      role: user.user_metadata?.role || null,
+      sub: payload.sub,
+      email: payload.email || null,
+      role: payload.role || null,
     };
 
-    next();
+    return next();
+
   } catch (err) {
-    console.error("Unexpected auth error:", err);
-    return res.status(500).json({ error: "Auth middleware crashed" });
+    console.error("❌ JWT verification error:", err.message);
+    return res.status(401).json({ error: "Invalid or expired token" });
   }
 };

@@ -72,10 +72,13 @@ export async function socialAuthLoginApple({ identityToken, fullName, email }) {
   });
 
   // 4. retourner les infos
-  return {
-    user: customUser,
-    accessToken: data.session.access_token,  // 🔥 token Supabase
-  };
+return {
+  user: customUser,
+  accessToken: data.session.access_token,
+  refreshToken: data.session.refresh_token,   // ⬅️ MANQUANT = bug
+  userRole: customUser.role                  // optionnel mais propre
+};
+
 }
 
 // 🔹 GOOGLE LOGIN
@@ -98,8 +101,10 @@ export async function socialAuthLoginGoogle({ idToken }) {
     fullName: authUser.user_metadata.full_name ?? "",
   });
 
-  return {
-    user: customUser,
-    accessToken: data.session.access_token,
-  };
+return {
+  user: customUser,
+  accessToken: data.session.access_token,
+  refreshToken: data.session.refresh_token
+};
+
 }
