@@ -304,3 +304,31 @@ export async function refreshToken(req, res) {
     expiresIn: session.expires_in,
   });
 }
+
+
+/* ============================================================
+   logout
+============================================================ */
+export async function logout(req, res) {
+  try {
+    // Récupère le Bearer token du header
+    const token = req.headers.authorization?.replace("Bearer ", "");
+
+    if (!token) {
+      return res.status(400).json({ error: "Missing access token" });
+    }
+
+    // Supprime la session côté Supabase
+    const { error } = await supabase.auth.admin.signOut(token);
+
+    if (error) {
+      console.error("Supabase logout error:", error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.json({ message: "Logged out successfully" });
+  } catch (err) {
+    console.error("Logout error:", err);
+    return res.status(500).json({ error: "Logout failed" });
+  }
+}

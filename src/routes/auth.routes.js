@@ -4,6 +4,7 @@ import {
   register,
   login,
   refreshToken,
+  logout
 } from "../controllers/auth.controller.js";
 import {
   loginWithApple,
@@ -21,5 +22,7 @@ router.post("/refresh", refreshToken);
 // === SOCIAL AUTH ===
 router.post("/apple", loginWithApple);
 router.post("/google", loginWithGoogle);
+
+router.post("/logout", requireAuth, logout);
 
 export default router;
