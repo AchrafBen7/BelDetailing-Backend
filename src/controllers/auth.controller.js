@@ -180,13 +180,12 @@ export async function register(req, res) {
   // ============================================================
   // 5) ENVOI FINAL
   // ============================================================
-  return res.status(201).json({
-    user: {
-      id: authUser.id,
-      email: authUser.email,
-      role: finalRole,
-    },
-  });
+return res.status(201).json({
+  success: true,
+  email: authUser.email,
+  role: finalRole,
+});
+
 }
 
 
