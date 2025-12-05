@@ -1,3 +1,4 @@
+// src/controllers/provider.controller.js
 import {
   getAllProviders,
   getProviderById,
@@ -8,11 +9,20 @@ import {
   getProviderStats,
 } from "../services/provider.service.js";
 
-// List all providers
 export async function listProviders(req, res) {
   try {
-    const providers = await getAllProviders();
-    return res.json({ data: providers });
+    const { sort, limit, lat, lng, radius } = req.query;
+
+    const providers = await getAllProviders({
+      sort,
+      limit,
+      lat: lat ? Number(lat) : undefined,
+      lng: lng ? Number(lng) : undefined,
+      radius: radius ? Number(radius) : undefined,
+    });
+
+    // ⬅️ heel belangrijk: direct array teruggeven
+    return res.json(providers);
   } catch (err) {
     console.error("[PROVIDERS] listProviders error:", err);
     return res.status(500).json({ error: "Could not fetch providers" });

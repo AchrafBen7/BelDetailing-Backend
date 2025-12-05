@@ -1,13 +1,13 @@
 // src/services/provider.service.js
 import { supabase } from "../config/supabase.js";
 
-// 🧠 Mapping DB → DTO iOS Detailer
+// DB → DTO
 function mapProviderRowToDetailer(row) {
   return {
     id: row.user_id,
     displayName: row.display_name,
     bio: row.bio,
-    city: row.base_city ?? "",   // ✔ CORRECT
+    city: row.base_city ?? "",
     postalCode: row.postal_code ?? "",
     lat: row.lat ?? 0,
     lng: row.lng ?? 0,
@@ -23,14 +23,28 @@ function mapProviderRowToDetailer(row) {
   };
 }
 
+// 🟦 Liste de tous les prestataires (+ optionele filters)
+export async function getAllProviders(options = {}) {
+  const { sort, limit /* lat, lng, radius */ } = options;
 
-// 🟦 Liste de tous les prestataires
-export async function getAllProviders() {
-  const { data, error } = await supabase
-    .from("provider_profiles")
-    .select("*");
+  let query = supabase.from("provider_profiles").select("*");
 
+  // sort=rating,-priceMin (komt van iOS recommendedProviders)
+  if (sort === "rating,-priceMin") {
+    query = query
+      .order("rating", { ascending: false })
+      .order("min_price", { ascending: true });
+  }
+
+  if (limit) {
+    query = query.limit(Number(limit));
+  }
+
+  // TODO later: lat/lng/radius gebruiken voor echte "nearby" search
+
+  const { data, error } = await query;
   if (error) throw error;
+
   return data.map(mapProviderRowToDetailer);
 }
 
