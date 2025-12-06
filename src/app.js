@@ -1,6 +1,8 @@
 // src/app.js
 import express from "express";
 import cors from "cors";
+import cron from "node-cron";
+import { autoCaptureBookings } from "./cron/autoCapture.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
@@ -48,6 +50,13 @@ app.use("/api/v1/stripe", stripeConnectRoutes);
 // Healthcheck
 app.get("/api/v1/health", (req, res) => {
   res.json({ status: "ok", timestamp: Date.now() });
+});
+
+
+// Tâche cron pour capturer automatiquement les paiements des bookings terminés
+cron.schedule("*/10 * * * *", async () => {
+  console.log("CRON running autoCapture...");
+  await autoCaptureBookings();
 });
 
 export default app;
