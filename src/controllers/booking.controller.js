@@ -165,29 +165,75 @@ export async function confirmBooking(req, res) {
   try {
     const bookingId = req.params.id;
     const userId = req.user.id;
-    const userRole = req.user.role;
 
-    if (userRole !== "provider") {
+    // Must be provider
+    if (req.user.role !== "provider") {
       return res.status(403).json({
         error: "Only providers can confirm bookings",
       });
     }
 
+    // Fetch booking
     const booking = await getBookingDetail(bookingId);
-
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    // 👉 Seul le provider propriétaire du booking
+    // Only the owner provider can confirm
     if (booking.provider_id !== userId) {
       return res.status(403).json({
         error: "You are not allowed to confirm this booking",
       });
     }
 
-    const ok = await updateBookingStatus(bookingId, "confirmed");
-    return res.json({ success: ok });
+    // Payment must exist
+    if (!booking.payment_intent_id) {
+      return res.status(400).json({
+        error: "No payment intent for this booking",
+      });
+    }
+
+    // Must be a preauthorized booking
+    if (booking.payment_status !== "preauthorized") {
+      return res.status(400).json({
+        error: "Booking is not in preauthorized state",
+      });
+    }
+
+    // Optional check: confirm only if booking is <24h old
+    const createdAt = new Date(booking.created_at);
+    const hoursSinceCreation = (Date.now() - createdAt.getTime()) / 1000 / 3600;
+
+    if (hoursSinceCreation > 24) {
+      return res.status(400).json({
+        error: "Confirmation window expired (24h)",
+      });
+    }
+
+    // 🔥 Capture payment on Stripe
+    const ok = await capturePayment(booking.payment_intent_id);
+    if (!ok) {
+      return res.status(500).json({ error: "Could not capture payment" });
+    }
+
+    // Update DB
+    const { data: updated, error: updateErr } = await supabase
+      .from("bookings")
+      .update({
+        status: "confirmed",
+        payment_status: "paid",
+      })
+      .eq("id", bookingId)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    return res.json({
+      success: true,
+      data: updated,
+    });
+
   } catch (err) {
     console.error("[BOOKINGS] confirm error:", err);
     return res.status(500).json({ error: "Could not confirm booking" });
@@ -219,8 +265,24 @@ export async function declineBooking(req, res) {
       });
     }
 
-    const ok = await updateBookingStatus(bookingId, "declined");
-    return res.json({ success: ok });
+    // 🟧 IMPORTANT : si le paiement est pré-autorisé → on annule la pré-autorisation
+    if (booking.payment_intent_id && booking.payment_status === "preauthorized") {
+      const ok = await refundPayment(booking.payment_intent_id);
+
+      if (!ok) {
+        return res.status(500).json({
+          error: "Could not refund preauthorized payment",
+        });
+      }
+    }
+
+    // On marque comme declined
+    const updated = await updateBookingService(bookingId, {
+      status: "declined",
+      payment_status: booking.payment_intent_id ? "refunded" : "pending"
+    });
+
+    return res.json({ success: true, data: updated });
   } catch (err) {
     console.error("[BOOKINGS] decline error:", err);
     return res.status(500).json({ error: "Could not decline booking" });
@@ -234,21 +296,18 @@ export async function refundBooking(req, res) {
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    // Seul le provider ou un admin peut rembourser
     if (userRole !== "provider" && userRole !== "admin") {
       return res.status(403).json({
         error: "Only providers or admins can refund bookings",
       });
     }
 
-    // On récupère la booking
     const booking = await getBookingDetail(bookingId);
 
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    // Si provider → doit être le bon provider
     if (userRole === "provider" && booking.provider_id !== userId) {
       return res.status(403).json({
         error: "You are not allowed to refund this booking",
@@ -256,25 +315,28 @@ export async function refundBooking(req, res) {
     }
 
     if (!booking.payment_intent_id) {
-      return res
-        .status(400)
-        .json({ error: "No payment_intent linked to this booking" });
+      return res.status(400).json({
+        error: "No payment_intent linked to this booking"
+      });
     }
 
-    // Appel Stripe → refund
     const ok = await refundPayment(booking.payment_intent_id);
 
     if (!ok) {
       return res.status(500).json({ error: "Stripe refund failed" });
     }
 
-    // On met à jour la DB
-    await updateBookingStatus(bookingId, "cancelled"); // ou "refunded" si tu crées ce statut
+    const updated = await updateBookingService(bookingId, {
+      status: "cancelled",
+      payment_status: "refunded"
+    });
 
-    return res.json({ success: true });
+    return res.json({ success: true, data: updated });
+
   } catch (err) {
     console.error("[BOOKINGS] refund error:", err);
     return res.status(500).json({ error: "Could not refund booking" });
   }
 }
+
 

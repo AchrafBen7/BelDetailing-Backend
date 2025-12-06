@@ -18,6 +18,9 @@ function mapProviderRowToDetailer(row) {
     logoUrl: row.logo_url ?? null,
     bannerUrl: row.banner_url ?? null,
     serviceCategories: row.services ?? [],
+    phone: row.phone ?? null,
+    email: row.email ?? null,
+    openingHours: row.opening_hours ?? null,
     teamSize: row.team_size ?? 1,
     yearsOfExperience: row.years_of_experience ?? 0,
   };
@@ -143,7 +146,10 @@ export async function updateProviderProfile(userId, updates) {
     team_size: updates.team_size,
     years_of_experience: updates.years_of_experience,
     logo_url: updates.logo_url,
-    banner_url: updates.banner_url
+    banner_url: updates.banner_url,
+    phone: updates.phone,
+  email: updates.email,
+  opening_hours: updates.opening_hours
   };
 
   const { data, error } = await supabase
