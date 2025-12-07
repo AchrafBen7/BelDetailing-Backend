@@ -112,27 +112,27 @@ const { data: inserted, error: bookingError } = await supabase
     provider_banner_url: provider.banner_url ?? null,
   })
   .select(
-      id,
-      provider_id,
-      customer_id,
-      service_id,
-      provider_name,
-      service_name,
-      price,
-      currency,
-      date,
-      start_time,
-      end_time,
-      address,
-      status,
-      payment_status,
-      payment_intent_id,
-      commission_rate,
-      invoice_sent,
-      provider_banner_url,
-      created_at
-  )
-  .single();
+  id,
+  provider_id,
+  customer_id,
+  service_id,
+  provider_name,
+  service_name,
+  price,
+  currency,
+  date,
+  start_time,
+  end_time,
+  address,
+  status,
+  payment_status,
+  payment_intent_id,
+  commission_rate,
+  invoice_sent,
+  provider_banner_url,
+  created_at
+)
+.single();
 
 if (bookingError) throw bookingError;
 
@@ -151,28 +151,28 @@ const { data: updatedBooking, error: updateErr } = await supabase
     payment_status: "preauthorized"
   })
   .eq("id", inserted.id)
-  .select(
-      id,
-      provider_id,
-      customer_id,
-      service_id,
-      provider_name,
-      service_name,
-      price,
-      currency,
-      date,
-      start_time,
-      end_time,
-      address,
-      status,
-      payment_status,
-      payment_intent_id,
-      commission_rate,
-      invoice_sent,
-      provider_banner_url,
-      created_at
-  )
-  .single();
+.select(
+  id,
+  provider_id,
+  customer_id,
+  service_id,
+  provider_name,
+  service_name,
+  price,
+  currency,
+  date,
+  start_time,
+  end_time,
+  address,
+  status,
+  payment_status,
+  payment_intent_id,
+  commission_rate,
+  invoice_sent,
+  provider_banner_url,
+  created_at
+)
+.single();
 
 if (updateErr) throw updateErr;
 
