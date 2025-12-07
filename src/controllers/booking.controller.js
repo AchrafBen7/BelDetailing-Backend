@@ -1,17 +1,18 @@
-// src/controllers/booking.controller.js
 import {
   getBookings,
   getBookingDetail,
-  createBookingService,
   updateBookingService,
   updateBookingStatus,
 } from "../services/booking.service.js";
-import { refundPayment } from "../services/payment.service.js";
 
-import { supabase } from "..//config/supabase.js";
+import { createPaymentIntent, refundPayment } from "../services/payment.service.js";
+import { supabase } from "../config/supabase.js";
 
 const COMMISSION_RATE = 0.10;
 
+/* -----------------------------------------------------
+   LIST BOOKINGS
+----------------------------------------------------- */
 export async function listBookings(req, res) {
   try {
     const { scope, status } = req.query;
@@ -25,6 +26,9 @@ export async function listBookings(req, res) {
   }
 }
 
+/* -----------------------------------------------------
+   GET BOOKING
+----------------------------------------------------- */
 export async function getBooking(req, res) {
   try {
     const { id } = req.params;
@@ -37,9 +41,12 @@ export async function getBooking(req, res) {
   }
 }
 
+/* -----------------------------------------------------
+   CREATE BOOKING + AUTO STRIPE PAYMENT INTENT
+----------------------------------------------------- */
 export async function createBooking(req, res) {
   try {
-    const customerId = req.user.id; // user connecté (customer)
+    const customerId = req.user.id;
     const {
       provider_id,
       service_id,
@@ -49,7 +56,7 @@ export async function createBooking(req, res) {
       address,
     } = req.body;
 
-    // 1) On récupère le service
+    // 1) Fetch service
     const { data: service, error: serviceError } = await supabase
       .from("services")
       .select("*")
@@ -60,17 +67,14 @@ export async function createBooking(req, res) {
       return res.status(404).json({ error: "Service not found" });
     }
 
-    // sécurité : on vérifie que le service appartient bien à ce provider
     if (service.provider_id !== provider_id) {
-      return res
-        .status(400)
-        .json({ error: "Service does not belong to this provider" });
+      return res.status(400).json({ error: "Service does not belong to this provider" });
     }
 
-    // 2) On récupère le provider (nom, bannière, stripe_account_id, etc.)
+    // 2) Fetch provider info
     const { data: provider, error: providerError } = await supabase
       .from("provider_profiles")
-      .select("display_name, banner_url, stripe_account_id")
+      .select("display_name, banner_url")
       .eq("user_id", provider_id)
       .single();
 
@@ -81,7 +85,7 @@ export async function createBooking(req, res) {
     const price = service.price;
     const currency = service.currency || "eur";
 
-    // 3) On insère la booking en base
+    // 3) Create booking (WITHOUT payment yet)
     const { data: booking, error: bookingError } = await supabase
       .from("bookings")
       .insert({
@@ -112,13 +116,37 @@ export async function createBooking(req, res) {
 
     if (bookingError) throw bookingError;
 
-    return res.status(201).json({ data: booking });
+    // **4) Create payment intent for this booking**
+    const intent = await createPaymentIntent({
+      amount: price,
+      currency,
+      userId: customerId,
+    });
+
+    // **5) Save Intent ID inside the booking**
+    await supabase
+      .from("bookings")
+      .update({
+        payment_intent_id: intent.id,
+        payment_status: "preauthorized"
+      })
+      .eq("id", booking.id);
+
+    // **6) Return booking + clientSecret to iOS**
+    return res.status(201).json({
+      data: booking,
+      clientSecret: intent.clientSecret
+    });
+
   } catch (err) {
     console.error("[BOOKINGS] createBooking error:", err);
     return res.status(500).json({ error: "Could not create booking" });
   }
 }
 
+/* -----------------------------------------------------
+   UPDATE BOOKING
+----------------------------------------------------- */
 export async function updateBooking(req, res) {
   try {
     const booking = await updateBookingService(req.params.id, req.body);
@@ -129,27 +157,22 @@ export async function updateBooking(req, res) {
   }
 }
 
+/* -----------------------------------------------------
+   CANCEL BOOKING (customer/provider)
+----------------------------------------------------- */
 export async function cancelBooking(req, res) {
   try {
     const bookingId = req.params.id;
     const userId = req.user.id;
-    const userRole = req.user.role;
 
-    // On récupère la réservation
     const booking = await getBookingDetail(bookingId);
-
-    if (!booking) {
-      return res.status(404).json({ error: "Booking not found" });
-    }
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
 
     const isCustomer = booking.customer_id === userId;
     const isProvider = booking.provider_id === userId;
 
-    // 👉 Seul le customer OU le provider lié au booking peut annuler
     if (!isCustomer && !isProvider) {
-      return res.status(403).json({
-        error: "You are not allowed to cancel this booking",
-      });
+      return res.status(403).json({ error: "You are not allowed to cancel this booking" });
     }
 
     const ok = await updateBookingStatus(bookingId, "cancelled");
