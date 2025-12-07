@@ -108,7 +108,7 @@ const { data: inserted, error: bookingError } = await supabase
     invoice_sent: false,
     provider_banner_url: provider.banner_url ?? null,
   })
-  .select("")
+  .select("*")
   .single();
 
 if (bookingError) throw bookingError;
