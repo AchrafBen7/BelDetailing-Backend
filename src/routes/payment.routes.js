@@ -2,7 +2,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import {
-    createCheckoutSessionController,
   createPaymentIntentController,
   capturePaymentController,
   refundPaymentController,
@@ -11,18 +10,16 @@ import { createStripeProductForServiceController } from "../controllers/stripePr
 
 const router = Router();
 
-// Paiement simple (déjà existant)
+// Paiements PaymentSheet
 router.post("/intent", requireAuth, createPaymentIntentController);
 router.post("/capture", requireAuth, capturePaymentController);
 router.post("/refund", requireAuth, refundPaymentController);
 
-// 🔥 Marketplace :
+// Marketplace : créer un produit Stripe pour un service
 router.post(
   "/services/:id/stripe-product",
   requireAuth,
   createStripeProductForServiceController
 );
-
-router.post("/checkout", requireAuth, createCheckoutSessionController);
 
 export default router;
