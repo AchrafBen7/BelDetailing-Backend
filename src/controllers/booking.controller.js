@@ -128,7 +128,7 @@ const { data: updatedBooking, error: updateErr } = await supabase
     payment_status: "preauthorized"
   })
   .eq("id", inserted.id)
-  .select("")
+  .select("*")
   .single();
 
 if (updateErr) throw updateErr;
