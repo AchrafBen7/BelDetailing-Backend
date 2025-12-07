@@ -111,7 +111,7 @@ const { data: inserted, error: bookingError } = await supabase
     invoice_sent: false,
     provider_banner_url: provider.banner_url ?? null,
   })
-  .select(
+  .select(`
   id,
   provider_id,
   customer_id,
@@ -131,7 +131,7 @@ const { data: inserted, error: bookingError } = await supabase
   invoice_sent,
   provider_banner_url,
   created_at
-)
+  `)
 .single();
 
 if (bookingError) throw bookingError;
@@ -151,7 +151,7 @@ const { data: updatedBooking, error: updateErr } = await supabase
     payment_status: "preauthorized"
   })
   .eq("id", inserted.id)
-.select(
+.select(`
   id,
   provider_id,
   customer_id,
@@ -171,6 +171,7 @@ const { data: updatedBooking, error: updateErr } = await supabase
   invoice_sent,
   provider_banner_url,
   created_at
+  `
 )
 .single();
 
