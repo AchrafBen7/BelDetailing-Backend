@@ -86,59 +86,61 @@ export async function createBooking(req, res) {
     const currency = service.currency || "eur";
 
     // 3) Create booking (WITHOUT payment yet)
-    const { data: booking, error: bookingError } = await supabase
-      .from("bookings")
-      .insert({
-        provider_id,
-        customer_id: customerId,
-        service_id,
+    // 1) Insert booking
+const { data: inserted, error: bookingError } = await supabase
+  .from("bookings")
+  .insert({
+    provider_id,
+    customer_id: customerId,
+    service_id,
+    provider_name: provider.display_name,
+    service_name: service.name,
+    price,
+    currency,
+    date,
+    start_time,
+    end_time,
+    address,
+    status: "pending",
+    payment_status: "pending",
+    payment_intent_id: null,
+    commission_rate: COMMISSION_RATE,
+    invoice_sent: false,
+    provider_banner_url: provider.banner_url ?? null,
+  })
+  .select("")
+  .single();
 
-        provider_name: provider.display_name,
-        service_name: service.name,
-        price,
-        currency,
+if (bookingError) throw bookingError;
 
-        date,
-        start_time,
-        end_time,
-        address,
+// 2) Create payment intent
+const intent = await createPaymentIntent({
+  amount: price,
+  currency,
+  userId: customerId,
+});
 
-        status: "pending",
-        payment_status: "pending",
-        payment_intent_id: null,
-        commission_rate: COMMISSION_RATE,
-        invoice_sent: false,
+// 3) Update booking with payment intent
+const { data: updatedBooking, error: updateErr } = await supabase
+  .from("bookings")
+  .update({
+    payment_intent_id: intent.id,
+    payment_status: "preauthorized"
+  })
+  .eq("id", inserted.id)
+  .select("")
+  .single();
 
-        provider_banner_url: provider.banner_url ?? null,
-      })
-      .select()
-      .single();
+if (updateErr) throw updateErr;
 
-    if (bookingError) throw bookingError;
-
-    // **4) Create payment intent for this booking**
-    const intent = await createPaymentIntent({
-      amount: price,
-      currency,
-      userId: customerId,
-    });
-
-    // **5) Save Intent ID inside the booking**
-    await supabase
-      .from("bookings")
-      .update({
-        payment_intent_id: intent.id,
-        payment_status: "preauthorized"
-      })
-      .eq("id", booking.id);
-
-
+// 4) Return the updated booking (NEVER the old one)
 return res.status(201).json({
   data: {
-    booking,
+    booking: updatedBooking,
     clientSecret: intent.clientSecret
   }
 });
+
 
 
   } catch (err) {
