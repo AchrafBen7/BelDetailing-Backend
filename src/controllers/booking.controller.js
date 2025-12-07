@@ -132,11 +132,14 @@ export async function createBooking(req, res) {
       })
       .eq("id", booking.id);
 
-    // **6) Return booking + clientSecret to iOS**
-    return res.status(201).json({
-      data: booking,
-      clientSecret: intent.clientSecret
-    });
+
+return res.status(201).json({
+  data: {
+    booking,
+    clientSecret: intent.clientSecret
+  }
+});
+
 
   } catch (err) {
     console.error("[BOOKINGS] createBooking error:", err);
