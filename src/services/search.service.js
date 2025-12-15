@@ -54,7 +54,6 @@ export async function searchProviders(filters) {
 
 
 
-
 export async function searchOffers(filters) {
   const { q, city, category } = filters;
 

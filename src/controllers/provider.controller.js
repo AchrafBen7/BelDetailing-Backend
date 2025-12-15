@@ -22,7 +22,8 @@ export async function listProviders(req, res) {
     });
 
     // ⬅️ heel belangrijk: direct array teruggeven
-    return res.json(providers);
+   return res.json({ data: providers });
+
   } catch (err) {
     console.error("[PROVIDERS] listProviders error:", err);
     return res.status(500).json({ error: "Could not fetch providers" });
