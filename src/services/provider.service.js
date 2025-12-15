@@ -28,27 +28,96 @@ function mapProviderRowToDetailer(row) {
 
 // 🟦 Liste de tous les prestataires (+ optionele filters)
 export async function getAllProviders(options = {}) {
-  const { sort, limit /* lat, lng, radius */ } = options;
+const { sort, limit, lat, lng, radius } = options;
 
-  let query = supabase.from("provider_profiles").select("*");
+let query = supabase.from("provider_profiles").select("*");
 
-  // sort=rating,-priceMin (komt van iOS recommendedProviders)
-  if (sort === "rating,-priceMin") {
-    query = query
-      .order("rating", { ascending: false })
-      .order("min_price", { ascending: true });
-  }
+// 1) Filtre "nearby" (bounding box) si lat/lng/radius fournis
+if (lat != null && lng != null && radius != null) {
+const radiusDeg = Number(radius) / 111; // 1° ≈ 111 km
 
-  if (limit) {
-    query = query.limit(Number(limit));
-  }
+const minLat = Number(lat) - radiusDeg;
 
-  // TODO later: lat/lng/radius gebruiken voor echte "nearby" search
+const maxLat = Number(lat) + radiusDeg;
 
-  const { data, error } = await query;
-  if (error) throw error;
+const minLng = Number(lng) - radiusDeg;
 
-  return data.map(mapProviderRowToDetailer);
+const maxLng = Number(lng) + radiusDeg;
+
+
+query = query
+
+  .gte("lat", minLat)
+
+  .lte("lat", maxLat)
+
+  .gte("lng", minLng)
+
+  .lte("lng", maxLng);
+
+}
+
+// 2) Tri optionnel (recommandations)
+if (sort === "rating,-priceMin") {
+query = query
+
+  .order("rating", { ascending: false })
+
+  .order("min_price", { ascending: true });
+
+}
+
+if (limit) {
+query = query.limit(Number(limit));
+
+}
+
+const { data, error } = await query;
+if (error) throw error;
+
+const mapped = data.map(mapProviderRowToDetailer);
+
+// 3) Tri par distance approximative côté Node si lat/lng/radius fournis
+if (lat != null && lng != null && radius != null) {
+const lat0 = Number(lat);
+
+const lng0 = Number(lng);
+
+const rKm = Number(radius);
+
+
+// approx: 1° lat = 111 km, 1° lon ≈ 75 km en Belgique
+
+const withDistance = mapped.map(p => {
+
+  const dLatKm = (p.lat - lat0) * 111;
+
+  const dLngKm = (p.lng - lng0) * 75;
+
+  const approxKm = Math.sqrt(dLatKm * dLatKm + dLngKm * dLngKm);
+
+  return { ...p, approxDistanceKm: approxKm };
+
+});
+
+
+// Filtrer strictement <= radius
+
+const filtered = withDistance.filter(p => p.approxDistanceKm <= rKm);
+
+
+// Trier par distance croissante
+
+filtered.sort((a, b) => a.approxDistanceKm - b.approxDistanceKm);
+
+
+// Nettoyer la clé temporaire
+
+return filtered.map(({ approxDistanceKm, ...rest }) => rest);
+
+}
+
+return mapped;
 }
 
 // 🟦 Services d’un prestataire
