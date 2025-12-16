@@ -95,14 +95,6 @@ if (error) throw error;
 
 const mapped = data.map(mapProviderRowToDetailer);
 
-if (sort === "rating,-priceMin") {
-  mapped.sort((a, b) => {
-    if (a.minPrice == null) return 1;
-    if (b.minPrice == null) return -1;
-    return a.minPrice - b.minPrice;
-  });
-}
-
 // 3) Tri par distance approximative côté Node si lat/lng/radius fournis
 if (lat != null && lng != null && radius != null) {
 const lat0 = Number(lat);

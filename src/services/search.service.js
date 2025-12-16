@@ -2,6 +2,15 @@
 import { supabase } from "../config/supabase.js";
 
 function mapProviderRow(row) {
+  const prices =
+    Array.isArray(row.services)
+      ? row.services
+          .filter(s => s.is_available && s.price > 0)
+          .map(s => s.price)
+      : [];
+
+  const minPrice = prices.length > 0 ? Math.min(...prices) : null;
+
   return {
     id: row.user_id,
     displayName: row.display_name,
@@ -12,7 +21,10 @@ function mapProviderRow(row) {
     lng: row.lng ?? 0,
     rating: row.rating ?? 0,
     reviewCount: row.review_count ?? 0,
-    minPrice: row.min_price ?? 0,
+
+    // 🔥 LE VRAI PRIX
+    minPrice,
+
     hasMobileService: row.has_mobile_service ?? false,
     logoUrl: row.logo_url ?? null,
     bannerUrl: row.banner_url ?? null,
@@ -27,7 +39,13 @@ export async function searchProviders(filters) {
 
   let query = supabase
     .from("provider_profiles")
-    .select("*");
+    .select(`
+      *,
+      services:services (
+        price,
+        is_available
+      )
+    `);
 
   // 🔍 Search by name
   if (q) {
@@ -47,6 +65,8 @@ export async function searchProviders(filters) {
     console.error("[SEARCH PROVIDERS] supabase error:", error);
     throw error;
   }
+
+  console.log("🧪 SEARCH PROVIDER:", data[0]);
 
  return data.map(mapProviderRow);
 
