@@ -3,8 +3,8 @@ import { supabase } from "../config/supabase.js";
 
 function mapProviderRow(row) {
   const prices =
-    Array.isArray(row.services)
-      ? row.services
+    Array.isArray(row.providerServices)
+      ? row.providerServices
           .filter(s => s.is_available && s.price > 0)
           .map(s => s.price)
       : [];
@@ -45,7 +45,7 @@ export async function searchProviders(filters) {
     .from("provider_profiles")
     .select(`
       *,
-      services:services (
+      providerServices:services (
         price,
         is_available
       )
