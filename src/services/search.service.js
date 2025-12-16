@@ -14,6 +14,7 @@ function mapProviderRow(row) {
   return {
     id: row.user_id,
     displayName: row.display_name,
+    companyName: row.company_name ?? "",
     bio: row.bio ?? "",
     city: row.base_city ?? "",
     postalCode: row.postal_code ?? "",
@@ -28,6 +29,9 @@ function mapProviderRow(row) {
     hasMobileService: row.has_mobile_service ?? false,
     logoUrl: row.logo_url ?? null,
     bannerUrl: row.banner_url ?? null,
+    phone: row.phone ?? null,
+    email: row.email ?? null,
+    openingHours: row.opening_hours ?? null,
     serviceCategories: row.services ?? [],
     teamSize: row.team_size ?? 1,
     yearsOfExperience: row.years_of_experience ?? 0,
