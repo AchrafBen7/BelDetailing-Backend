@@ -82,19 +82,7 @@ query = query
 
 // 2) Tri optionnel (recommandations)
 if (sort === "rating,-priceMin") {
-query = query
-
-  .order("rating", { ascending: false })
-
-  if (sort === "rating,-priceMin") {
-  mapped.sort((a, b) => {
-    if (a.minPrice == null) return 1;
-    if (b.minPrice == null) return -1;
-    return a.minPrice - b.minPrice;
-  });
-}
-
-
+  query = query.order("rating", { ascending: false });
 }
 
 if (limit) {
@@ -106,6 +94,14 @@ const { data, error } = await query;
 if (error) throw error;
 
 const mapped = data.map(mapProviderRowToDetailer);
+
+if (sort === "rating,-priceMin") {
+  mapped.sort((a, b) => {
+    if (a.minPrice == null) return 1;
+    if (b.minPrice == null) return -1;
+    return a.minPrice - b.minPrice;
+  });
+}
 
 // 3) Tri par distance approximative côté Node si lat/lng/radius fournis
 if (lat != null && lng != null && radius != null) {
