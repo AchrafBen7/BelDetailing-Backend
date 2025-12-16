@@ -11,10 +11,14 @@ import {
 
 export async function listProviders(req, res) {
   try {
-    const { sort, limit, lat, lng, radius } = req.query;
+    const { limit, lat, lng, radius } = req.query;
+    const requestedSort = req.query.sort;
+    const sanitizedSort =
+      requestedSort === "rating,-priceMin" ? "rating" : requestedSort;
 
     const providers = await getAllProviders({
-      sort,
+      sort: sanitizedSort,
+      requestedSort,
       limit,
       lat: lat ? Number(lat) : undefined,
       lng: lng ? Number(lng) : undefined,

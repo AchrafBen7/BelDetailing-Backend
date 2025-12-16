@@ -39,20 +39,44 @@ function mapProviderRowToDetailer(row) {
   };
 }
 
+async function fetchProviderServicesMap(providerIds) {
+  if (!Array.isArray(providerIds) || providerIds.length === 0) {
+    return new Map();
+  }
+
+  const uniqueIds = [...new Set(providerIds)];
+  const { data, error } = await supabase
+    .from("services")
+    .select("provider_id, price, is_available")
+    .in("provider_id", uniqueIds);
+
+  if (error) throw error;
+
+  const map = new Map();
+  data.forEach(service => {
+    const list = map.get(service.provider_id) ?? [];
+    list.push({
+      price: service.price,
+      is_available: service.is_available,
+    });
+    map.set(service.provider_id, list);
+  });
+
+  return map;
+}
 
 // 🟦 Liste de tous les prestataires (+ optionele filters)
 export async function getAllProviders(options = {}) {
-const { sort, limit, lat, lng, radius } = options;
+const { sort, limit, lat, lng, radius, requestedSort } = options;
+
+const sortForDb =
+  sort === "rating,-priceMin"
+    ? "rating"
+    : sort;
 
 let query = supabase
   .from("provider_profiles")
-  .select(`
-    *,
-    providerServices:services (
-      price,
-      is_available
-    )
-  `);
+  .select("*");
 
 
 // 1) Filtre "nearby" (bounding box) si lat/lng/radius fournis
@@ -67,7 +91,6 @@ const minLng = Number(lng) - radiusDeg;
 
 const maxLng = Number(lng) + radiusDeg;
 
-
 query = query
 
   .gte("lat", minLat)
@@ -81,7 +104,7 @@ query = query
 }
 
 // 2) Tri optionnel (recommandations)
-if (sort === "rating,-priceMin") {
+if (sortForDb === "rating") {
   query = query.order("rating", { ascending: false });
 }
 
@@ -93,7 +116,27 @@ query = query.limit(Number(limit));
 const { data, error } = await query;
 if (error) throw error;
 
-const mapped = data.map(mapProviderRowToDetailer);
+const providerIds = Array.isArray(data) ? data.map(row => row.user_id) : [];
+const servicesMap = await fetchProviderServicesMap(providerIds);
+
+const mapped = data.map(row =>
+  mapProviderRowToDetailer({
+    ...row,
+    providerServices: servicesMap.get(row.user_id) ?? [],
+  })
+);
+
+const effectiveSort = requestedSort ?? sort;
+if (effectiveSort === "rating,-priceMin") {
+  mapped.sort((a, b) => {
+    if (a.rating !== b.rating) {
+      return b.rating - a.rating;
+    }
+    if (a.minPrice == null) return 1;
+    if (b.minPrice == null) return -1;
+    return a.minPrice - b.minPrice;
+  });
+}
 
 // 3) Tri par distance approximative côté Node si lat/lng/radius fournis
 if (lat != null && lng != null && radius != null) {
@@ -202,7 +245,11 @@ export async function getProviderById(providerId) {
     .single();
 
   if (error) throw error;
-  return mapProviderRowToDetailer(data);
+  const servicesMap = await fetchProviderServicesMap([data.user_id]);
+  return mapProviderRowToDetailer({
+    ...data,
+    providerServices: servicesMap.get(data.user_id) ?? [],
+  });
 }
 
 // 🟦 Avis d’un prestataire

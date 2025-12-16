@@ -32,10 +32,39 @@ function mapProviderRow(row) {
     phone: row.phone ?? null,
     email: row.email ?? null,
     openingHours: row.opening_hours ?? null,
+
+    // ✅ catégories text[]
     serviceCategories: row.services ?? [],
+
     teamSize: row.team_size ?? 1,
     yearsOfExperience: row.years_of_experience ?? 0,
   };
+}
+
+async function fetchProviderServicesMap(providerIds) {
+  if (!Array.isArray(providerIds) || providerIds.length === 0) {
+    return new Map();
+  }
+
+  const uniqueIds = [...new Set(providerIds)];
+  const { data, error } = await supabase
+    .from("services")
+    .select("provider_id, price, is_available")
+    .in("provider_id", uniqueIds);
+
+  if (error) throw error;
+
+  const map = new Map();
+  data.forEach(service => {
+    const list = map.get(service.provider_id) ?? [];
+    list.push({
+      price: service.price,
+      is_available: service.is_available,
+    });
+    map.set(service.provider_id, list);
+  });
+
+  return map;
 }
 
 export async function searchProviders(filters) {
@@ -43,13 +72,7 @@ export async function searchProviders(filters) {
 
   let query = supabase
     .from("provider_profiles")
-    .select(`
-      *,
-      providerServices:services (
-        price,
-        is_available
-      )
-    `);
+    .select("*");
 
   // 🔍 Search by name
   if (q) {
@@ -70,9 +93,16 @@ export async function searchProviders(filters) {
     throw error;
   }
 
-  console.log("🧪 SEARCH PROVIDER:", data[0]);
+  const providerIds = Array.isArray(data) ? data.map(row => row.user_id) : [];
+  const servicesMap = await fetchProviderServicesMap(providerIds);
+  const withServices = data.map(row => ({
+    ...row,
+    providerServices: servicesMap.get(row.user_id) ?? [],
+  }));
 
- return data.map(mapProviderRow);
+  console.log("🧪 SEARCH PROVIDER:", withServices[0]);
+
+ return withServices.map(mapProviderRow);
 
 }
 
