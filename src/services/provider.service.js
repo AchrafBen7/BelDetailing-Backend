@@ -3,6 +3,16 @@ import { supabase } from "../config/supabase.js";
 
 // DB → DTO
 function mapProviderRowToDetailer(row) {
+  const prices =
+    Array.isArray(row.services)
+      ? row.services
+          .filter(s => s.is_available && s.price > 0)
+          .map(s => s.price)
+      : [];
+
+  const computedMinPrice =
+    prices.length > 0 ? Math.min(...prices) : null;
+
   return {
     id: row.user_id,
     displayName: row.display_name,
@@ -13,7 +23,10 @@ function mapProviderRowToDetailer(row) {
     lng: row.lng ?? 0,
     rating: row.rating ?? 0,
     reviewCount: row.review_count ?? 0,
-    minPrice: row.min_price ?? 0,
+
+    // 🔥 ICI LA VÉRITÉ
+    minPrice: computedMinPrice,
+
     hasMobileService: row.has_mobile_service ?? false,
     logoUrl: row.logo_url ?? null,
     bannerUrl: row.banner_url ?? null,
@@ -26,11 +39,21 @@ function mapProviderRowToDetailer(row) {
   };
 }
 
+
 // 🟦 Liste de tous les prestataires (+ optionele filters)
 export async function getAllProviders(options = {}) {
 const { sort, limit, lat, lng, radius } = options;
 
-let query = supabase.from("provider_profiles").select("*");
+let query = supabase
+  .from("provider_profiles")
+  .select(`
+    *,
+    services:services (
+      price,
+      is_available
+    )
+  `);
+
 
 // 1) Filtre "nearby" (bounding box) si lat/lng/radius fournis
 if (lat != null && lng != null && radius != null) {
@@ -63,7 +86,14 @@ query = query
 
   .order("rating", { ascending: false })
 
-  .order("min_price", { ascending: true });
+  if (sort === "rating,-priceMin") {
+  mapped.sort((a, b) => {
+    if (a.minPrice == null) return 1;
+    if (b.minPrice == null) return -1;
+    return a.minPrice - b.minPrice;
+  });
+}
+
 
 }
 
