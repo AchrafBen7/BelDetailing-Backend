@@ -72,11 +72,11 @@ export async function createBooking(req, res) {
     }
 
     // 2) Fetch provider info
-    const { data: provider, error: providerError } = await supabase
-      .from("provider_profiles")
-      .select("display_name, banner_url")
-      .eq("user_id", provider_id)
-      .single();
+const { data: provider, error: providerError } = await supabase
+  .from("provider_profiles")
+  .select("id, user_id, display_name, banner_url")
+  .eq("id", provider_id)
+  .single();
 
     if (providerError || !provider) {
       return res.status(404).json({ error: "Provider not found" });

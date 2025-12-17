@@ -6,11 +6,17 @@ export async function getBookings({ userId, scope, status }) {
 
   if (scope === "customer") {
     query.eq("customer_id", userId);
-  } else if (scope === "provider") {
-    query.eq("provider_id", userId);
-  } else {
-    // "all" = customer + provider
-    query.or(`customer_id.eq.${userId},provider_id.eq.${userId}`);
+  }
+
+  if (scope === "provider") {
+    const { data: provider } = await supabase
+      .from("provider_profiles")
+      .select("id")
+      .eq("user_id", userId)
+      .single();
+
+    if (!provider) return [];
+    query.eq("provider_id", provider.id);
   }
 
   if (status) {
@@ -18,8 +24,8 @@ export async function getBookings({ userId, scope, status }) {
   }
 
   const { data, error } = await query.order("created_at", { ascending: false });
-
   if (error) throw error;
+
   return data;
 }
 
