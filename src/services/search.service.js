@@ -1,28 +1,6 @@
 // src/services/search.service.js
 import { supabase } from "../config/supabase.js";
 
-function getProviderIdentity(row) {
-  return row?.id ?? row?.user_id ?? null;
-}
-
-function getProviderIdentityKeys(row) {
-  const keys = [];
-  if (row?.id) keys.push(row.id);
-  if (row?.user_id) keys.push(row.user_id);
-  return [...new Set(keys.filter(Boolean))];
-}
-
-function pickServicesForRow(row, servicesMap) {
-  const keys = getProviderIdentityKeys(row);
-  for (const key of keys) {
-    const services = servicesMap.get(key);
-    if (services && services.length) {
-      return services;
-    }
-  }
-  return [];
-}
-
 function mapProviderRow(row) {
   const prices =
     Array.isArray(row.providerServices)
@@ -34,7 +12,7 @@ function mapProviderRow(row) {
   const minPrice = prices.length > 0 ? Math.min(...prices) : null;
 
   return {
-    id: getProviderIdentity(row),
+    id: row.id,
     userId: row.user_id ?? null,
     displayName: row.display_name,
     companyName: row.company_name ?? "",
@@ -116,16 +94,13 @@ export async function searchProviders(filters) {
     throw error;
   }
 
-  const providerIdSet = new Set();
-  if (Array.isArray(data)) {
-    data.forEach(row => {
-      getProviderIdentityKeys(row).forEach(idVal => providerIdSet.add(idVal));
-    });
-  }
-  const servicesMap = await fetchProviderServicesMap([...providerIdSet]);
+  const providerIds = Array.isArray(data)
+    ? data.map(row => row.id).filter(Boolean)
+    : [];
+  const servicesMap = await fetchProviderServicesMap(providerIds);
   const withServices = data.map(row => ({
     ...row,
-    providerServices: pickServicesForRow(row, servicesMap),
+    providerServices: servicesMap.get(row.id) ?? [],
   }));
 
   console.log("🧪 SEARCH PROVIDER:", withServices[0]);

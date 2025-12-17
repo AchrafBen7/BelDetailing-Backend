@@ -13,46 +13,23 @@ import {
 import { supabase } from "../config/supabase.js";
 
 const COMMISSION_RATE = 0.10;
-let providerProfilesSupportsIdColumn;
 
 async function getProviderProfileIdForUser(userId) {
   const { data, error } = await supabase
     .from("provider_profiles")
-    .select("*")
+    .select("id")
     .eq("user_id", userId)
     .maybeSingle();
 
   if (error) throw error;
-  if (!data) return null;
-  return data.id ?? data.user_id ?? null;
+  return data?.id ?? null;
 }
 
-async function fetchProviderProfileByAnyId(identifier) {
-  if (identifier == null) return null;
-
-  if (providerProfilesSupportsIdColumn !== false) {
-    const { data, error } = await supabase
-      .from("provider_profiles")
-      .select("*")
-      .eq("id", identifier)
-      .maybeSingle();
-
-    if (error) {
-      if (error.code === "42703") {
-        providerProfilesSupportsIdColumn = false;
-      } else {
-        throw error;
-      }
-    } else if (data) {
-      providerProfilesSupportsIdColumn = true;
-      return data;
-    }
-  }
-
+async function getProviderProfileById(providerId) {
   const { data, error } = await supabase
     .from("provider_profiles")
     .select("*")
-    .eq("user_id", identifier)
+    .eq("id", providerId)
     .maybeSingle();
 
   if (error) throw error;
@@ -121,7 +98,7 @@ export async function createBooking(req, res) {
     }
 
     // 2) Fetch provider info
-    const provider = await fetchProviderProfileByAnyId(provider_id);
+    const provider = await getProviderProfileById(provider_id);
 
     if (!provider) {
       return res.status(404).json({ error: "Provider not found" });
@@ -234,7 +211,10 @@ return res.status(201).json({
 
   } catch (err) {
     console.error("[BOOKINGS] createBooking error:", err);
-    return res.status(500).json({ error: "Could not create booking" });
+    return res.status(500).json({
+      error: err?.message || "Could not create booking",
+      stack: err?.stack,
+    });
   }
 }
 
@@ -323,10 +303,10 @@ export async function confirmBooking(req, res) {
       });
     }
 
-    // Must be a preauthorized booking
-    if (booking.payment_status !== "preauthorized") {
+    const allowedStatuses = ["preauthorized", "processing", "succeeded"];
+    if (!allowedStatuses.includes(booking.payment_status)) {
       return res.status(400).json({
-        error: "Booking is not in preauthorized state",
+        error: "Booking is not in a confirmable payment state",
       });
     }
 
@@ -340,10 +320,12 @@ export async function confirmBooking(req, res) {
       });
     }
 
-    // 🔥 Capture payment on Stripe
-    const ok = await capturePayment(booking.payment_intent_id);
-    if (!ok) {
-      return res.status(500).json({ error: "Could not capture payment" });
+    let captureRequired = booking.payment_status !== "succeeded";
+    if (captureRequired) {
+      const ok = await capturePayment(booking.payment_intent_id);
+      if (!ok) {
+        return res.status(500).json({ error: "Could not capture payment" });
+      }
     }
 
     // Update DB
