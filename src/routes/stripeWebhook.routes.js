@@ -1,7 +1,7 @@
 // src/routes/stripeWebhook.routes.js
 import express from "express";
 import Stripe from "stripe";
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 const router = express.Router();
 

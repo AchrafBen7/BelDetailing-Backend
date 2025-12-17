@@ -1,5 +1,5 @@
 // src/services/provider.service.js
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { ensureStripeProductForService } from "./stripeProduct.service.js";
 
 let providerProfilesSupportsIdColumn;

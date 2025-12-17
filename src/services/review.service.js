@@ -1,5 +1,5 @@
 // src/services/review.service.js
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 export async function createReviewForProvider({ userId, providerId, bookingId, rating, comment }) {
   const payload = {

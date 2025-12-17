@@ -1,5 +1,5 @@
 // src/services/auth.service.js
-import { supabase } from "../config/supabase.js";
+import { supabase, supabaseAdmin } from "../config/supabase.js";
 
 export async function registerUser({ email, password, role, phone }) {
   // 1) Créer l'utilisateur dans Supabase Auth
@@ -21,7 +21,7 @@ export async function registerUser({ email, password, role, phone }) {
   const authUser = data.user;
 
   // 2) Créer la ligne dans la table public.users
-  const { error: insertError } = await supabase.from("users").insert({
+  const { error: insertError } = await supabaseAdmin.from("users").insert({
     id: authUser.id, // 👈 même id que auth.users
     email,
     phone,

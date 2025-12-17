@@ -1,6 +1,6 @@
 // src/services/stripeConnect.service.js
 import Stripe from "stripe";
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 // ⚠️ Vérifie que STRIPE_SECRET_KEY est bien dans ton .env
 if (!process.env.STRIPE_SECRET_KEY) {

@@ -1,5 +1,5 @@
 // src/services/socialAuth.service.js
-import { supabase } from "../config/supabase.js";
+import { supabase, supabaseAdmin } from "../config/supabase.js";
 import { verifyAppleToken } from "./thirdPartyVerification.service.js";
 
 async function upsertCustomUser({
@@ -8,14 +8,14 @@ async function upsertCustomUser({
   email,
   fullName,
 }) {
-  let { data: user } = await supabase
+  let { data: user } = await supabaseAdmin
     .from("users")
     .select("*")
     .eq(`${provider}_id`, providerUserId)
     .maybeSingle();
 
   if (!user && email) {
-    const { data } = await supabase
+    const { data } = await supabaseAdmin
       .from("users")
       .select("*")
       .eq("email", email.toLowerCase())
@@ -27,7 +27,7 @@ async function upsertCustomUser({
     const [firstName, ...rest] = (fullName ?? "").split(" ");
     const lastName = rest.join(" ") || null;
 
-    const { data: created, error: createError } = await supabase
+    const { data: created, error: createError } = await supabaseAdmin
       .from("users")
       .insert({
         email: email?.toLowerCase() ?? null,

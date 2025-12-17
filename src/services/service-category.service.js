@@ -1,5 +1,5 @@
 // src/services/service-category.service.js
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 function mapServiceCategoryRow(row) {
   return {

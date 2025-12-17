@@ -10,7 +10,7 @@ import {
   refundPayment,
   capturePayment,
 } from "../services/payment.service.js";
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 const COMMISSION_RATE = 0.10;
 let providerProfilesSupportsIdColumn;

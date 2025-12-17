@@ -1,5 +1,5 @@
 // src/services/search.service.js
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 function getProviderIdentity(row) {
   return row?.id ?? row?.user_id ?? null;

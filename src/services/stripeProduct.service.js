@@ -1,6 +1,6 @@
 // src/services/stripeProduct.service.js
 import Stripe from "stripe";
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2025-11-17.clover",

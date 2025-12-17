@@ -13,8 +13,14 @@ if (!SUPABASE_URL) {
   throw new Error("SUPABASE_URL missing – check .env or docker-compose env_file");
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: false },
+});
 
-export const supabaseAdmin = SUPABASE_SERVICE_ROLE_KEY
-  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-  : supabase;
+export const supabaseAdmin = createClient(
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY,
+  {
+    auth: { persistSession: false },
+  }
+);

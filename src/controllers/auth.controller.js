@@ -1,5 +1,5 @@
 // src/controllers/auth.controller.js
-import { supabase } from "../config/supabase.js";
+import { supabase, supabaseAdmin } from "../config/supabase.js";
 
 /* ============================================================
    Helper : Map row SQL → DTO User pour iOS
@@ -96,7 +96,7 @@ export async function register(req, res) {
   }
 
   // 2) Ligne dans public.users
-  const { error: insertError } = await supabase.from("users").insert({
+  const { error: insertError } = await supabaseAdmin.from("users").insert({
     id: authUser.id,
     email: authUser.email,
     phone: phone || "",
@@ -115,7 +115,7 @@ export async function register(req, res) {
 
   // CUSTOMER
   if (finalRole === "customer") {
-    const { error: custError } = await supabase
+    const { error: custError } = await supabaseAdmin
       .from("customer_profiles")
       .insert({
         user_id: authUser.id,
@@ -132,7 +132,7 @@ export async function register(req, res) {
 
   // COMPANY
   if (finalRole === "company") {
-    const { error: companyError } = await supabase
+    const { error: companyError } = await supabaseAdmin
       .from("company_profiles")
       .insert({
         user_id: authUser.id,
@@ -151,7 +151,7 @@ export async function register(req, res) {
 
   // PROVIDER (profile)
   if (finalRole === "provider") {
-    const { error: provProfileErr } = await supabase
+    const { error: provProfileErr } = await supabaseAdmin
       .from("provider_profiles")
       .insert({
         user_id: authUser.id,

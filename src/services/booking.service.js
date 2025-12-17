@@ -1,5 +1,5 @@
 // src/services/booking.service.js
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 export async function getBookings({ userId, scope, status }) {
   let query = supabase.from("bookings").select("*");

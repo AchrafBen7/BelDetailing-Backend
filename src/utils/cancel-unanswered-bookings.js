@@ -1,5 +1,5 @@
-import { supabase } from "./config/supabase.js";
-import { refundPayment } from "./services/payment.service.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { refundPayment } from "../services/payment.service.js";
 
 export async function autoCancelUnansweredBookings() {
 

@@ -1,4 +1,4 @@
-import { supabase } from "../config/supabase.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 // 🧠 DB → DTO (iOS Offer)
 function mapOfferRowToDto(row) {
@@ -272,4 +272,3 @@ export async function deleteOffer(id, user) {
 
   return true;
 }
-
