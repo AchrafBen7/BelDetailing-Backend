@@ -1,6 +1,28 @@
 // src/services/search.service.js
 import { supabase } from "../config/supabase.js";
 
+function getProviderIdentity(row) {
+  return row?.id ?? row?.user_id ?? null;
+}
+
+function getProviderIdentityKeys(row) {
+  const keys = [];
+  if (row?.id) keys.push(row.id);
+  if (row?.user_id) keys.push(row.user_id);
+  return [...new Set(keys.filter(Boolean))];
+}
+
+function pickServicesForRow(row, servicesMap) {
+  const keys = getProviderIdentityKeys(row);
+  for (const key of keys) {
+    const services = servicesMap.get(key);
+    if (services && services.length) {
+      return services;
+    }
+  }
+  return [];
+}
+
 function mapProviderRow(row) {
   const prices =
     Array.isArray(row.providerServices)
@@ -12,7 +34,8 @@ function mapProviderRow(row) {
   const minPrice = prices.length > 0 ? Math.min(...prices) : null;
 
   return {
-    id: row.user_id,
+    id: getProviderIdentity(row),
+    userId: row.user_id ?? null,
     displayName: row.display_name,
     companyName: row.company_name ?? "",
     bio: row.bio ?? "",
@@ -55,7 +78,7 @@ async function fetchProviderServicesMap(providerIds) {
   if (error) throw error;
 
   const map = new Map();
-  data.forEach(service => {
+  (data ?? []).forEach(service => {
     const list = map.get(service.provider_id) ?? [];
     list.push({
       price: service.price,
@@ -93,11 +116,16 @@ export async function searchProviders(filters) {
     throw error;
   }
 
-  const providerIds = Array.isArray(data) ? data.map(row => row.user_id) : [];
-  const servicesMap = await fetchProviderServicesMap(providerIds);
+  const providerIdSet = new Set();
+  if (Array.isArray(data)) {
+    data.forEach(row => {
+      getProviderIdentityKeys(row).forEach(idVal => providerIdSet.add(idVal));
+    });
+  }
+  const servicesMap = await fetchProviderServicesMap([...providerIdSet]);
   const withServices = data.map(row => ({
     ...row,
-    providerServices: servicesMap.get(row.user_id) ?? [],
+    providerServices: pickServicesForRow(row, servicesMap),
   }));
 
   console.log("🧪 SEARCH PROVIDER:", withServices[0]);

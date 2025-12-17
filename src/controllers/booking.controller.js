@@ -5,10 +5,59 @@ import {
   updateBookingStatus,
 } from "../services/booking.service.js";
 
-import { createPaymentIntent, refundPayment } from "../services/payment.service.js";
+import {
+  createPaymentIntent,
+  refundPayment,
+  capturePayment,
+} from "../services/payment.service.js";
 import { supabase } from "../config/supabase.js";
 
 const COMMISSION_RATE = 0.10;
+let providerProfilesSupportsIdColumn;
+
+async function getProviderProfileIdForUser(userId) {
+  const { data, error } = await supabase
+    .from("provider_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return data.id ?? data.user_id ?? null;
+}
+
+async function fetchProviderProfileByAnyId(identifier) {
+  if (identifier == null) return null;
+
+  if (providerProfilesSupportsIdColumn !== false) {
+    const { data, error } = await supabase
+      .from("provider_profiles")
+      .select("*")
+      .eq("id", identifier)
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === "42703") {
+        providerProfilesSupportsIdColumn = false;
+      } else {
+        throw error;
+      }
+    } else if (data) {
+      providerProfilesSupportsIdColumn = true;
+      return data;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("provider_profiles")
+    .select("*")
+    .eq("user_id", identifier)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
 
 /* -----------------------------------------------------
    LIST BOOKINGS
@@ -72,13 +121,9 @@ export async function createBooking(req, res) {
     }
 
     // 2) Fetch provider info
-const { data: provider, error: providerError } = await supabase
-  .from("provider_profiles")
-  .select("id, user_id, display_name, banner_url")
-  .eq("id", provider_id)
-  .single();
+    const provider = await fetchProviderProfileByAnyId(provider_id);
 
-    if (providerError || !provider) {
+    if (!provider) {
       return res.status(404).json({ error: "Provider not found" });
     }
 
@@ -218,7 +263,13 @@ export async function cancelBooking(req, res) {
     if (!booking) return res.status(404).json({ error: "Booking not found" });
 
     const isCustomer = booking.customer_id === userId;
-    const isProvider = booking.provider_id === userId;
+    let isProvider = false;
+    if (req.user.role === "provider") {
+      const providerProfileId = await getProviderProfileIdForUser(userId);
+      isProvider = providerProfileId
+        ? booking.provider_id === providerProfileId
+        : false;
+    }
 
     if (!isCustomer && !isProvider) {
       return res.status(403).json({ error: "You are not allowed to cancel this booking" });
@@ -245,6 +296,13 @@ export async function confirmBooking(req, res) {
       });
     }
 
+    const providerProfileId = await getProviderProfileIdForUser(userId);
+    if (!providerProfileId) {
+      return res.status(403).json({
+        error: "Provider profile not found",
+      });
+    }
+
     // Fetch booking
     const booking = await getBookingDetail(bookingId);
     if (!booking) {
@@ -252,7 +310,7 @@ export async function confirmBooking(req, res) {
     }
 
     // Only the owner provider can confirm
-    if (booking.provider_id !== userId) {
+    if (booking.provider_id !== providerProfileId) {
       return res.status(403).json({
         error: "You are not allowed to confirm this booking",
       });
@@ -325,13 +383,20 @@ export async function declineBooking(req, res) {
       });
     }
 
+    const providerProfileId = await getProviderProfileIdForUser(userId);
+    if (!providerProfileId) {
+      return res.status(403).json({
+        error: "Provider profile not found",
+      });
+    }
+
     const booking = await getBookingDetail(bookingId);
 
     if (!booking) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    if (booking.provider_id !== userId) {
+    if (booking.provider_id !== providerProfileId) {
       return res.status(403).json({
         error: "You are not allowed to decline this booking",
       });
@@ -380,10 +445,13 @@ export async function refundBooking(req, res) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    if (userRole === "provider" && booking.provider_id !== userId) {
-      return res.status(403).json({
-        error: "You are not allowed to refund this booking",
-      });
+    if (userRole === "provider") {
+      const providerProfileId = await getProviderProfileIdForUser(userId);
+      if (!providerProfileId || booking.provider_id !== providerProfileId) {
+        return res.status(403).json({
+          error: "You are not allowed to refund this booking",
+        });
+      }
     }
 
     if (!booking.payment_intent_id) {
@@ -410,5 +478,3 @@ export async function refundBooking(req, res) {
     return res.status(500).json({ error: "Could not refund booking" });
   }
 }
-
-

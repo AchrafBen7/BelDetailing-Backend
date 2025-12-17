@@ -1,5 +1,62 @@
 // src/services/provider.service.js
 import { supabase } from "../config/supabase.js";
+import { ensureStripeProductForService } from "./stripeProduct.service.js";
+
+let providerProfilesSupportsIdColumn;
+
+function getProviderIdentity(row) {
+  return row?.id ?? row?.user_id ?? null;
+}
+
+function getProviderIdentityKeys(row) {
+  const keys = [];
+  if (row?.id) keys.push(row.id);
+  if (row?.user_id) keys.push(row.user_id);
+  return [...new Set(keys.filter(Boolean))];
+}
+
+function pickServicesForRow(row, servicesMap) {
+  const keys = getProviderIdentityKeys(row);
+  for (const key of keys) {
+    const services = servicesMap.get(key);
+    if (services && services.length) {
+      return services;
+    }
+  }
+  return [];
+}
+
+async function fetchProviderProfileByAnyId(identifier) {
+  if (identifier == null) return null;
+
+  if (providerProfilesSupportsIdColumn !== false) {
+    const { data, error } = await supabase
+      .from("provider_profiles")
+      .select("*")
+      .eq("id", identifier)
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === "42703") {
+        providerProfilesSupportsIdColumn = false;
+      } else {
+        throw error;
+      }
+    } else if (data) {
+      providerProfilesSupportsIdColumn = true;
+      return data;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("provider_profiles")
+    .select("*")
+    .eq("user_id", identifier)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
 
 // DB → DTO
 function mapProviderRowToDetailer(row) {
@@ -14,8 +71,8 @@ function mapProviderRowToDetailer(row) {
     prices.length > 0 ? Math.min(...prices) : null;
 
   return {
-    id: row.id, // provider_profiles.id
-    userId: row.user_id, // auth.users.id (si besoin)
+    id: getProviderIdentity(row), // provider_profiles.id (fallback user_id)
+    userId: row.user_id ?? null, // auth.users.id
     displayName: row.display_name,
     bio: row.bio,
     city: row.base_city ?? "",
@@ -54,7 +111,7 @@ async function fetchProviderServicesMap(providerIds) {
   if (error) throw error;
 
   const map = new Map();
-  data.forEach(service => {
+  (data ?? []).forEach(service => {
     const list = map.get(service.provider_id) ?? [];
     list.push({
       price: service.price,
@@ -117,13 +174,18 @@ query = query.limit(Number(limit));
 const { data, error } = await query;
 if (error) throw error;
 
-const providerIds = Array.isArray(data) ? data.map(row => row.user_id) : [];
-const servicesMap = await fetchProviderServicesMap(providerIds);
+const providerIdSet = new Set();
+if (Array.isArray(data)) {
+  data.forEach(row => {
+    getProviderIdentityKeys(row).forEach(idVal => providerIdSet.add(idVal));
+  });
+}
+const servicesMap = await fetchProviderServicesMap([...providerIdSet]);
 
 const mapped = data.map(row =>
   mapProviderRowToDetailer({
     ...row,
-    providerServices: servicesMap.get(row.user_id) ?? [],
+    providerServices: pickServicesForRow(row, servicesMap),
   })
 );
 
@@ -195,20 +257,31 @@ export async function getProviderServices(providerId) {
 }
 
 export async function createProviderService(userId, service) {
- // 1. récupérer le provider_profile
-const { data: provider } = await supabase
-  .from("provider_profiles")
-  .select("id")
-  .eq("user_id", userId)
-  .single();
+  const { data: provider, error: providerLookupError } = await supabase
+    .from("provider_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
 
-if (!provider) throw new Error("Provider profile not found");
+  if (providerLookupError) throw providerLookupError;
+  if (!provider) {
+    const err = new Error("Provider profile not found");
+    err.statusCode = 404;
+    throw err;
+  }
 
- // 1️⃣ Insert dans Supabase
+  const providerProfileId = provider.id ?? provider.user_id;
+  if (!providerProfileId) {
+    const err = new Error("Provider profile identifier missing");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 1️⃣ Insert dans Supabase
   const { data, error } = await supabase
     .from("services")
     .insert({
-      provider_id: provider.id,
+      provider_id: providerProfileId,
       name: service.name,
       category: service.category,
       price: service.price,
@@ -248,17 +321,17 @@ if (!provider) throw new Error("Provider profile not found");
 
 // 🟦 Détail d’un prestataire
 export async function getProviderById(providerId) {
-  const { data, error } = await supabase
-    .from("provider_profiles")
-    .select("*")
-    .eq("user_id", providerId)
-    .single();
+  const profile = await fetchProviderProfileByAnyId(providerId);
 
-  if (error) throw error;
-  const servicesMap = await fetchProviderServicesMap([data.user_id]);
+  if (!profile) {
+    return null;
+  }
+
+  const identityKeys = getProviderIdentityKeys(profile);
+  const servicesMap = await fetchProviderServicesMap(identityKeys);
   return mapProviderRowToDetailer({
-    ...data,
-    providerServices: servicesMap.get(data.user_id) ?? [],
+    ...profile,
+    providerServices: pickServicesForRow(profile, servicesMap),
   });
 }
 
