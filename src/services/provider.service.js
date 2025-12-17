@@ -14,7 +14,8 @@ function mapProviderRowToDetailer(row) {
     prices.length > 0 ? Math.min(...prices) : null;
 
   return {
-    id: row.user_id,
+    id: row.id, // provider_profiles.id
+    userId: row.user_id, // auth.users.id (si besoin)
     displayName: row.display_name,
     bio: row.bio,
     city: row.base_city ?? "",
@@ -194,11 +195,20 @@ export async function getProviderServices(providerId) {
 }
 
 export async function createProviderService(userId, service) {
-  // 1️⃣ Insert dans Supabase
+ // 1. récupérer le provider_profile
+const { data: provider } = await supabase
+  .from("provider_profiles")
+  .select("id")
+  .eq("user_id", userId)
+  .single();
+
+if (!provider) throw new Error("Provider profile not found");
+
+ // 1️⃣ Insert dans Supabase
   const { data, error } = await supabase
     .from("services")
     .insert({
-      provider_id: userId,
+      provider_id: provider.id,
       name: service.name,
       category: service.category,
       price: service.price,
