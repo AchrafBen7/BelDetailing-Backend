@@ -32,7 +32,7 @@ function mapOfferRowToDto(row) {
 
 // 🟦 LIST – GET /api/v1/offers?status=&type=
 export async function getOffers({ status, type }) {
-  let query = supabase.from("offers").select("*");
+  let query = supabase.from("offers_with_counts").select("*");
 
   if (status) {
     query = query.eq("status", status);

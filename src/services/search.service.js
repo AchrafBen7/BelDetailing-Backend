@@ -139,7 +139,7 @@ export async function searchProviders(filters) {
 export async function searchOffers(filters) {
   const { q, city, category } = filters;
 
-  let query = supabase.from("offers").select("*").eq("status", "open");
+  let query = supabase.from("offers_with_counts").select("*").eq("status", "open");
 
   if (q) query = query.ilike("title", `%${q}%`);
 
