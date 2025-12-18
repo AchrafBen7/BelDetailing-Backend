@@ -381,13 +381,80 @@ export async function updateProviderProfile(userId, updates) {
 }
 
 
-// 🟦 Stats mock
-export async function getProviderStats() {
+async function getProviderProfileIdForUser(userId) {
+  const { data, error } = await supabase
+    .from("provider_profiles")
+    .select("id, rating")
+    .eq("user_id", userId)
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// 🟦 Stats provider
+export async function getProviderStats(userId) {
+  const provider = await getProviderProfileIdForUser(userId);
+  if (!provider?.id) {
+    const err = new Error("Provider profile not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const providerId = provider.id;
+  const rating = provider.rating ?? 0;
+
+  const now = new Date();
+  const startOfThisMonth = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    1
+  );
+  const startOfLastMonth = new Date(
+    now.getFullYear(),
+    now.getMonth() - 1,
+    1
+  );
+
+  const { data: bookings, error } = await supabase
+    .from("bookings")
+    .select("price, customer_id, created_at")
+    .eq("provider_id", providerId)
+    .eq("payment_status", "paid")
+    .gte("created_at", startOfLastMonth.toISOString());
+
+  if (error) throw error;
+
+  let thisMonthEarnings = 0;
+  let lastMonthEarnings = 0;
+  let thisMonthReservations = 0;
+  const clientsSet = new Set();
+
+  bookings.forEach(b => {
+    const createdAt = new Date(b.created_at);
+
+    if (createdAt >= startOfThisMonth) {
+      thisMonthEarnings += Number(b.price);
+      thisMonthReservations += 1;
+      clientsSet.add(b.customer_id);
+    } else if (createdAt >= startOfLastMonth) {
+      lastMonthEarnings += Number(b.price);
+    }
+  });
+
+  let variationPercent = 0;
+  if (lastMonthEarnings > 0) {
+    variationPercent =
+      ((thisMonthEarnings - lastMonthEarnings) / lastMonthEarnings) * 100;
+  } else if (thisMonthEarnings > 0) {
+    variationPercent = 100;
+  }
+
   return {
-    monthlyEarnings: 0,
-    variationPercent: 0,
-    reservationsCount: 0,
-    rating: 0,
-    clientsCount: 0
+    monthlyEarnings: Math.round(thisMonthEarnings * 100) / 100,
+    variationPercent: Math.round(variationPercent),
+    reservationsCount: thisMonthReservations,
+    rating,
+    clientsCount: clientsSet.size,
   };
 }

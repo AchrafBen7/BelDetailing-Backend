@@ -108,10 +108,15 @@ export async function getProviderReviewsController(req, res) {
 // Provider stats
 export async function getProviderStatsController(req, res) {
   try {
-    const stats = await getProviderStats(req.params.id);
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can access stats" });
+    }
+
+    const stats = await getProviderStats(req.user.id);
     return res.json(stats);
   } catch (err) {
     console.error("[PROVIDERS] getProviderStats error:", err);
-    return res.status(500).json({ error: "Could not fetch stats" });
+    const status = err.statusCode || 500;
+    return res.status(status).json({ error: "Could not fetch stats" });
   }
 }
