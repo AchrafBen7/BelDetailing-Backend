@@ -51,7 +51,7 @@ export async function getOffers({ status, type }) {
 // 🟦 DETAIL – GET /api/v1/offers/:id
 export async function getOfferById(id) {
   const { data, error } = await supabase
-    .from("offers")
+    .from("offers_with_counts")
     .select("*")
     .eq("id", id)
     .single();
