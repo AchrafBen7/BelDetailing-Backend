@@ -18,7 +18,7 @@ import mediaRoutes from "./routes/media.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import stripeWebhookRoutes from "./routes/stripeWebhook.routes.js";
 import stripeConnectRoutes from "./routes/stripeConnect.routes.js";
-
+import productRoutes from "./routes/product.routes.js";
 const app = express();
 
 app.use(cors());
@@ -46,6 +46,8 @@ app.use("/api/v1/service-categories", serviceCategoryRoutes);
 app.use("/api/v1/media", mediaRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/stripe", stripeConnectRoutes);
+app.use("/api/v1/products", productRoutes);
+
 
 // Healthcheck
 app.get("/api/v1/health", (req, res) => {
