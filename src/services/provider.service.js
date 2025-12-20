@@ -384,13 +384,16 @@ export async function updateProviderProfile(userId, updates) {
 export async function getProviderProfileIdForUser(userId) {
   const { data, error } = await supabase
     .from("provider_profiles")
-    .select("id, rating")
+    .select("user_id, rating")
     .eq("user_id", userId)
     .single();
 
   if (error) throw error;
-  return data;
+
+  // consistent object teruggeven
+  return { id: data.user_id, rating: data.rating };
 }
+
 
 // 🟦 Stats provider
 export async function getProviderStats(userId) {
@@ -401,7 +404,7 @@ export async function getProviderStats(userId) {
     throw err;
   }
 
-  const providerId = provider.id;
+ const providerId = userId;
   const rating = provider.rating ?? 0;
 
   const now = new Date();
@@ -419,7 +422,7 @@ export async function getProviderStats(userId) {
   const { data: bookings, error } = await supabase
     .from("bookings")
     .select("price, customer_id, created_at")
-    .or(`provider_id.eq.${provider.id},provider_id.eq.${userId}`)
+    .eq("provider_id", providerId)
     .eq("payment_status", "paid")
     .gte("created_at", startOfLastMonth.toISOString());
 
