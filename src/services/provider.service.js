@@ -381,7 +381,7 @@ export async function updateProviderProfile(userId, updates) {
 }
 
 
-async function getProviderProfileIdForUser(userId) {
+export async function getProviderProfileIdForUser(userId) {
   const { data, error } = await supabase
     .from("provider_profiles")
     .select("id, rating")

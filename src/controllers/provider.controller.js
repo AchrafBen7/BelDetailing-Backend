@@ -7,6 +7,7 @@ import {
   getProviderServices,
   getProviderReviews,
   getProviderStats,
+  getProviderProfileIdForUser,
 } from "../services/provider.service.js";
 
 export async function listProviders(req, res) {
@@ -105,6 +106,25 @@ export async function getProviderReviewsController(req, res) {
   }
 }
 
+export async function getMyProviderReviews(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const provider = await getProviderProfileIdForUser(req.user.id);
+    if (!provider?.id) {
+      return res.status(404).json({ error: "Provider profile not found" });
+    }
+
+    const reviews = await getProviderReviews(provider.id);
+    return res.json(reviews);
+  } catch (err) {
+    console.error("[PROVIDERS] getMyReviews error:", err);
+    return res.status(500).json({ error: "Could not fetch reviews" });
+  }
+}
+
 // Provider stats
 export async function getProviderStatsController(req, res) {
   try {
@@ -120,3 +140,4 @@ export async function getProviderStatsController(req, res) {
     return res.status(status).json({ error: "Could not fetch stats" });
   }
 }
+

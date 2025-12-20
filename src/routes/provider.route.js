@@ -8,16 +8,18 @@ import {
   getProviderServicesController,
   getProviderReviewsController,
   getProviderStatsController,
+  getMyProviderReviews,
 } from "../controllers/provider.controller.js";
 import { createReview } from "../controllers/review.controller.js";
 
 const router = Router();
 
 // ⭐ Services d’un prestataire
-router.get("/:id/services", getProviderServicesController);
+
+router.get("/me/reviews", requireAuth, getMyProviderReviews);
 
 router.patch("/me", requireAuth, updateMyProviderProfile);
-
+router.get("/:id/services", getProviderServicesController);
 router.post("/services", requireAuth, createService);
 
 // ⭐ Avis d’un prestataire
@@ -31,5 +33,6 @@ router.get("/:id", getProvider);
 
 // ⭐ Liste de tous les prestataires
 router.get("/", listProviders);
+
 
 export default router;
