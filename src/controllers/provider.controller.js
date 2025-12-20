@@ -94,6 +94,25 @@ export async function getProviderServicesController(req, res) {
   }
 }
 
+export async function getMyProviderServicesController(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const provider = await getProviderProfileIdForUser(req.user.id);
+    if (!provider?.id) {
+      return res.status(404).json({ error: "Provider profile not found" });
+    }
+
+    const services = await getProviderServices(provider.id);
+    return res.json(services);
+  } catch (err) {
+    console.error("[PROVIDERS] getMyProviderServices error:", err);
+    return res.status(500).json({ error: "Could not fetch services" });
+  }
+}
+
 // List provider reviews
 export async function getProviderReviewsController(req, res) {
   try {
@@ -141,3 +160,6 @@ export async function getProviderStatsController(req, res) {
   }
 }
 
+export async function getMyProviderStatsController(req, res) {
+  return getProviderStatsController(req, res);
+}
