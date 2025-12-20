@@ -419,7 +419,7 @@ export async function getProviderStats(userId) {
   const { data: bookings, error } = await supabase
     .from("bookings")
     .select("price, customer_id, created_at")
-    .eq("provider_id", providerId)
+    .or(`provider_id.eq.${provider.id},provider_id.eq.${userId}`)
     .eq("payment_status", "paid")
     .gte("created_at", startOfLastMonth.toISOString());
 

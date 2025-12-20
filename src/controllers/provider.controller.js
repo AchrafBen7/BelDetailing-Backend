@@ -105,7 +105,7 @@ export async function getMyProviderServicesController(req, res) {
       return res.status(404).json({ error: "Provider profile not found" });
     }
 
-    const services = await getProviderServices(provider.id);
+   const services = await getProviderServices(provider.id ?? req.user.id);
     return res.json(services);
   } catch (err) {
     console.error("[PROVIDERS] getMyProviderServices error:", err);
