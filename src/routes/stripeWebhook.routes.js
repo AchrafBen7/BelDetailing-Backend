@@ -126,40 +126,27 @@ router.post(
 
           break;
         }
+        
+case "setup_intent.succeeded": {
+  const setupIntent = event.data.object;
 
-        case "setup_intent.succeeded": {
-          const setupIntent = event.data.object;
+  const customerId = setupIntent.customer;
+  const paymentMethodId = setupIntent.payment_method;
 
-          const customerId = setupIntent.customer;
-          const paymentMethodId = setupIntent.payment_method;
+  if (!customerId || !paymentMethodId) break;
 
-          if (!customerId || !paymentMethodId) {
-            console.warn("⚠️ setup_intent.succeeded missing data");
-            break;
-          }
+  // ✅ NE PAS re-attach
+  // Stripe l’a déjà fait
 
-          console.log(
-            "💳 Attaching payment method",
-            paymentMethodId,
-            "to customer",
-            customerId
-          );
+  // Juste définir comme carte par défaut
+  await stripe.customers.update(customerId, {
+    invoice_settings: {
+      default_payment_method: paymentMethodId,
+    },
+  });
 
-          // 1️⃣ Attacher la carte au customer
-          await stripe.paymentMethods.attach(paymentMethodId, {
-            customer: customerId,
-          });
-
-          // 2️⃣ Définir comme carte par défaut
-          await stripe.customers.update(customerId, {
-            invoice_settings: {
-              default_payment_method: paymentMethodId,
-            },
-          });
-
-          break;
-        }
-
+  break;
+}
         case "refund.succeeded": {
           const refund = event.data.object;
 
