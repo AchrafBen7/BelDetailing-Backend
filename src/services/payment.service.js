@@ -117,13 +117,20 @@ export async function createSetupIntent(user) {
    LIST PAYMENT METHODS — Cartes enregistrées
 ----------------------------------------------------- */
 export async function listPaymentMethods(user) {
-  if (!user.stripe_customer_id) {
+  // 🔁 Toujours relire le user depuis la DB
+  const { data: freshUser, error } = await supabase
+    .from("users")
+    .select("stripe_customer_id")
+    .eq("id", user.id)
+    .single();
+
+  if (error || !freshUser?.stripe_customer_id) {
     return [];
   }
 
-  const customer = await stripe.customers.retrieve(
-    user.stripe_customer_id
-  );
+  const customerId = freshUser.stripe_customer_id;
+
+  const customer = await stripe.customers.retrieve(customerId);
 
   const defaultPmId =
     typeof customer.invoice_settings?.default_payment_method === "string"
@@ -131,19 +138,20 @@ export async function listPaymentMethods(user) {
       : null;
 
   const paymentMethods = await stripe.paymentMethods.list({
-    customer: user.stripe_customer_id,
+    customer: customerId,
     type: "card",
   });
 
   return paymentMethods.data.map(pm => ({
     id: pm.id,
-    brand: pm.card.brand,              // visa, mastercard, amex
+    brand: pm.card.brand,
     last4: pm.card.last4,
     expMonth: pm.card.exp_month,
     expYear: pm.card.exp_year,
     isDefault: pm.id === defaultPmId,
   }));
 }
+
 
 /* -----------------------------------------------------
    LIST PAYMENT TRANSACTIONS — Historique user
