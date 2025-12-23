@@ -7,6 +7,7 @@ import {
   refundPaymentController,
   createSetupIntentController,
   listPaymentMethodsController,
+  listTransactionsController,
 } from "../controllers/payment.controller.js";
 import { createStripeProductForServiceController } from "../controllers/stripeProduct.controller.js";
 
@@ -20,6 +21,7 @@ router.post("/refund", requireAuth, refundPaymentController);
 // 💳 Cartes (Customer)
 router.post("/setup-intent", requireAuth, createSetupIntentController);
 router.get("/methods", requireAuth, listPaymentMethodsController);
+router.get("/transactions", requireAuth, listTransactionsController);
 
 // Marketplace : créer un produit Stripe pour un service
 router.post(

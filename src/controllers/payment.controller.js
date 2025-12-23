@@ -6,6 +6,7 @@ import {
   refundPayment,
   createSetupIntent,
   listPaymentMethods,
+  listUserTransactions,
 } from "../services/payment.service.js";
 
 /* -----------------------------------------------------
@@ -93,5 +94,18 @@ export async function listPaymentMethodsController(req, res) {
   } catch (err) {
     console.error("[LIST METHODS ERROR]", err);
     return res.status(500).json({ error: "Could not fetch payment methods" });
+  }
+}
+
+/* -----------------------------------------------------
+   LIST PAYMENT TRANSACTIONS
+----------------------------------------------------- */
+export async function listTransactionsController(req, res) {
+  try {
+    const data = await listUserTransactions(req.user.id);
+    return res.json({ data });
+  } catch (err) {
+    console.error("[LIST TRANSACTIONS ERROR]", err);
+    return res.status(500).json({ error: "Could not fetch transactions" });
   }
 }

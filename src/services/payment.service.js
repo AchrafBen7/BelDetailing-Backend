@@ -146,3 +146,17 @@ export async function listPaymentMethods(user) {
     isDefault: pm.id === defaultPmId,
   }));
 }
+
+/* -----------------------------------------------------
+   LIST PAYMENT TRANSACTIONS — Historique user
+----------------------------------------------------- */
+export async function listUserTransactions(userId) {
+  const { data, error } = await supabase
+    .from("payment_transactions")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data;
+}

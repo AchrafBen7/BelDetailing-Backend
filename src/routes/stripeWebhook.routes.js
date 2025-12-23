@@ -79,6 +79,15 @@ router.post(
           const intent = event.data.object;
           const bookingId = intent.metadata?.bookingId;
 
+          await supabase.from("payment_transactions").insert({
+            user_id: intent.metadata?.userId ?? null,
+            stripe_object_id: intent.id,
+            amount: intent.amount / 100,
+            currency: intent.currency,
+            status: intent.status,
+            type: "payment",
+          });
+
           if (!bookingId) {
             console.log("payment_intent.succeeded (no bookingId), skipping");
             break;
@@ -118,9 +127,41 @@ router.post(
           break;
         }
 
-        case "charge.refunded":
-        case "charge.refund.updated":
         case "refund.succeeded": {
+          const refund = event.data.object;
+
+          await supabase.from("payment_transactions").insert({
+            user_id: refund.metadata?.userId ?? null,
+            stripe_object_id: refund.id,
+            amount: -(refund.amount / 100),
+            currency: refund.currency,
+            status: refund.status,
+            type: "refund",
+          });
+
+          const paymentIntentId = refund.payment_intent;
+          if (!paymentIntentId) {
+            console.log("refund event without payment_intent, skipping");
+            break;
+          }
+
+          console.log(
+            `💸 Refund detected for payment_intent ${paymentIntentId}`
+          );
+
+          await supabase
+            .from("bookings")
+            .update({
+              payment_status: "refunded",
+              status: "cancelled", // ou "refunded" selon ta logique
+            })
+            .eq("payment_intent_id", paymentIntentId);
+
+          break;
+        }
+
+        case "charge.refunded":
+        case "charge.refund.updated": {
           // Selon l’event que tu actives
           const chargeOrRefund = event.data.object;
           const paymentIntentId = chargeOrRefund.payment_intent;
@@ -141,6 +182,21 @@ router.post(
               status: "cancelled", // ou "refunded" selon ta logique
             })
             .eq("payment_intent_id", paymentIntentId);
+
+          break;
+        }
+
+        case "payout.paid": {
+          const payout = event.data.object;
+
+          await supabase.from("payment_transactions").insert({
+            user_id: payout.metadata?.providerUserId ?? null,
+            stripe_object_id: payout.id,
+            amount: payout.amount / 100,
+            currency: payout.currency,
+            status: payout.status,
+            type: "payout",
+          });
 
           break;
         }
