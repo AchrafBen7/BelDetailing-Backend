@@ -8,6 +8,7 @@ import {
   createSetupIntentController,
   listPaymentMethodsController,
   listTransactionsController,
+  deletePaymentMethodController,
 } from "../controllers/payment.controller.js";
 import { createStripeProductForServiceController } from "../controllers/stripeProduct.controller.js";
 
@@ -22,6 +23,11 @@ router.post("/refund", requireAuth, refundPaymentController);
 router.post("/setup-intent", requireAuth, createSetupIntentController);
 router.get("/methods", requireAuth, listPaymentMethodsController);
 router.get("/transactions", requireAuth, listTransactionsController);
+router.delete(
+  "/methods/:paymentMethodId",
+  requireAuth,
+  deletePaymentMethodController
+);
 
 // Marketplace : créer un produit Stripe pour un service
 router.post(

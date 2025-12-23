@@ -7,6 +7,7 @@ import {
   createSetupIntent,
   listPaymentMethods,
   listUserTransactions,
+  detachPaymentMethod,
 } from "../services/payment.service.js";
 
 /* -----------------------------------------------------
@@ -107,5 +108,19 @@ export async function listTransactionsController(req, res) {
   } catch (err) {
     console.error("[LIST TRANSACTIONS ERROR]", err);
     return res.status(500).json({ error: "Could not fetch transactions" });
+  }
+}
+
+/* -----------------------------------------------------
+   DELETE PAYMENT METHOD
+----------------------------------------------------- */
+export async function deletePaymentMethodController(req, res) {
+  try {
+    const { paymentMethodId } = req.params;
+    await detachPaymentMethod(req.user, paymentMethodId);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[PAYMENT] delete method error", err);
+    return res.status(400).json({ error: err.message });
   }
 }

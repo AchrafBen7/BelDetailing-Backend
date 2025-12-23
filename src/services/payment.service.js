@@ -166,3 +166,27 @@ export async function listUserTransactions(userId) {
   if (error) throw error;
   return data;
 }
+
+/* -----------------------------------------------------
+   DELETE PAYMENT METHOD — Detach card
+----------------------------------------------------- */
+export async function detachPaymentMethod(user, paymentMethodId) {
+  if (!user.stripe_customer_id) {
+    throw new Error("No Stripe customer");
+  }
+
+  const customer = await stripe.customers.retrieve(user.stripe_customer_id);
+
+  const defaultPm =
+    typeof customer.invoice_settings?.default_payment_method === "string"
+      ? customer.invoice_settings.default_payment_method
+      : null;
+
+  if (paymentMethodId === defaultPm) {
+    throw new Error("Cannot delete default payment method");
+  }
+
+  await stripe.paymentMethods.detach(paymentMethodId);
+
+  return true;
+}
