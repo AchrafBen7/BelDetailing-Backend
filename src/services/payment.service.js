@@ -123,6 +123,15 @@ export async function listPaymentMethods(user) {
     return [];
   }
 
+  const customer = await stripe.customers.retrieve(
+    user.stripe_customer_id
+  );
+
+  const defaultPmId =
+    typeof customer.invoice_settings?.default_payment_method === "string"
+      ? customer.invoice_settings.default_payment_method
+      : null;
+
   const paymentMethods = await stripe.paymentMethods.list({
     customer: user.stripe_customer_id,
     type: "card",
@@ -130,10 +139,10 @@ export async function listPaymentMethods(user) {
 
   return paymentMethods.data.map(pm => ({
     id: pm.id,
-    brand: pm.card.brand,
+    brand: pm.card.brand,              // visa, mastercard, amex
     last4: pm.card.last4,
     expMonth: pm.card.exp_month,
     expYear: pm.card.exp_year,
-    isDefault: false,
+    isDefault: pm.id === defaultPmId,
   }));
 }
