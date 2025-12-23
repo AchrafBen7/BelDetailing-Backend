@@ -9,31 +9,29 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 /* -----------------------------------------------------
    CREATE PAYMENT INTENT — Préautorisation standard
 ----------------------------------------------------- */
-export async function createPaymentIntent({ amount, currency, userId }) {
-  try {
-    // Stripe attend amount en CENTS → iOS t’envoie un prix en EUR → multiplie 100 ici
-    const stripeIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // € → cents
-      currency,
-      capture_method: "manual", // Préautorisation
-      metadata: {
-        userId,
-        source: "beldetailing-app",
-      },
-    });
+export async function createPaymentIntent({ amount, currency, user }) {
+  const customerId = await getOrCreateStripeCustomer(user);
 
-    return {
-      id: stripeIntent.id,
-      clientSecret: stripeIntent.client_secret,
-      amount,
-      currency,
-      status: stripeIntent.status,
-    };
-  } catch (err) {
-    console.error("[STRIPE ERROR - createPaymentIntent]", err);
-    throw new Error("Stripe failed to create payment intent");
-  }
+  const stripeIntent = await stripe.paymentIntents.create({
+    amount: Math.round(amount * 100),
+    currency,
+    customer: customerId, // ✅ LIGNE CRUCIALE
+    capture_method: "manual",
+    metadata: {
+      userId: user.id,
+      source: "beldetailing-app",
+    },
+  });
+
+  return {
+    id: stripeIntent.id,
+    clientSecret: stripeIntent.client_secret,
+    amount,
+    currency,
+    status: stripeIntent.status,
+  };
 }
+
 
 /* -----------------------------------------------------
    CAPTURE PAYMENT — Provider accepte
