@@ -1,5 +1,6 @@
 // src/services/payment.service.js
 import Stripe from "stripe";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2023-10-16",
@@ -61,4 +62,78 @@ export async function refundPayment(paymentIntentId) {
     console.error("[STRIPE ERROR - refundPayment]", err);
     return false;
   }
+}
+
+/* -----------------------------------------------------
+   STRIPE CUSTOMER HELPERS
+----------------------------------------------------- */
+async function getOrCreateStripeCustomer(user) {
+  if (user.stripe_customer_id) {
+    return user.stripe_customer_id;
+  }
+
+  const customer = await stripe.customers.create({
+    email: user.email,
+    phone: user.phone ?? undefined,
+    metadata: {
+      userId: user.id,
+      source: "beldetailing-app",
+    },
+  });
+
+  // 🔐 Sauvegarde dans Supabase
+  await supabase
+    .from("users")
+    .update({ stripe_customer_id: customer.id })
+    .eq("id", user.id);
+
+  return customer.id;
+}
+
+/* -----------------------------------------------------
+   CREATE SETUP INTENT — Ajouter une carte
+----------------------------------------------------- */
+export async function createSetupIntent(user) {
+  const customerId = await getOrCreateStripeCustomer(user);
+
+  // Ephemeral Key pour iOS
+  const ephemeralKey = await stripe.ephemeralKeys.create(
+    { customer: customerId },
+    { apiVersion: "2023-10-16" }
+  );
+
+  const setupIntent = await stripe.setupIntents.create({
+    customer: customerId,
+    payment_method_types: ["card"],
+    usage: "off_session",
+  });
+
+  return {
+    customerId,
+    ephemeralKeySecret: ephemeralKey.secret,
+    setupIntentClientSecret: setupIntent.client_secret,
+  };
+}
+
+/* -----------------------------------------------------
+   LIST PAYMENT METHODS — Cartes enregistrées
+----------------------------------------------------- */
+export async function listPaymentMethods(user) {
+  if (!user.stripe_customer_id) {
+    return [];
+  }
+
+  const paymentMethods = await stripe.paymentMethods.list({
+    customer: user.stripe_customer_id,
+    type: "card",
+  });
+
+  return paymentMethods.data.map(pm => ({
+    id: pm.id,
+    brand: pm.card.brand,
+    last4: pm.card.last4,
+    expMonth: pm.card.exp_month,
+    expYear: pm.card.exp_year,
+    isDefault: false,
+  }));
 }

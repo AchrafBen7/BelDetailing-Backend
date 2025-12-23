@@ -4,6 +4,8 @@ import {
   createPaymentIntent,
   capturePayment,
   refundPayment,
+  createSetupIntent,
+  listPaymentMethods,
 } from "../services/payment.service.js";
 
 /* -----------------------------------------------------
@@ -65,5 +67,31 @@ export async function refundPaymentController(req, res) {
   } catch (err) {
     console.error("[REFUND ERROR]", err);
     return res.status(500).json({ error: "Could not refund payment" });
+  }
+}
+
+/* -----------------------------------------------------
+   SETUP INTENT — Ajouter une carte
+----------------------------------------------------- */
+export async function createSetupIntentController(req, res) {
+  try {
+    const result = await createSetupIntent(req.user);
+    return res.json(result);
+  } catch (err) {
+    console.error("[SETUP INTENT ERROR]", err);
+    return res.status(500).json({ error: "Could not create setup intent" });
+  }
+}
+
+/* -----------------------------------------------------
+   LIST PAYMENT METHODS
+----------------------------------------------------- */
+export async function listPaymentMethodsController(req, res) {
+  try {
+    const methods = await listPaymentMethods(req.user);
+    return res.json({ data: methods });
+  } catch (err) {
+    console.error("[LIST METHODS ERROR]", err);
+    return res.status(500).json({ error: "Could not fetch payment methods" });
   }
 }
