@@ -1,8 +1,12 @@
 // src/app.js
 import express from "express";
-import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import cron from "node-cron";
 import { autoCaptureBookings } from "./cron/autoCapture.js";
+import { supabaseAdmin as supabase } from "./config/supabase.js";
+import { httpLogger } from "./observability/logger.js";
+import { metricsEndpoint, metricsMiddleware } from "./observability/metrics.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
@@ -21,7 +25,24 @@ import stripeConnectRoutes from "./routes/stripeConnect.routes.js";
 import productRoutes from "./routes/product.routes.js";
 const app = express();
 
-app.use(cors());
+app.use(helmet());
+
+app.use(
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
+
+app.use(httpLogger);
+app.use((req, res, next) => {
+  res.setHeader("x-request-id", req.id);
+  next();
+});
+
+app.use(metricsMiddleware);
 
 // ⚠️ 1) D’abord le webhook Stripe (il utilise express.raw dans le router)
 app.use("/api/v1/stripe", stripeWebhookRoutes);
@@ -48,10 +69,36 @@ app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/stripe", stripeConnectRoutes);
 app.use("/api/v1/products", productRoutes);
 
+app.get("/metrics", metricsEndpoint);
 
 // Healthcheck
-app.get("/api/v1/health", (req, res) => {
-  res.json({ status: "ok", timestamp: Date.now() });
+app.get("/api/v1/health", async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from("provider_profiles")
+      .select("id")
+      .limit(1);
+
+    if (error) {
+      return res.status(503).json({
+        status: "degraded",
+        timestamp: Date.now(),
+        db: "unhealthy",
+      });
+    }
+
+    return res.json({
+      status: "ok",
+      timestamp: Date.now(),
+      db: "healthy",
+    });
+  } catch (err) {
+    return res.status(503).json({
+      status: "degraded",
+      timestamp: Date.now(),
+      db: "unhealthy",
+    });
+  }
 });
 
 
