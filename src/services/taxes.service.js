@@ -1,12 +1,12 @@
 import PDFDocument from "pdfkit";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { getMonthRange } from "../utils/date.utils.js";
 
 /**
  * Vérifie que le provider a une activité sur le mois
  */
 export async function providerHasActivity(providerUserId, month) {
-const start = `${month}-01T00:00:00Z`;
-const end = `${month}-31T23:59:59Z`;
+  const { start, end } = getMonthRange(month);
 
 
   const { data, error } = await supabase
@@ -26,8 +26,7 @@ const end = `${month}-31T23:59:59Z`;
  * Résumé mensuel (recalcul backend)
  */
 export async function computeMonthlySummary(providerUserId, month) {
-  const start = `${month}-01T00:00:00Z`;
-  const end = `${month}-31T23:59:59Z`;
+  const { start, end } = getMonthRange(month);
 
   const { data, error } = await supabase
     .from("bookings")
