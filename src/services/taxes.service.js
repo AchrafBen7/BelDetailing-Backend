@@ -60,25 +60,35 @@ export async function computeMonthlySummary(providerUserId, month) {
 export async function buildDocumentsList(providerUserId, month) {
   const summary = await computeMonthlySummary(providerUserId, month);
 
-  return [
-    {
+  const documents = [];
+
+  // Facture BelDetailing → seulement si commission > 0
+  if (summary.commissions > 0) {
+    documents.push({
       id: `${month}-beldetailing`,
       type: "belDetailingInvoice",
       title: "Facture BelDetailing",
       subtitle: `${month} • Commission mensuelle`,
       amount: summary.commissions,
       currency: "eur",
-    },
-    {
+    });
+  }
+
+  // Relevé Stripe → seulement si revenue > 0
+  if (summary.revenue > 0) {
+    documents.push({
       id: `${month}-stripe`,
       type: "stripeStatement",
       title: "Relevé Stripe",
       subtitle: `${month} • Récap des paiements`,
       amount: summary.revenue,
       currency: "eur",
-    },
-  ];
+    });
+  }
+
+  return documents;
 }
+
 
 /**
  * Génération PDF à la volée
