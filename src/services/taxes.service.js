@@ -5,8 +5,9 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
  * Vérifie que le provider a une activité sur le mois
  */
 export async function providerHasActivity(providerUserId, month) {
-  const start = `${month}-01`;
-  const end = `${month}-31`;
+const start = `${month}-01T00:00:00Z`;
+const end = `${month}-31T23:59:59Z`;
+
 
   const { data, error } = await supabase
     .from("bookings")
@@ -25,8 +26,8 @@ export async function providerHasActivity(providerUserId, month) {
  * Résumé mensuel (recalcul backend)
  */
 export async function computeMonthlySummary(providerUserId, month) {
-  const start = `${month}-01`;
-  const end = `${month}-31`;
+  const start = `${month}-01T00:00:00Z`;
+  const end = `${month}-31T23:59:59Z`;
 
   const { data, error } = await supabase
     .from("bookings")
@@ -83,11 +84,14 @@ export async function buildDocumentsList(providerUserId, month) {
  * Génération PDF à la volée
  */
 export async function generateDocumentPDF(providerUserId, documentId) {
-  const [month, type] = documentId.split("-");
+  const parts = documentId.split("-");
 
-  if (!month || !type) {
+  if (parts.length < 3) {
     throw new Error("Invalid document id");
   }
+
+  const month = `${parts[0]}-${parts[1]}`;
+  const type = parts.slice(2).join("-");
 
   if (!["beldetailing", "stripe"].includes(type)) {
     throw new Error("Unsupported document type");

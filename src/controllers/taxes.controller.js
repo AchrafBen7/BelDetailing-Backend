@@ -49,8 +49,11 @@ export async function downloadDocument(req, res) {
       return res.status(403).json({ error: "Providers only" });
     }
 
-    const documentId = req.params.id;
-    const [month] = documentId.split("-");
+const documentId = req.params.id;
+// "2024-12-beldetailing" → ["2024","12","beldetailing"]
+const parts = documentId.split("-");
+const month = `${parts[0]}-${parts[1]}`; // ✅ "2024-12"
+
 
     if (!(await providerHasActivity(req.user.id, month))) {
       return res.status(404).json({ error: "No document for this period" });
