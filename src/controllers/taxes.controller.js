@@ -1,9 +1,9 @@
 import {
   computeMonthlySummary,
   buildDocumentsList,
-  generateDocumentPDF,
   providerHasActivity,
 } from "../services/taxes.service.js";
+import { generateDocumentPDF } from "../services/taxes.document.service.js";
 
 export async function getMonthlySummary(req, res) {
   try {
@@ -71,3 +71,4 @@ export async function downloadDocument(req, res) {
     return res.status(400).json({ error: err.message });
   }
 }
+

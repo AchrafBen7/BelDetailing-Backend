@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body { font-family: Arial; padding: 40px; }
+    h1 { text-align: center; }
+    .box { margin-top: 30px; }
+    .row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+    .total { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Facture NÏOS</h1>
+
+  <div class="box">
+    <div class="row"><span>Période</span><span>{{MONTH}}</span></div>
+    <div class="row"><span>Prestations</span><span>{{COUNT}}</span></div>
+    <div class="row"><span>Chiffre d’affaires</span><span>{{REVENUE}} €</span></div>
+    <div class="row total"><span>Commission</span><span>{{COMMISSION}} €</span></div>
+  </div>
+
+  <p style="margin-top:40px;font-size:12px">
+    Document généré automatiquement – à transmettre à votre comptable.
+  </p>
+</body>
+</html>
