@@ -23,6 +23,7 @@ import paymentRoutes from "./routes/payment.routes.js";
 import stripeWebhookRoutes from "./routes/stripeWebhook.routes.js";
 import stripeConnectRoutes from "./routes/stripeConnect.routes.js";
 import productRoutes from "./routes/product.routes.js";
+import taxesRoutes from "./routes/taxes.routes.js";
 const app = express();
 
 app.use(helmet());
@@ -68,6 +69,7 @@ app.use("/api/v1/media", mediaRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/stripe", stripeConnectRoutes);
 app.use("/api/v1/products", productRoutes);
+app.use("/api/v1/taxes", taxesRoutes);
 
 app.get("/metrics", metricsEndpoint);
 
