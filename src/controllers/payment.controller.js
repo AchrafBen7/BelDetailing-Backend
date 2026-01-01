@@ -9,6 +9,7 @@ import {
   listUserTransactions,
   detachPaymentMethod,
 } from "../services/payment.service.js";
+import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 /* -----------------------------------------------------
    CREATE PAYMENT INTENT — App iOS → Stripe
@@ -21,10 +22,20 @@ export async function createPaymentIntentController(req, res) {
       return res.status(400).json({ error: "Missing parameters" });
     }
 
+    const { data: user, error: userError } = await supabase
+      .from("users")
+      .select("id, email, phone, stripe_customer_id")
+      .eq("id", req.user.id)
+      .single();
+
+    if (userError || !user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
     const intent = await createPaymentIntent({
       amount,
       currency,
-      userId: req.user.id,
+      user,
     });
 
     return res.json(intent);

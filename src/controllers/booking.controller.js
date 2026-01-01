@@ -181,14 +181,25 @@ const { data: inserted, error: bookingError } = await supabase
 
 if (bookingError) throw bookingError;
 
-// 2) Create payment intent
+// 2) Fetch customer for payment intent
+const { data: customer, error: customerError } = await supabase
+  .from("users")
+  .select("id, email, phone, stripe_customer_id")
+  .eq("id", customerId)
+  .single();
+
+if (customerError || !customer) {
+  return res.status(404).json({ error: "Customer not found" });
+}
+
+// 3) Create payment intent
 const intent = await createPaymentIntent({
   amount: price,
   currency,
-  userId: customerId,
+  user: customer,
 });
 
-// 3) Update booking with payment intent
+// 4) Update booking with payment intent
 const { data: updatedBooking, error: updateErr } = await supabase
   .from("bookings")
   .update({
