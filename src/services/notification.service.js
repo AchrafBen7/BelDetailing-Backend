@@ -1,5 +1,6 @@
 // src/services/notification.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { registerDevice } from "./onesignal.service.js";
 
 export async function getNotifications(userId, { limit, unreadOnly } = {}) {
   let query = supabase
@@ -54,5 +55,6 @@ export async function subscribeDeviceToken(userId, deviceToken, platform = "ios"
     );
 
   if (error) throw error;
+  await registerDevice({ userId, token: actualToken, platform });
   return true;
 }
