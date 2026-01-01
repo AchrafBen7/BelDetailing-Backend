@@ -26,7 +26,8 @@ export async function getProfile(req, res) {
       first_name,
       last_name,
       default_address,
-      preferred_city_id
+      preferred_city_id,
+      vehicle_type
     ),
     company_profiles (
       legal_name,
@@ -52,7 +53,9 @@ export async function getProfile(req, res) {
       team_size,
       years_of_experience,
       logo_url,
-      banner_url
+      banner_url,
+      transport_price_per_km,
+      transport_enabled
     )
   `)
   .eq("id", userId)
@@ -117,6 +120,7 @@ export async function updateProfile(req, res) {
       lastName,
       defaultAddress,
       preferredCityId,
+      vehicleType,
     } = customerProfile;
 
     const { error: customerError } = await supabase
@@ -128,6 +132,7 @@ export async function updateProfile(req, res) {
           last_name: lastName,
           default_address: defaultAddress,
           preferred_city_id: preferredCityId,
+          vehicle_type: vehicleType,
         },
         { onConflict: "user_id" }
       );
@@ -178,6 +183,8 @@ export async function updateProfile(req, res) {
       hasMobileService,
       minPrice,
       services,
+      transportPricePerKm,
+      transportEnabled,
     } = providerProfile;
 
     const { error: providerError } = await supabase
@@ -193,6 +200,8 @@ export async function updateProfile(req, res) {
           min_price: minPrice,
           // rating : calculé côté système → on ne le touche pas ici
           services,
+          transport_price_per_km: transportPricePerKm,
+          transport_enabled: transportEnabled,
         },
         { onConflict: "user_id" }
       );

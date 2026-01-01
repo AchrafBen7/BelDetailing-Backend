@@ -15,6 +15,31 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 const COMMISSION_RATE = 0.10;
 let providerProfilesSupportsIdColumn;
 
+function degreesToRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function calculateDistanceKm(lat1, lng1, lat2, lng2) {
+  const earthRadiusKm = 6371;
+  const dLat = degreesToRadians(lat2 - lat1);
+  const dLng = degreesToRadians(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(degreesToRadians(lat1)) *
+      Math.cos(degreesToRadians(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+}
+
+function buildBookingDateTime(dateValue, timeValue) {
+  if (!dateValue || !timeValue) return null;
+  const isoString = `${dateValue}T${timeValue}`;
+  const parsed = new Date(isoString);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 const DEFAULT_SERVICE_STEPS = [
   { id: "step_1", title: "Preparation", percentage: 10, is_completed: false, order: 1 },
   { id: "step_2", title: "Exterior cleaning", percentage: 25, is_completed: false, order: 2 },
@@ -120,6 +145,9 @@ export async function createBooking(req, res) {
       start_time,
       end_time,
       address,
+      payment_method,
+      customer_address_lat,
+      customer_address_lng,
     } = req.body;
 
     // 1) Fetch service
@@ -144,8 +172,39 @@ export async function createBooking(req, res) {
       return res.status(404).json({ error: "Provider not found" });
     }
 
-    const price = service.price;
+    const servicePrice = service.price;
     const currency = service.currency || "eur";
+
+    const providerLat = provider.lat;
+    const providerLng = provider.lng;
+    const customerAddressLat =
+      customer_address_lat != null ? Number(customer_address_lat) : null;
+    const customerAddressLng =
+      customer_address_lng != null ? Number(customer_address_lng) : null;
+
+    let transportDistanceKm = null;
+    let transportFee = 0;
+
+    if (
+      provider.transport_enabled &&
+      providerLat != null &&
+      providerLng != null &&
+      customerAddressLat != null &&
+      customerAddressLng != null
+    ) {
+      transportDistanceKm = calculateDistanceKm(
+        Number(providerLat),
+        Number(providerLng),
+        customerAddressLat,
+        customerAddressLng
+      );
+      const pricePerKm = provider.transport_price_per_km ?? 2.0;
+      transportFee =
+        Math.round(transportDistanceKm * pricePerKm * 100) / 100;
+    }
+
+    const totalPrice = servicePrice + transportFee;
+    const paymentMethod = payment_method || "card";
 
     // 3) Create booking (WITHOUT payment yet)
     // 1) Insert booking
@@ -158,7 +217,7 @@ const { data: inserted, error: bookingError } = await supabase
 
     provider_name: provider.display_name,
     service_name: service.name,
-    price,
+    price: totalPrice,
     currency,
 
     date,
@@ -169,9 +228,16 @@ const { data: inserted, error: bookingError } = await supabase
     status: "pending",
     payment_status: "pending",
     payment_intent_id: null,
+    payment_method: paymentMethod,
+    deposit_amount: null,
+    deposit_payment_intent_id: null,
     commission_rate: COMMISSION_RATE,
     invoice_sent: false,
     provider_banner_url: provider.banner_url ?? null,
+    transport_distance_km: transportDistanceKm,
+    transport_fee: transportFee,
+    customer_address_lat: customerAddressLat,
+    customer_address_lng: customerAddressLng,
   })
   .select(`
   id,
@@ -181,6 +247,10 @@ const { data: inserted, error: bookingError } = await supabase
   provider_name,
   service_name,
   price,
+  transport_distance_km,
+  transport_fee,
+  customer_address_lat,
+  customer_address_lng,
   currency,
   date,
   start_time,
@@ -189,6 +259,9 @@ const { data: inserted, error: bookingError } = await supabase
   status,
   payment_status,
   payment_intent_id,
+  payment_method,
+  deposit_amount,
+  deposit_payment_intent_id,
   commission_rate,
   invoice_sent,
   provider_banner_url,
@@ -209,19 +282,30 @@ if (customerError || !customer) {
   return res.status(404).json({ error: "Customer not found" });
 }
 
-// 3) Create payment intent
-const intent = await createPaymentIntent({
-  amount: price,
-  currency,
-  user: customer,
-});
+let intent = null;
+if (paymentMethod === "cash") {
+  const depositAmount = Math.round(totalPrice * 0.2 * 100) / 100;
+  intent = await createPaymentIntent({
+    amount: depositAmount,
+    currency,
+    user: customer,
+  });
+} else {
+  intent = await createPaymentIntent({
+    amount: totalPrice,
+    currency,
+    user: customer,
+  });
+}
 
 // 4) Update booking with payment intent
 const { data: updatedBooking, error: updateErr } = await supabase
   .from("bookings")
   .update({
-    payment_intent_id: intent.id,
-    payment_status: "preauthorized"
+    payment_intent_id: paymentMethod === "cash" ? null : intent.id,
+    deposit_payment_intent_id: paymentMethod === "cash" ? intent.id : null,
+    deposit_amount: paymentMethod === "cash" ? intent.amount : null,
+    payment_status: paymentMethod === "cash" ? "pending" : "preauthorized"
   })
   .eq("id", inserted.id)
 .select(`
@@ -232,6 +316,10 @@ const { data: updatedBooking, error: updateErr } = await supabase
   provider_name,
   service_name,
   price,
+  transport_distance_km,
+  transport_fee,
+  customer_address_lat,
+  customer_address_lng,
   currency,
   date,
   start_time,
@@ -240,6 +328,9 @@ const { data: updatedBooking, error: updateErr } = await supabase
   status,
   payment_status,
   payment_intent_id,
+  payment_method,
+  deposit_amount,
+  deposit_payment_intent_id,
   commission_rate,
   invoice_sent,
   provider_banner_url,
@@ -254,7 +345,7 @@ if (updateErr) throw updateErr;
 return res.status(201).json({
   data: {
     booking: updatedBooking,
-    clientSecret: intent.clientSecret
+    clientSecret: intent?.clientSecret ?? null
   }
 });
 
@@ -483,11 +574,144 @@ export async function cancelBooking(req, res) {
       return res.status(403).json({ error: "You are not allowed to cancel this booking" });
     }
 
+    if (booking.payment_intent_id && booking.payment_status === "paid") {
+      const bookingDateTime = buildBookingDateTime(
+        booking.date,
+        booking.start_time
+      );
+      const hoursUntilBooking = bookingDateTime
+        ? (bookingDateTime.getTime() - Date.now()) / 1000 / 3600
+        : null;
+      const transportFee = booking.transport_fee || 0;
+
+      if (hoursUntilBooking != null && hoursUntilBooking < 24) {
+        const servicePrice = booking.price - transportFee;
+        await refundPayment(booking.payment_intent_id, servicePrice);
+      } else {
+        await refundPayment(booking.payment_intent_id);
+      }
+    }
+
     const ok = await updateBookingStatus(bookingId, "cancelled");
     return res.json({ success: ok });
   } catch (err) {
     console.error("[BOOKINGS] cancel error:", err);
     return res.status(500).json({ error: "Could not cancel booking" });
+  }
+}
+
+/* -----------------------------------------------------
+   COUNTER PROPOSAL (provider)
+----------------------------------------------------- */
+export async function counterPropose(req, res) {
+  try {
+    const { id } = req.params;
+    const { date, start_time, end_time, message } = req.body;
+    const userId = req.user.id;
+
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can counter propose" });
+    }
+
+    const booking = await getBookingDetail(id);
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const providerProfileId = await getProviderProfileIdForUser(userId);
+    if (!providerProfileId || booking.provider_id !== providerProfileId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const { data, error } = await supabase
+      .from("bookings")
+      .update({
+        counter_proposal_date: date,
+        counter_proposal_start_time: start_time,
+        counter_proposal_end_time: end_time,
+        counter_proposal_message: message,
+        counter_proposal_status: "pending",
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return res.json({ data });
+  } catch (err) {
+    console.error("[BOOKINGS] counterPropose error:", err);
+    return res.status(500).json({ error: "Could not create counter proposal" });
+  }
+}
+
+/* -----------------------------------------------------
+   ACCEPT COUNTER PROPOSAL (customer)
+----------------------------------------------------- */
+export async function acceptCounterProposal(req, res) {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const booking = await getBookingDetail(id);
+    if (!booking || booking.counter_proposal_status !== "pending") {
+      return res.status(400).json({ error: "No pending counter proposal" });
+    }
+
+    if (booking.customer_id !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const { data, error } = await supabase
+      .from("bookings")
+      .update({
+        date: booking.counter_proposal_date,
+        start_time: booking.counter_proposal_start_time,
+        end_time: booking.counter_proposal_end_time,
+        counter_proposal_status: "accepted",
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return res.json({ data });
+  } catch (err) {
+    console.error("[BOOKINGS] acceptCounterProposal error:", err);
+    return res.status(500).json({ error: "Could not accept counter proposal" });
+  }
+}
+
+/* -----------------------------------------------------
+   REFUSE COUNTER PROPOSAL (customer)
+----------------------------------------------------- */
+export async function refuseCounterProposal(req, res) {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const booking = await getBookingDetail(id);
+    if (!booking || booking.counter_proposal_status !== "pending") {
+      return res.status(400).json({ error: "No pending counter proposal" });
+    }
+
+    if (booking.customer_id !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const { data, error } = await supabase
+      .from("bookings")
+      .update({
+        counter_proposal_status: "refused",
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return res.json({ data });
+  } catch (err) {
+    console.error("[BOOKINGS] refuseCounterProposal error:", err);
+    return res.status(500).json({ error: "Could not refuse counter proposal" });
   }
 }
 

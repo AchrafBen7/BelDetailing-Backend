@@ -14,6 +14,9 @@ import {
   startService,
   updateProgress,
   completeService,
+  counterPropose,
+  acceptCounterProposal,
+  refuseCounterProposal,
 } from "../controllers/booking.controller.js";
 
 const router = Router();
@@ -31,5 +34,8 @@ router.post("/:id/refund", requireAuth, refundBooking);
 router.post("/:id/start", requireAuth, startService);
 router.post("/:id/progress", requireAuth, updateProgress);
 router.post("/:id/complete", requireAuth, completeService);
+router.post("/:id/counter-propose", requireAuth, counterPropose);
+router.post("/:id/accept-counter-proposal", requireAuth, acceptCounterProposal);
+router.post("/:id/refuse-counter-proposal", requireAuth, refuseCounterProposal);
 
 export default router;

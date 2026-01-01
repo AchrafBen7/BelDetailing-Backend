@@ -38,6 +38,7 @@ export function mapUserRowToDto(row) {
           lastName: cleanNull(c.last_name),
           defaultAddress: cleanNull(c.default_address),
           preferredCityId: cleanNull(c.preferred_city_id),
+          vehicleType: cleanNull(c.vehicle_type),
         }
       : null,
 
@@ -78,6 +79,8 @@ export function mapUserRowToDto(row) {
           yearsOfExperience: cleanNull(p.years_of_experience),
           logoUrl: cleanNull(p.logo_url),
           bannerUrl: cleanNull(p.banner_url),
+          transportPricePerKm: cleanNull(p.transport_price_per_km),
+          transportEnabled: p.transport_enabled ?? false,
         }
       : null,
   };

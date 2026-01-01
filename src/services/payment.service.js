@@ -82,10 +82,11 @@ export async function capturePayment(paymentIntentId) {
 /* -----------------------------------------------------
    REFUND PAYMENT — Provider refuse / auto-cancel
 ----------------------------------------------------- */
-export async function refundPayment(paymentIntentId) {
+export async function refundPayment(paymentIntentId, amount) {
   try {
     const refund = await stripe.refunds.create({
       payment_intent: paymentIntentId,
+      amount: amount != null ? Math.round(amount * 100) : undefined,
     });
 
     return refund.status === "succeeded";
