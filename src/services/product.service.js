@@ -66,3 +66,15 @@ export async function trackProductClick(productId, user) {
 
   return true;
 }
+
+export async function getProductById(id) {
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("id", id)
+    .eq("is_active", true)
+    .single();
+
+  if (error) throw error;
+  return data ? mapProductRowToDto(data) : null;
+}

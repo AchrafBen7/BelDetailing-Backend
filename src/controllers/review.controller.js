@@ -3,7 +3,7 @@ import { createReviewForProvider } from "../services/review.service.js";
 
 export async function createReview(req, res) {
   try {
-    const userId = req.user?.sub; // vient de requireAuth
+    const userId = req.user?.id;
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
     }
@@ -22,8 +22,7 @@ export async function createReview(req, res) {
       comment,
     });
 
-    // iOS: APIResponse<Review>
-    return res.status(201).json(review);
+    return res.status(201).json({ data: review });
   } catch (err) {
     console.error("[REVIEWS] createReview error:", err);
     return res.status(500).json({ error: "Could not create review" });

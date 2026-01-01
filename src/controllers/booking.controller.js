@@ -15,6 +15,23 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 const COMMISSION_RATE = 0.10;
 let providerProfilesSupportsIdColumn;
 
+const DEFAULT_SERVICE_STEPS = [
+  { id: "step_1", title: "Preparation", percentage: 10, is_completed: false, order: 1 },
+  { id: "step_2", title: "Exterior cleaning", percentage: 25, is_completed: false, order: 2 },
+  { id: "step_3", title: "Interior cleaning", percentage: 30, is_completed: false, order: 3 },
+  { id: "step_4", title: "Finishing", percentage: 25, is_completed: false, order: 4 },
+  { id: "step_5", title: "Final check", percentage: 10, is_completed: false, order: 5 },
+];
+
+function buildDefaultProgress(bookingId) {
+  return {
+    booking_id: bookingId,
+    steps: DEFAULT_SERVICE_STEPS.map(step => ({ ...step })),
+    current_step_index: 0,
+    total_progress: 0,
+  };
+}
+
 async function getProviderProfileIdForUser(userId) {
   const { data, error } = await supabase
     .from("provider_profiles")
@@ -246,6 +263,186 @@ return res.status(201).json({
   } catch (err) {
     console.error("[BOOKINGS] createBooking error:", err);
     return res.status(500).json({ error: "Could not create booking" });
+  }
+}
+
+/* -----------------------------------------------------
+   START SERVICE (provider)
+----------------------------------------------------- */
+export async function startService(req, res) {
+  try {
+    const bookingId = req.params.id;
+    const userId = req.user.id;
+
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can start services" });
+    }
+
+    const providerProfileId = await getProviderProfileIdForUser(userId);
+    if (!providerProfileId) {
+      return res.status(403).json({ error: "Provider profile not found" });
+    }
+
+    const booking = await getBookingDetail(bookingId);
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    if (booking.provider_id !== providerProfileId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (booking.status !== "confirmed") {
+      return res.status(400).json({ error: "Booking must be confirmed to start" });
+    }
+
+    const progress = buildDefaultProgress(bookingId);
+
+    const updated = await updateBookingService(bookingId, {
+      status: "started",
+      progress,
+    });
+
+    return res.json({ data: updated });
+  } catch (err) {
+    console.error("[BOOKINGS] startService error:", err);
+    return res.status(500).json({ error: "Could not start service" });
+  }
+}
+
+/* -----------------------------------------------------
+   UPDATE SERVICE PROGRESS (provider)
+----------------------------------------------------- */
+export async function updateProgress(req, res) {
+  try {
+    const bookingId = req.params.id;
+    const userId = req.user.id;
+    const { step_id } = req.body;
+
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can update progress" });
+    }
+
+    if (!step_id) {
+      return res.status(400).json({ error: "Missing step_id" });
+    }
+
+    const providerProfileId = await getProviderProfileIdForUser(userId);
+    if (!providerProfileId) {
+      return res.status(403).json({ error: "Provider profile not found" });
+    }
+
+    const booking = await getBookingDetail(bookingId);
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    if (booking.provider_id !== providerProfileId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (booking.status !== "started" && booking.status !== "in_progress") {
+      return res.status(400).json({ error: "Service not started" });
+    }
+
+    if (!booking.progress?.steps?.length) {
+      return res.status(400).json({ error: "Service progress not initialized" });
+    }
+
+    const progress = { ...booking.progress };
+    const steps = progress.steps.map(step => ({ ...step }));
+    const stepIndex = steps.findIndex(step => step.id === step_id);
+
+    if (stepIndex === -1) {
+      return res.status(400).json({ error: "Step not found" });
+    }
+
+    steps[stepIndex].is_completed = true;
+
+    const totalProgress = steps
+      .filter(step => step.is_completed)
+      .reduce((sum, step) => sum + Number(step.percentage || 0), 0);
+
+    const nextIncompleteIndex = steps.findIndex(step => !step.is_completed);
+    const currentStepIndex =
+      nextIncompleteIndex !== -1 ? nextIncompleteIndex : steps.length - 1;
+
+    const updatedProgress = {
+      ...progress,
+      steps,
+      total_progress: totalProgress,
+      current_step_index: currentStepIndex,
+    };
+
+    const newStatus =
+      booking.status === "started" && totalProgress > 0
+        ? "in_progress"
+        : booking.status;
+
+    const updated = await updateBookingService(bookingId, {
+      status: newStatus,
+      progress: updatedProgress,
+    });
+
+    return res.json({ data: updated });
+  } catch (err) {
+    console.error("[BOOKINGS] updateProgress error:", err);
+    return res.status(500).json({ error: "Could not update progress" });
+  }
+}
+
+/* -----------------------------------------------------
+   COMPLETE SERVICE (provider)
+----------------------------------------------------- */
+export async function completeService(req, res) {
+  try {
+    const bookingId = req.params.id;
+    const userId = req.user.id;
+
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can complete services" });
+    }
+
+    const providerProfileId = await getProviderProfileIdForUser(userId);
+    if (!providerProfileId) {
+      return res.status(403).json({ error: "Provider profile not found" });
+    }
+
+    const booking = await getBookingDetail(bookingId);
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    if (booking.provider_id !== providerProfileId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const progress = booking.progress;
+    if (!progress?.steps?.length) {
+      return res.status(400).json({ error: "Service progress not initialized" });
+    }
+
+    const totalProgress = progress.steps
+      .filter(step => step.is_completed)
+      .reduce((sum, step) => sum + Number(step.percentage || 0), 0);
+
+    if (totalProgress < 100) {
+      return res.status(400).json({ error: "All steps must be completed" });
+    }
+
+    const updated = await updateBookingService(bookingId, {
+      status: "completed",
+      progress: {
+        ...progress,
+        total_progress: 100,
+        current_step_index: progress.steps.length - 1,
+      },
+    });
+
+    return res.json({ data: updated });
+  } catch (err) {
+    console.error("[BOOKINGS] completeService error:", err);
+    return res.status(500).json({ error: "Could not complete service" });
   }
 }
 

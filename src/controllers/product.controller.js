@@ -3,6 +3,7 @@ import {
   getProducts,
   getRecommendedProducts,
   trackProductClick,
+  getProductById,
 } from "../services/product.service.js";
 
 // GET /api/v1/products
@@ -36,5 +37,22 @@ export async function clickProduct(req, res) {
   } catch (err) {
     console.error("[PRODUCTS] click error:", err);
     return res.status(500).json({ error: "Could not track click" });
+  }
+}
+
+// GET /api/v1/products/:id
+export async function getProduct(req, res) {
+  try {
+    const { id } = req.params;
+    const item = await getProductById(id);
+
+    if (!item) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    return res.json({ data: item });
+  } catch (err) {
+    console.error("[PRODUCTS] get error:", err);
+    return res.status(500).json({ error: "Could not fetch product" });
   }
 }

@@ -11,6 +11,9 @@ import {
   confirmBooking,
   declineBooking,
   refundBooking,
+  startService,
+  updateProgress,
+  completeService,
 } from "../controllers/booking.controller.js";
 
 const router = Router();
@@ -25,5 +28,8 @@ router.post("/:id/confirm", requireAuth, confirmBooking);
 router.post("/:id/decline", requireAuth, declineBooking);
 
 router.post("/:id/refund", requireAuth, refundBooking);
+router.post("/:id/start", requireAuth, startService);
+router.post("/:id/progress", requireAuth, updateProgress);
+router.post("/:id/complete", requireAuth, completeService);
 
 export default router;

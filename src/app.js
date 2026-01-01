@@ -24,6 +24,9 @@ import stripeWebhookRoutes from "./routes/stripeWebhook.routes.js";
 import stripeConnectRoutes from "./routes/stripeConnect.routes.js";
 import productRoutes from "./routes/product.routes.js";
 import taxesRoutes from "./routes/taxes.routes.js";
+import orderRoutes from "./routes/order.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import utilsRoutes from "./routes/utils.routes.js";
 const app = express();
 
 app.use(helmet());
@@ -70,6 +73,9 @@ app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/stripe", stripeConnectRoutes);
 app.use("/api/v1/products", productRoutes);
 app.use("/api/v1/taxes", taxesRoutes);
+app.use("/api/v1/orders", orderRoutes);
+app.use("/api/v1/notifications", notificationRoutes);
+app.use("/api/v1/utils", utilsRoutes);
 
 app.get("/metrics", metricsEndpoint);
 
