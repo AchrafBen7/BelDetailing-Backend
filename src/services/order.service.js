@@ -39,29 +39,32 @@ export async function createOrderService({ customerId, items, shippingAddress })
   const orderItems = [];
 
   for (const item of items) {
-    if (!item?.product_id || !item?.quantity || item.quantity <= 0) {
+    const productId = item?.product?.id || item?.product_id;
+    const quantity = item?.quantity || 1;
+
+    if (!productId || quantity <= 0) {
       throw new Error("Invalid item payload");
     }
 
     const { data: product, error } = await supabase
       .from("products")
       .select("*")
-      .eq("id", item.product_id)
+      .eq("id", productId)
       .single();
 
     if (error || !product) {
-      throw new Error(`Product ${item.product_id} not found`);
+      throw new Error(`Product ${productId} not found`);
     }
 
     const unitPrice = product.promo_price ?? product.price;
-    const totalPrice = unitPrice * item.quantity;
+    const totalPrice = unitPrice * quantity;
 
     orderItems.push({
-      id: randomUUID(),
+      id: item.id || randomUUID(),
       product_id: product.id,
       product_name: product.name,
       product_image_url: product.image_url,
-      quantity: item.quantity,
+      quantity,
       unit_price: unitPrice,
       total_price: totalPrice,
     });
