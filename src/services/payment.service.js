@@ -20,6 +20,39 @@ export async function createPaymentIntent({ amount, currency, user }) {
     metadata: {
       userId: user.id,
       source: "beldetailing-app",
+      type: "booking",
+    },
+  });
+
+  return {
+    id: stripeIntent.id,
+    clientSecret: stripeIntent.client_secret,
+    amount,
+    currency,
+    status: stripeIntent.status,
+  };
+}
+
+/* -----------------------------------------------------
+   CREATE PAYMENT INTENT — Orders (paiement direct)
+----------------------------------------------------- */
+export async function createPaymentIntentForOrder({
+  amount,
+  currency,
+  user,
+  orderId,
+}) {
+  const customerId = await getOrCreateStripeCustomer(user);
+
+  const stripeIntent = await stripe.paymentIntents.create({
+    amount: Math.round(amount * 100),
+    currency,
+    customer: customerId,
+    metadata: {
+      userId: user.id,
+      source: "beldetailing-app",
+      type: "order",
+      orderId,
     },
   });
 

@@ -5,7 +5,7 @@ import {
   createOrderService,
   cancelOrderService,
 } from "../services/order.service.js";
-import { createPaymentIntent } from "../services/payment.service.js";
+import { createPaymentIntentForOrder } from "../services/payment.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 export async function listOrders(req, res) {
@@ -55,10 +55,11 @@ export async function createOrder(req, res) {
       return res.status(404).json({ error: "Customer not found" });
     }
 
-    const intent = await createPaymentIntent({
+    const intent = await createPaymentIntentForOrder({
       amount: order.total_amount,
       currency: "eur",
       user: customer,
+      orderId: order.id,
     });
 
     const { data: updatedOrder, error: updateError } = await supabase
