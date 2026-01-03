@@ -1,5 +1,10 @@
 // src/controllers/auth.controller.js
+import { nanoid } from "nanoid";
 import { supabase, supabaseAdmin } from "../config/supabase.js";
+import {
+  resendVerificationEmail,
+  sendVerificationEmail,
+} from "../services/email.service.js";
 
 /* ============================================================
    Helper : Map row SQL → DTO User pour iOS
@@ -180,11 +185,32 @@ export async function register(req, res) {
   // ============================================================
   // 5) ENVOI FINAL
   // ============================================================
-return res.status(201).json({
-  success: true,
-  email: authUser.email,
-  role: finalRole,
-});
+  const verificationToken = nanoid(32);
+
+  const { error: tokenError } = await supabaseAdmin
+    .from("users")
+    .update({
+      email_verification_token: verificationToken,
+      email_verified: false,
+    })
+    .eq("id", authUser.id);
+
+  if (tokenError) {
+    console.error("[AUTH] token save error:", tokenError);
+  }
+
+  try {
+    await sendVerificationEmail(authUser.email, verificationToken);
+  } catch (emailError) {
+    console.error("[AUTH] verification email error:", emailError);
+  }
+
+  return res.status(201).json({
+    success: true,
+    email: authUser.email,
+    role: finalRole,
+    emailSent: true,
+  });
 
 }
 
@@ -329,5 +355,89 @@ export async function logout(req, res) {
   } catch (err) {
     console.error("Logout error:", err);
     return res.status(500).json({ error: "Logout failed" });
+  }
+}
+
+/* ============================================================
+   VERIFY EMAIL
+============================================================ */
+export async function verifyEmail(req, res) {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: "Missing verification token" });
+  }
+
+  const { data: user, error: userError } = await supabaseAdmin
+    .from("users")
+    .select("id, email, email_verified")
+    .eq("email_verification_token", token)
+    .maybeSingle();
+
+  if (userError || !user) {
+    return res.status(400).json({ error: "Invalid or expired token" });
+  }
+
+  if (user.email_verified) {
+    return res.status(400).json({ error: "Email already verified" });
+  }
+
+  const { error: updateError } = await supabaseAdmin
+    .from("users")
+    .update({
+      email_verified: true,
+      email_verification_token: null,
+    })
+    .eq("id", user.id);
+
+  if (updateError) {
+    return res.status(500).json({ error: "Could not verify email" });
+  }
+
+  return res.json({ success: true, message: "Email verified successfully" });
+}
+
+/* ============================================================
+   RESEND VERIFICATION EMAIL
+============================================================ */
+export async function resendVerification(req, res) {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: "Missing email" });
+  }
+
+  const { data: user, error: userError } = await supabaseAdmin
+    .from("users")
+    .select("id, email, email_verified, email_verification_token")
+    .eq("email", email.toLowerCase())
+    .maybeSingle();
+
+  if (userError || !user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  if (user.email_verified) {
+    return res.status(400).json({ error: "Email already verified" });
+  }
+
+  const verificationToken = user.email_verification_token || nanoid(32);
+
+  if (!user.email_verification_token) {
+    const { error: tokenError } = await supabaseAdmin
+      .from("users")
+      .update({ email_verification_token: verificationToken })
+      .eq("id", user.id);
+
+    if (tokenError) {
+      return res.status(500).json({ error: "Could not update verification token" });
+    }
+  }
+
+  try {
+    await resendVerificationEmail(user.email, verificationToken);
+    return res.json({ success: true, message: "Verification email sent" });
+  } catch (err) {
+    return res.status(500).json({ error: "Could not send email" });
   }
 }

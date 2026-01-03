@@ -4,7 +4,9 @@ import {
   register,
   login,
   refreshToken,
-  logout
+  logout,
+  verifyEmail,
+  resendVerification,
 } from "../controllers/auth.controller.js";
 import {
   loginWithApple,
@@ -18,6 +20,8 @@ const router = Router();
 router.post("/register", register);
 router.post("/login", login);
 router.post("/refresh", refreshToken);
+router.post("/verify-email", verifyEmail);
+router.post("/resend-verification", resendVerification);
 
 // === SOCIAL AUTH ===
 router.post("/apple", loginWithApple);
