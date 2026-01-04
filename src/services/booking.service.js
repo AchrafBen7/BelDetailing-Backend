@@ -11,21 +11,13 @@ export async function getBookings({ userId, scope, status }) {
   if (scope === "provider") {
     const { data: provider, error: providerError } = await supabase
       .from("provider_profiles")
-      .select("id, user_id")
+      .select("user_id")
       .eq("user_id", userId)
       .maybeSingle();
 
     if (providerError) throw providerError;
     if (!provider) return [];
-
-    const providerId = provider.id;
-    const providerUserId = provider.user_id;
-
-    if (providerId && providerUserId && providerId !== providerUserId) {
-      query.or(`provider_id.eq.${providerId},provider_id.eq.${providerUserId}`);
-    } else {
-      query.eq("provider_id", providerId || providerUserId);
-    }
+    query.eq("provider_id", provider.user_id);
   }
 
   if (status) {

@@ -72,14 +72,14 @@ async function getProviderProfileIdForUser(userId) {
 async function getProviderProfileIdsForUser(userId) {
   const { data, error } = await supabase
     .from("provider_profiles")
-    .select("id, user_id")
+    .select("user_id")
     .eq("user_id", userId)
     .maybeSingle();
 
   if (error) throw error;
   if (!data) return null;
   return {
-    id: data.id ?? null,
+    id: null,
     userId: data.user_id ?? null,
   };
 }
