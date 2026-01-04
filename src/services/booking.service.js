@@ -9,14 +9,23 @@ export async function getBookings({ userId, scope, status }) {
   }
 
   if (scope === "provider") {
-    const { data: provider } = await supabase
+    const { data: provider, error: providerError } = await supabase
       .from("provider_profiles")
-      .select("id")
+      .select("id, user_id")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
 
+    if (providerError) throw providerError;
     if (!provider) return [];
-    query.eq("provider_id", provider.id);
+
+    const providerId = provider.id;
+    const providerUserId = provider.user_id;
+
+    if (providerId && providerUserId && providerId !== providerUserId) {
+      query.or(`provider_id.eq.${providerId},provider_id.eq.${providerUserId}`);
+    } else {
+      query.eq("provider_id", providerId || providerUserId);
+    }
   }
 
   if (status) {
