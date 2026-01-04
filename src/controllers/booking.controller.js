@@ -69,6 +69,29 @@ async function getProviderProfileIdForUser(userId) {
   return data.id ?? data.user_id ?? null;
 }
 
+async function getProviderProfileIdsForUser(userId) {
+  const { data, error } = await supabase
+    .from("provider_profiles")
+    .select("id, user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    id: data.id ?? null,
+    userId: data.user_id ?? null,
+  };
+}
+
+function isBookingOwnedByProvider(booking, providerProfile) {
+  if (!booking || !providerProfile) return false;
+  return (
+    booking.provider_id === providerProfile.id ||
+    booking.provider_id === providerProfile.userId
+  );
+}
+
 async function fetchProviderProfileByAnyId(identifier) {
   if (identifier == null) return null;
 
@@ -618,8 +641,8 @@ export async function counterPropose(req, res) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    const providerProfileId = await getProviderProfileIdForUser(userId);
-    if (!providerProfileId || booking.provider_id !== providerProfileId) {
+    const providerProfile = await getProviderProfileIdsForUser(userId);
+    if (!providerProfile || !isBookingOwnedByProvider(booking, providerProfile)) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -728,8 +751,8 @@ export async function confirmBooking(req, res) {
       });
     }
 
-    const providerProfileId = await getProviderProfileIdForUser(userId);
-    if (!providerProfileId) {
+    const providerProfile = await getProviderProfileIdsForUser(userId);
+    if (!providerProfile) {
       return res.status(403).json({
         error: "Provider profile not found",
       });
@@ -742,7 +765,7 @@ export async function confirmBooking(req, res) {
     }
 
     // Only the owner provider can confirm
-    if (booking.provider_id !== providerProfileId) {
+    if (!isBookingOwnedByProvider(booking, providerProfile)) {
       return res.status(403).json({
         error: "You are not allowed to confirm this booking",
       });
@@ -815,8 +838,8 @@ export async function declineBooking(req, res) {
       });
     }
 
-    const providerProfileId = await getProviderProfileIdForUser(userId);
-    if (!providerProfileId) {
+    const providerProfile = await getProviderProfileIdsForUser(userId);
+    if (!providerProfile) {
       return res.status(403).json({
         error: "Provider profile not found",
       });
@@ -828,7 +851,7 @@ export async function declineBooking(req, res) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    if (booking.provider_id !== providerProfileId) {
+    if (!isBookingOwnedByProvider(booking, providerProfile)) {
       return res.status(403).json({
         error: "You are not allowed to decline this booking",
       });
