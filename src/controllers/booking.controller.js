@@ -33,6 +33,19 @@ function calculateDistanceKm(lat1, lng1, lat2, lng2) {
   return earthRadiusKm * c;
 }
 
+function calculateTransportFeeByZone(distanceKm) {
+  if (!Number.isFinite(distanceKm) || distanceKm < 0) {
+    return 0;
+  }
+  if (distanceKm > 25) {
+    return 20.0;
+  }
+  if (distanceKm > 10) {
+    return 15.0;
+  }
+  return 0.0;
+}
+
 function buildBookingDateTime(dateValue, timeValue) {
   if (!dateValue || !timeValue) return null;
   const isoString = `${dateValue}T${timeValue}`;
@@ -171,8 +184,6 @@ export async function createBooking(req, res) {
       payment_method,
       customer_address_lat,
       customer_address_lng,
-      transport_fee,
-      transport_distance_km,
     } = req.body;
 
     // 1) Fetch service
@@ -207,28 +218,13 @@ export async function createBooking(req, res) {
     const customerAddressLng =
       customer_address_lng != null ? Number(customer_address_lng) : null;
 
-    const payloadTransportFee =
-      transport_fee != null ? Number(transport_fee) : null;
-    const payloadTransportDistanceKm =
-      transport_distance_km != null ? Number(transport_distance_km) : null;
-
-    if (
-      payloadTransportFee != null &&
-      (!Number.isFinite(payloadTransportFee) || payloadTransportFee < 0)
-    ) {
-      return res.status(400).json({ error: "Invalid transport_fee" });
-    }
-
     let transportDistanceKm = null;
     let transportFee = 0;
 
-    if (payloadTransportFee != null) {
-      transportFee = payloadTransportFee;
-      transportDistanceKm = Number.isFinite(payloadTransportDistanceKm)
-        ? payloadTransportDistanceKm
-        : null;
+    if (!provider.has_mobile_service) {
+      transportDistanceKm = null;
+      transportFee = 0;
     } else if (
-      provider.transport_enabled &&
       providerLat != null &&
       providerLng != null &&
       customerAddressLat != null &&
@@ -240,9 +236,7 @@ export async function createBooking(req, res) {
         customerAddressLat,
         customerAddressLng
       );
-      const pricePerKm = provider.transport_price_per_km ?? 2.0;
-      transportFee =
-        Math.round(transportDistanceKm * pricePerKm * 100) / 100;
+      transportFee = calculateTransportFeeByZone(transportDistanceKm);
     }
 
     const totalPrice = servicePrice + transportFee;
