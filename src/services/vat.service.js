@@ -20,8 +20,9 @@ function parseAddress(address) {
     return { city: null, postalCode: null };
   }
 
-  const parts = address.split(",");
-  const lastPart = parts.length >= 2 ? parts[parts.length - 1].trim() : address;
+  const cleanAddress = address.replace(/\n/g, " ").trim();
+  const parts = cleanAddress.split(",");
+  const lastPart = parts.length >= 2 ? parts[parts.length - 1].trim() : cleanAddress;
   const postalMatch = lastPart.match(/\b(\d{4})\b/);
 
   if (postalMatch) {
@@ -67,12 +68,6 @@ export async function lookupVAT(vatNumber) {
     });
 
     console.log(`📦 [VAT] VIES Response status: ${response.status}`);
-    console.log(
-      `📦 [VAT] VIES Response data (first 500 chars): ${response.data.substring(
-        0,
-        500
-      )}`
-    );
 
     const parser = new XMLParser({
       ignoreAttributes: false,
@@ -82,12 +77,9 @@ export async function lookupVAT(vatNumber) {
     });
 
     const xmlData = parser.parse(response.data);
-    console.log(
-      `🔍 [VAT] Parsed XML structure:`,
-      JSON.stringify(xmlData, null, 2).substring(0, 1000)
-    );
 
     let checkVatResponse =
+      xmlData["env:Envelope"]?.["env:Body"]?.["ns2:checkVatResponse"] ||
       xmlData["soap:Envelope"]?.["soap:Body"]?.["checkVatResponse"] ||
       xmlData["soap:Envelope"]?.["soap:Body"]?.["ns2:checkVatResponse"] ||
       xmlData["Envelope"]?.["Body"]?.["checkVatResponse"] ||
@@ -96,20 +88,9 @@ export async function lookupVAT(vatNumber) {
     if (!checkVatResponse) {
       console.error("❌ [VAT] Cannot find checkVatResponse in XML structure");
       console.error("❌ [VAT] Available keys:", Object.keys(xmlData));
-      if (xmlData["soap:Envelope"]) {
-        console.error(
-          "❌ [VAT] soap:Envelope keys:",
-          Object.keys(xmlData["soap:Envelope"])
-        );
-        if (xmlData["soap:Envelope"]["soap:Body"]) {
-          console.error(
-            "❌ [VAT] soap:Body keys:",
-            Object.keys(xmlData["soap:Envelope"]["soap:Body"])
-          );
-        }
-      }
 
       const fault =
+        xmlData["env:Envelope"]?.["env:Body"]?.["env:Fault"] ||
         xmlData["soap:Envelope"]?.["soap:Body"]?.["soap:Fault"] ||
         xmlData["soap:Envelope"]?.["soap:Body"]?.["Fault"] ||
         xmlData["soap:Envelope"]?.["soap:Body"]?.["soapenv:Fault"];
@@ -123,7 +104,9 @@ export async function lookupVAT(vatNumber) {
           fault["soap:FaultString"]?._text ||
           fault["soap:FaultString"] ||
           fault["soapenv:faultstring"]?._text ||
-          fault["soapenv:faultstring"];
+          fault["soapenv:faultstring"] ||
+          fault["env:faultstring"]?._text ||
+          fault["env:faultstring"];
         console.error("❌ [VAT] SOAP Fault detected:", faultString);
         return {
           valid: false,
@@ -138,12 +121,23 @@ export async function lookupVAT(vatNumber) {
     }
 
     const valid =
+      checkVatResponse["ns2:valid"] === "true" ||
+      checkVatResponse["ns2:valid"] === true ||
       checkVatResponse.valid === "true" ||
       checkVatResponse.valid === true ||
       checkVatResponse.valid?._text === "true";
-    const name = checkVatResponse.name?._text || checkVatResponse.name || null;
+
+    const name =
+      checkVatResponse["ns2:name"] ||
+      checkVatResponse.name?._text ||
+      checkVatResponse.name ||
+      null;
+
     const address =
-      checkVatResponse.address?._text || checkVatResponse.address || null;
+      checkVatResponse["ns2:address"] ||
+      checkVatResponse.address?._text ||
+      checkVatResponse.address ||
+      null;
 
     console.log(`✅ [VAT] Valid: ${valid}, Name: ${name}, Address: ${address}`);
 
