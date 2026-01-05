@@ -56,6 +56,8 @@ export async function lookupVAT(vatNumber) {
 </soap:Envelope>`;
 
   try {
+    console.log(`🔍 [VAT] Calling VIES for ${countryCode}${number}`);
+
     const response = await axios.post(VIES_URL, soapBody, {
       headers: {
         "Content-Type": "text/xml; charset=utf-8",
@@ -64,25 +66,86 @@ export async function lookupVAT(vatNumber) {
       timeout: 10000,
     });
 
+    console.log(`📦 [VAT] VIES Response status: ${response.status}`);
+    console.log(
+      `📦 [VAT] VIES Response data (first 500 chars): ${response.data.substring(
+        0,
+        500
+      )}`
+    );
+
     const parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: "@_",
+      textNodeName: "_text",
+      isArray: () => false,
     });
 
     const xmlData = parser.parse(response.data);
-    const checkVatResponse =
-      xmlData["soap:Envelope"]?.["soap:Body"]?.["checkVatResponse"];
+    console.log(
+      `🔍 [VAT] Parsed XML structure:`,
+      JSON.stringify(xmlData, null, 2).substring(0, 1000)
+    );
+
+    let checkVatResponse =
+      xmlData["soap:Envelope"]?.["soap:Body"]?.["checkVatResponse"] ||
+      xmlData["soap:Envelope"]?.["soap:Body"]?.["ns2:checkVatResponse"] ||
+      xmlData["Envelope"]?.["Body"]?.["checkVatResponse"] ||
+      xmlData["soapenv:Envelope"]?.["soapenv:Body"]?.["checkVatResponse"];
 
     if (!checkVatResponse) {
+      console.error("❌ [VAT] Cannot find checkVatResponse in XML structure");
+      console.error("❌ [VAT] Available keys:", Object.keys(xmlData));
+      if (xmlData["soap:Envelope"]) {
+        console.error(
+          "❌ [VAT] soap:Envelope keys:",
+          Object.keys(xmlData["soap:Envelope"])
+        );
+        if (xmlData["soap:Envelope"]["soap:Body"]) {
+          console.error(
+            "❌ [VAT] soap:Body keys:",
+            Object.keys(xmlData["soap:Envelope"]["soap:Body"])
+          );
+        }
+      }
+
+      const fault =
+        xmlData["soap:Envelope"]?.["soap:Body"]?.["soap:Fault"] ||
+        xmlData["soap:Envelope"]?.["soap:Body"]?.["Fault"] ||
+        xmlData["soap:Envelope"]?.["soap:Body"]?.["soapenv:Fault"];
+
+      if (fault) {
+        const faultString =
+          fault["faultstring"]?._text ||
+          fault["faultstring"] ||
+          fault["faultString"]?._text ||
+          fault["faultString"] ||
+          fault["soap:FaultString"]?._text ||
+          fault["soap:FaultString"] ||
+          fault["soapenv:faultstring"]?._text ||
+          fault["soapenv:faultstring"];
+        console.error("❌ [VAT] SOAP Fault detected:", faultString);
+        return {
+          valid: false,
+          error: faultString || "Erreur lors de la verification VIES",
+        };
+      }
+
       return {
         valid: false,
         error: "Reponse VIES invalide",
       };
     }
 
-    const valid = checkVatResponse.valid === "true" || checkVatResponse.valid === true;
-    const name = checkVatResponse.name || null;
-    const address = checkVatResponse.address || null;
+    const valid =
+      checkVatResponse.valid === "true" ||
+      checkVatResponse.valid === true ||
+      checkVatResponse.valid?._text === "true";
+    const name = checkVatResponse.name?._text || checkVatResponse.name || null;
+    const address =
+      checkVatResponse.address?._text || checkVatResponse.address || null;
+
+    console.log(`✅ [VAT] Valid: ${valid}, Name: ${name}, Address: ${address}`);
 
     if (!valid) {
       return {
@@ -104,6 +167,13 @@ export async function lookupVAT(vatNumber) {
     };
   } catch (error) {
     console.error("[VAT] VIES API error:", error.message);
+    if (error.response) {
+      console.error("[VAT] Error response status:", error.response.status);
+      console.error(
+        "[VAT] Error response data (first 500 chars):",
+        error.response.data?.substring(0, 500)
+      );
+    }
 
     if (error.code === "ECONNABORTED" || error.response?.status >= 500) {
       return {
