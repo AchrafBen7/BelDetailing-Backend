@@ -1,40 +1,130 @@
-// src/services/vat.service.js
-export async function validateVATNumber(vatNumber) {
-  const normalized = String(vatNumber || "").trim();
-  if (normalized.length < 3) {
+import axios from "axios";
+import { XMLParser } from "fast-xml-parser";
+
+const VIES_URL =
+  "https://ec.europa.eu/taxation_customs/vies/services/checkVatService";
+
+function normalizeVatNumber(vatNumber) {
+  const normalized = vatNumber.replace(/\s/g, "").toUpperCase();
+  if (normalized.startsWith("BE")) {
+    return { countryCode: "BE", number: normalized.slice(2) };
+  }
+  if (normalized.length >= 9) {
+    return { countryCode: "BE", number: normalized };
+  }
+  return null;
+}
+
+function parseAddress(address) {
+  if (!address) {
+    return { city: null, postalCode: null };
+  }
+
+  const parts = address.split(",");
+  const lastPart = parts.length >= 2 ? parts[parts.length - 1].trim() : address;
+  const postalMatch = lastPart.match(/\b(\d{4})\b/);
+
+  if (postalMatch) {
     return {
-      valid: false,
-      country: null,
-      number: null,
-      name: null,
+      postalCode: postalMatch[1],
+      city: lastPart.replace(/\d{4}\s*/, "").trim() || null,
     };
   }
 
-  const countryCode = normalized.substring(0, 2).toUpperCase();
-  const number = normalized.substring(2);
+  return { city: lastPart.trim() || null, postalCode: null };
+}
+
+export async function lookupVAT(vatNumber) {
+  const normalized = normalizeVatNumber(vatNumber ?? "");
+  if (!normalized) {
+    return {
+      valid: false,
+      error: "Format de numero de TVA invalide",
+    };
+  }
+
+  const { countryCode, number } = normalized;
+
+  const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <checkVat xmlns="urn:ec.europa.eu:taxud:vies:services:checkVat:types">
+      <countryCode>${countryCode}</countryCode>
+      <vatNumber>${number}</vatNumber>
+    </checkVat>
+  </soap:Body>
+</soap:Envelope>`;
 
   try {
-    const response = await fetch(
-      `https://ec.europa.eu/taxation_customs/vies/rest-api/ms/${countryCode}/vat/${number}`
-    );
+    const response = await axios.post(VIES_URL, soapBody, {
+      headers: {
+        "Content-Type": "text/xml; charset=utf-8",
+        SOAPAction: "",
+      },
+      timeout: 10000,
+    });
 
-    if (!response.ok) {
-      return { valid: false, country: countryCode, number, name: null };
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "@_",
+    });
+
+    const xmlData = parser.parse(response.data);
+    const checkVatResponse =
+      xmlData["soap:Envelope"]?.["soap:Body"]?.["checkVatResponse"];
+
+    if (!checkVatResponse) {
+      return {
+        valid: false,
+        error: "Reponse VIES invalide",
+      };
     }
 
-    const payload = await response.json();
+    const valid = checkVatResponse.valid === "true" || checkVatResponse.valid === true;
+    const name = checkVatResponse.name || null;
+    const address = checkVatResponse.address || null;
+
+    if (!valid) {
+      return {
+        valid: false,
+        error: "Numero de TVA non reconnu en Belgique",
+      };
+    }
+
+    const { city, postalCode } = parseAddress(address);
+
     return {
-      valid: Boolean(payload.valid),
+      valid: true,
+      companyName: name,
+      address,
+      city,
+      postalCode,
       country: countryCode,
-      number,
-      name: payload.name || null,
+      vatNumber: `${countryCode}${number}`,
     };
-  } catch (err) {
+  } catch (error) {
+    console.error("[VAT] VIES API error:", error.message);
+
+    if (error.code === "ECONNABORTED" || error.response?.status >= 500) {
+      return {
+        valid: false,
+        error:
+          "Service de verification temporairement indisponible. Veuillez reessayer plus tard.",
+        retryable: true,
+      };
+    }
+
     return {
       valid: false,
-      country: countryCode,
-      number,
-      name: null,
+      error: "Impossible de verifier le numero de TVA",
     };
   }
+}
+
+export async function validateVATNumber(vatNumber) {
+  const result = await lookupVAT(vatNumber);
+  return {
+    valid: result.valid,
+    error: result.error,
+  };
 }
