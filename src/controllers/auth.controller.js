@@ -1,5 +1,4 @@
 // src/controllers/auth.controller.js
-import { nanoid } from "nanoid";
 import { supabase, supabaseAdmin } from "../config/supabase.js";
 import {
   resendVerificationEmail,
@@ -55,6 +54,10 @@ function mapUserRowToDto(row) {
         }
       : null,
   };
+}
+
+function generateVerificationCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 /* ============================================================
@@ -185,22 +188,24 @@ export async function register(req, res) {
   // ============================================================
   // 5) ENVOI FINAL
   // ============================================================
-  const verificationToken = nanoid(32);
+  const verificationCode = generateVerificationCode();
+  const codeExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
   const { error: tokenError } = await supabaseAdmin
     .from("users")
     .update({
-      email_verification_token: verificationToken,
+      email_verification_code: verificationCode,
+      email_verification_code_expires_at: codeExpiresAt.toISOString(),
       email_verified: false,
     })
     .eq("id", authUser.id);
 
   if (tokenError) {
-    console.error("[AUTH] token save error:", tokenError);
+    console.error("[AUTH] code save error:", tokenError);
   }
 
   try {
-    await sendVerificationEmail(authUser.email, verificationToken);
+    await sendVerificationEmail(authUser.email, verificationCode);
   } catch (emailError) {
     console.error("[AUTH] verification email error:", emailError);
   }
@@ -362,82 +367,138 @@ export async function logout(req, res) {
    VERIFY EMAIL
 ============================================================ */
 export async function verifyEmail(req, res) {
-  const { token } = req.body;
+  try {
+    const { email, code } = req.body;
 
-  if (!token) {
-    return res.status(400).json({ error: "Missing verification token" });
+    if (!email || !code) {
+      return res.status(400).json({ error: "Missing email or code" });
+    }
+
+    if (!/^\d{6}$/.test(code)) {
+      return res
+        .status(400)
+        .json({ error: "Invalid code format. Code must be 6 digits." });
+    }
+
+    const { data: user, error: userError } = await supabaseAdmin
+      .from("users")
+      .select(
+        "id, email, email_verified, email_verification_code, email_verification_code_expires_at"
+      )
+      .eq("email", email.toLowerCase())
+      .maybeSingle();
+
+    if (userError) {
+      console.error("❌ [AUTH] verifyEmail error:", userError);
+      return res.status(500).json({ error: "Database error" });
+    }
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (user.email_verified) {
+      return res.status(400).json({ error: "Email already verified" });
+    }
+
+    if (user.email_verification_code !== code) {
+      return res.status(400).json({ error: "Invalid verification code" });
+    }
+
+    if (user.email_verification_code_expires_at) {
+      const expiresAt = new Date(user.email_verification_code_expires_at);
+      if (expiresAt < new Date()) {
+        return res.status(400).json({
+          error: "Verification code has expired. Please request a new one.",
+        });
+      }
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("users")
+      .update({
+        email_verified: true,
+        email_verification_code: null,
+        email_verification_code_expires_at: null,
+      })
+      .eq("id", user.id);
+
+    if (updateError) {
+      console.error("❌ [AUTH] verifyEmail update error:", updateError);
+      return res.status(500).json({ error: "Could not verify email" });
+    }
+
+    console.log("✅ [AUTH] Email verified for:", user.email);
+
+    return res.json({
+      success: true,
+      message: "Email verified successfully",
+    });
+  } catch (err) {
+    console.error("❌ [AUTH] verifyEmail exception:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
-
-  const { data: user, error: userError } = await supabaseAdmin
-    .from("users")
-    .select("id, email, email_verified")
-    .eq("email_verification_token", token)
-    .maybeSingle();
-
-  if (userError || !user) {
-    return res.status(400).json({ error: "Invalid or expired token" });
-  }
-
-  if (user.email_verified) {
-    return res.status(400).json({ error: "Email already verified" });
-  }
-
-  const { error: updateError } = await supabaseAdmin
-    .from("users")
-    .update({
-      email_verified: true,
-      email_verification_token: null,
-    })
-    .eq("id", user.id);
-
-  if (updateError) {
-    return res.status(500).json({ error: "Could not verify email" });
-  }
-
-  return res.json({ success: true, message: "Email verified successfully" });
 }
 
 /* ============================================================
    RESEND VERIFICATION EMAIL
 ============================================================ */
-export async function resendVerification(req, res) {
-  const { email } = req.body;
+export async function resendVerificationEmailController(req, res) {
+  try {
+    const { email } = req.body;
 
-  if (!email) {
-    return res.status(400).json({ error: "Missing email" });
-  }
+    if (!email) {
+      return res.status(400).json({ error: "Missing email" });
+    }
 
-  const { data: user, error: userError } = await supabaseAdmin
-    .from("users")
-    .select("id, email, email_verified, email_verification_token")
-    .eq("email", email.toLowerCase())
-    .maybeSingle();
-
-  if (userError || !user) {
-    return res.status(404).json({ error: "User not found" });
-  }
-
-  if (user.email_verified) {
-    return res.status(400).json({ error: "Email already verified" });
-  }
-
-  const verificationToken = user.email_verification_token || nanoid(32);
-
-  if (!user.email_verification_token) {
-    const { error: tokenError } = await supabaseAdmin
+    const { data: user, error: userError } = await supabaseAdmin
       .from("users")
-      .update({ email_verification_token: verificationToken })
+      .select("id, email, email_verified")
+      .eq("email", email.toLowerCase())
+      .maybeSingle();
+
+    if (userError) {
+      console.error("❌ [AUTH] resendVerificationEmail error:", userError);
+      return res.status(500).json({ error: "Database error" });
+    }
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (user.email_verified) {
+      return res.status(400).json({ error: "Email already verified" });
+    }
+
+    const verificationCode = generateVerificationCode();
+    const codeExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    const { error: updateError } = await supabaseAdmin
+      .from("users")
+      .update({
+        email_verification_code: verificationCode,
+        email_verification_code_expires_at: codeExpiresAt.toISOString(),
+      })
       .eq("id", user.id);
 
-    if (tokenError) {
-      return res.status(500).json({ error: "Could not update verification token" });
+    if (updateError) {
+      console.error(
+        "❌ [AUTH] resendVerificationEmail code update error:",
+        updateError
+      );
+      return res.status(500).json({ error: "Could not update code" });
     }
-  }
 
-  try {
-    await resendVerificationEmail(user.email, verificationToken);
-    return res.json({ success: true, message: "Verification email sent" });
+    try {
+      await sendVerificationEmail(user.email, verificationCode);
+      console.log("✅ [AUTH] Resend verification code sent to:", user.email);
+      return res.json({ success: true, message: "Verification code sent" });
+    } catch (emailError) {
+      console.error("❌ [AUTH] Resend email error:", emailError);
+      return res.status(500).json({ error: "Could not send email" });
+    }
   } catch (err) {
-    return res.status(500).json({ error: "Could not send email" });
+    console.error("❌ [AUTH] resendVerificationEmail exception:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 }

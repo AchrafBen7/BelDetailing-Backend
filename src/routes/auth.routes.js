@@ -6,7 +6,7 @@ import {
   refreshToken,
   logout,
   verifyEmail,
-  resendVerification,
+  resendVerificationEmailController,
 } from "../controllers/auth.controller.js";
 import {
   loginWithApple,
@@ -21,7 +21,7 @@ router.post("/register", register);
 router.post("/login", login);
 router.post("/refresh", refreshToken);
 router.post("/verify-email", verifyEmail);
-router.post("/resend-verification", resendVerification);
+router.post("/resend-verification-email", resendVerificationEmailController);
 
 // === SOCIAL AUTH ===
 router.post("/apple", loginWithApple);
