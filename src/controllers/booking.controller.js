@@ -171,6 +171,8 @@ export async function createBooking(req, res) {
       payment_method,
       customer_address_lat,
       customer_address_lng,
+      transport_fee,
+      transport_distance_km,
     } = req.body;
 
     // 1) Fetch service
@@ -205,10 +207,27 @@ export async function createBooking(req, res) {
     const customerAddressLng =
       customer_address_lng != null ? Number(customer_address_lng) : null;
 
+    const payloadTransportFee =
+      transport_fee != null ? Number(transport_fee) : null;
+    const payloadTransportDistanceKm =
+      transport_distance_km != null ? Number(transport_distance_km) : null;
+
+    if (
+      payloadTransportFee != null &&
+      (!Number.isFinite(payloadTransportFee) || payloadTransportFee < 0)
+    ) {
+      return res.status(400).json({ error: "Invalid transport_fee" });
+    }
+
     let transportDistanceKm = null;
     let transportFee = 0;
 
-    if (
+    if (payloadTransportFee != null) {
+      transportFee = payloadTransportFee;
+      transportDistanceKm = Number.isFinite(payloadTransportDistanceKm)
+        ? payloadTransportDistanceKm
+        : null;
+    } else if (
       provider.transport_enabled &&
       providerLat != null &&
       providerLng != null &&
