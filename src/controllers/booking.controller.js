@@ -3,6 +3,7 @@ import {
   getBookingDetail,
   updateBookingService,
   updateBookingStatus,
+  cleanupExpiredBookings,
 } from "../services/booking.service.js";
 
 import {
@@ -944,5 +945,19 @@ export async function refundBooking(req, res) {
   } catch (err) {
     console.error("[BOOKINGS] refund error:", err);
     return res.status(500).json({ error: "Could not refund booking" });
+  }
+}
+
+export async function cleanupExpiredBookingsController(req, res) {
+  try {
+    const deletedCount = await cleanupExpiredBookings();
+    return res.json({
+      success: true,
+      deleted_count: deletedCount,
+      message: `Deleted ${deletedCount} expired bookings`,
+    });
+  } catch (err) {
+    console.error("[BOOKINGS] cleanup error:", err);
+    return res.status(500).json({ error: "Could not cleanup expired bookings" });
   }
 }

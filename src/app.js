@@ -27,6 +27,7 @@ import taxesRoutes from "./routes/taxes.routes.js";
 import orderRoutes from "./routes/order.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import utilsRoutes from "./routes/utils.routes.js";
+import cronRoutes from "./routes/cron.routes.js";
 const app = express();
 
 app.use(helmet());
@@ -76,6 +77,7 @@ app.use("/api/v1/taxes", taxesRoutes);
 app.use("/api/v1/orders", orderRoutes);
 app.use("/api/v1/notifications", notificationRoutes);
 app.use("/api/v1/utils", utilsRoutes);
+app.use("/api/v1/cron", cronRoutes);
 
 app.get("/metrics", metricsEndpoint);
 

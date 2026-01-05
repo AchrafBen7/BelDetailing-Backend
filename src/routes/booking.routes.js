@@ -17,6 +17,7 @@ import {
   counterPropose,
   acceptCounterProposal,
   refuseCounterProposal,
+  cleanupExpiredBookingsController,
 } from "../controllers/booking.controller.js";
 
 const router = Router();
@@ -37,5 +38,6 @@ router.post("/:id/complete", requireAuth, completeService);
 router.post("/:id/counter-propose", requireAuth, counterPropose);
 router.post("/:id/accept-counter-proposal", requireAuth, acceptCounterProposal);
 router.post("/:id/refuse-counter-proposal", requireAuth, refuseCounterProposal);
+router.delete("/expired", requireAuth, cleanupExpiredBookingsController);
 
 export default router;

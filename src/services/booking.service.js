@@ -1,5 +1,6 @@
 // src/services/booking.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { refundPayment } from "./payment.service.js";
 
 export async function getBookings({ userId, scope, status }) {
   let query = supabase.from("bookings").select("*");
@@ -104,4 +105,43 @@ export async function updateBookingStatus(id, newStatus) {
   if (error) throw error;
 
   return data ? true : false;
+}
+
+export async function cleanupExpiredBookings() {
+  const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+
+  const { data: expiredBookings, error: fetchError } = await supabase
+    .from("bookings")
+    .select("id, payment_intent_id, payment_status")
+    .eq("status", "pending")
+    .in("payment_status", ["preauthorized", "paid"])
+    .lt("created_at", sixHoursAgo);
+
+  if (fetchError) throw fetchError;
+  if (!expiredBookings || expiredBookings.length === 0) {
+    return 0;
+  }
+
+  for (const booking of expiredBookings) {
+    if (booking.payment_status === "paid" && booking.payment_intent_id) {
+      try {
+        await refundPayment(booking.payment_intent_id);
+      } catch (err) {
+        console.error(
+          `[CLEANUP] Failed to refund booking ${booking.id}:`,
+          err
+        );
+      }
+    }
+  }
+
+  const bookingIds = expiredBookings.map(booking => booking.id);
+  const { error: deleteError } = await supabase
+    .from("bookings")
+    .delete()
+    .in("id", bookingIds);
+
+  if (deleteError) throw deleteError;
+
+  return bookingIds.length;
 }
