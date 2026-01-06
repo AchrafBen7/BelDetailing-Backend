@@ -29,6 +29,7 @@ import notificationRoutes from "./routes/notification.routes.js";
 import utilsRoutes from "./routes/utils.routes.js";
 import cronRoutes from "./routes/cron.routes.js";
 import vatRoutes from "./routes/vat.routes.js";
+import chatRoutes from "./routes/chat.routes.js";
 const app = express();
 
 app.use(helmet());
@@ -80,6 +81,7 @@ app.use("/api/v1/notifications", notificationRoutes);
 app.use("/api/v1/utils", utilsRoutes);
 app.use("/api/v1/cron", cronRoutes);
 app.use("/api/v1/vat", vatRoutes);
+app.use("/api/v1/chat", chatRoutes);
 
 app.get("/metrics", metricsEndpoint);
 
