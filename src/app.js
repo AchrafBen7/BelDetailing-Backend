@@ -31,6 +31,8 @@ import cronRoutes from "./routes/cron.routes.js";
 import vatRoutes from "./routes/vat.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import googleReviewRoutes from "./routes/googleReview.routes.js";
+import portfolioRoutes from "./routes/portfolio.routes.js";
+import servicePhotosRoutes from "./routes/servicePhotos.routes.js";
 const app = express();
 
 app.use(helmet());
@@ -65,6 +67,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/profile", profileRoutes);
 
 app.use("/api/v1/providers", providerRoutes);
+app.use("/api/v1/providers", portfolioRoutes);
 app.use("/api/v1/bookings", bookingsRoutes);
 app.use("/api/v1/offers", offerRoutes);
 app.use("/api/v1/applications", applicationRoutes);
@@ -72,6 +75,7 @@ app.use("/api/v1/reviews", reviewRoutes);
 app.use("/api/v1/cities", cityRoutes);
 app.use("/api/v1/search", searchRoutes);
 app.use("/api/v1/service-categories", serviceCategoryRoutes);
+app.use("/api/v1/services", servicePhotosRoutes);
 app.use("/api/v1/media", mediaRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/stripe", stripeConnectRoutes);
