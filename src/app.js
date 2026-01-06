@@ -33,6 +33,7 @@ import chatRoutes from "./routes/chat.routes.js";
 import googleReviewRoutes from "./routes/googleReview.routes.js";
 import portfolioRoutes from "./routes/portfolio.routes.js";
 import servicePhotosRoutes from "./routes/servicePhotos.routes.js";
+import noShowRoutes from "./routes/noShow.routes.js";
 const app = express();
 
 app.use(helmet());
@@ -68,6 +69,7 @@ app.use("/api/v1/profile", profileRoutes);
 
 app.use("/api/v1/providers", providerRoutes);
 app.use("/api/v1/providers", portfolioRoutes);
+app.use("/api/v1/bookings", noShowRoutes);
 app.use("/api/v1/bookings", bookingsRoutes);
 app.use("/api/v1/offers", offerRoutes);
 app.use("/api/v1/applications", applicationRoutes);
