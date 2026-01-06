@@ -178,6 +178,7 @@ export async function createBooking(req, res) {
     const {
       provider_id,
       service_id,
+      service_ids,
       date,
       start_time,
       end_time,
@@ -187,19 +188,34 @@ export async function createBooking(req, res) {
       customer_address_lng,
     } = req.body;
 
-    // 1) Fetch service
-    const { data: service, error: serviceError } = await supabase
-      .from("services")
-      .select("*")
-      .eq("id", service_id)
-      .single();
+    let serviceIdsToBook = [];
 
-    if (serviceError || !service) {
-      return res.status(404).json({ error: "Service not found" });
+    if (Array.isArray(service_ids) && service_ids.length > 0) {
+      serviceIdsToBook = service_ids;
+    } else if (service_id) {
+      serviceIdsToBook = [service_id];
+    } else {
+      return res.status(400).json({ error: "Missing service_id or service_ids" });
     }
 
-    if (service.provider_id !== provider_id) {
-      return res.status(400).json({ error: "Service does not belong to this provider" });
+    // 1) Fetch services
+    const { data: services, error: servicesError } = await supabase
+      .from("services")
+      .select("*")
+      .in("id", serviceIdsToBook);
+
+    if (servicesError || !services || services.length === 0) {
+      return res.status(404).json({ error: "Services not found" });
+    }
+
+    const allFromSameProvider = services.every(
+      service => service.provider_id === provider_id
+    );
+
+    if (!allFromSameProvider) {
+      return res
+        .status(400)
+        .json({ error: "All services must belong to the same provider" });
     }
 
     // 2) Fetch provider info
@@ -209,8 +225,11 @@ export async function createBooking(req, res) {
       return res.status(404).json({ error: "Provider not found" });
     }
 
-    const servicePrice = service.price;
-    const currency = service.currency || "eur";
+    const servicesTotalPrice = services.reduce(
+      (sum, service) => sum + Number(service.price || 0),
+      0
+    );
+    const currency = services[0]?.currency || "eur";
 
     const providerLat = provider.lat;
     const providerLng = provider.lng;
@@ -240,151 +259,176 @@ export async function createBooking(req, res) {
       transportFee = calculateTransportFeeByZone(transportDistanceKm);
     }
 
-    const totalPrice = servicePrice + transportFee;
+    const totalPrice = servicesTotalPrice + transportFee;
     const paymentMethod = payment_method || "card";
+    const serviceNames = services.map(service => service.name).join(", ");
 
     // 3) Create booking (WITHOUT payment yet)
     // 1) Insert booking
-const { data: inserted, error: bookingError } = await supabase
-  .from("bookings")
-  .insert({
-    provider_id,
-    customer_id: customerId,
-    service_id,
+    const { data: inserted, error: bookingError } = await supabase
+      .from("bookings")
+      .insert({
+        provider_id,
+        customer_id: customerId,
+        service_id: serviceIdsToBook[0],
 
-    provider_name: provider.display_name,
-    service_name: service.name,
-    price: totalPrice,
-    currency,
+        provider_name: provider.display_name,
+        service_name: serviceNames,
+        price: totalPrice,
+        currency,
 
-    date,
-    start_time,
-    end_time,
-    address,
+        date,
+        start_time,
+        end_time,
+        address,
 
-    status: "pending",
-    payment_status: "pending",
-    payment_intent_id: null,
-    payment_method: paymentMethod,
-    deposit_amount: null,
-    deposit_payment_intent_id: null,
-    commission_rate: COMMISSION_RATE,
-    invoice_sent: false,
-    provider_banner_url: provider.banner_url ?? null,
-    transport_distance_km: transportDistanceKm,
-    transport_fee: transportFee,
-    customer_address_lat: customerAddressLat,
-    customer_address_lng: customerAddressLng,
-  })
-  .select(`
-  id,
-  provider_id,
-  customer_id,
-  service_id,
-  provider_name,
-  service_name,
-  price,
-  transport_distance_km,
-  transport_fee,
-  customer_address_lat,
-  customer_address_lng,
-  currency,
-  date,
-  start_time,
-  end_time,
-  address,
-  status,
-  payment_status,
-  payment_intent_id,
-  payment_method,
-  deposit_amount,
-  deposit_payment_intent_id,
-  commission_rate,
-  invoice_sent,
-  provider_banner_url,
-  created_at
-  `)
-.single();
+        status: "pending",
+        payment_status: "pending",
+        payment_intent_id: null,
+        payment_method: paymentMethod,
+        deposit_amount: null,
+        deposit_payment_intent_id: null,
+        commission_rate: COMMISSION_RATE,
+        invoice_sent: false,
+        provider_banner_url: provider.banner_url ?? null,
+        transport_distance_km: transportDistanceKm,
+        transport_fee: transportFee,
+        customer_address_lat: customerAddressLat,
+        customer_address_lng: customerAddressLng,
+      })
+      .select(`
+        id,
+        provider_id,
+        customer_id,
+        service_id,
+        provider_name,
+        service_name,
+        price,
+        transport_distance_km,
+        transport_fee,
+        customer_address_lat,
+        customer_address_lng,
+        currency,
+        date,
+        start_time,
+        end_time,
+        address,
+        status,
+        payment_status,
+        payment_intent_id,
+        payment_method,
+        deposit_amount,
+        deposit_payment_intent_id,
+        commission_rate,
+        invoice_sent,
+        provider_banner_url,
+        created_at
+      `)
+      .single();
 
-if (bookingError) throw bookingError;
+    if (bookingError) throw bookingError;
 
-// 2) Fetch customer for payment intent
-const { data: customer, error: customerError } = await supabase
-  .from("users")
-  .select("id, email, phone, stripe_customer_id")
-  .eq("id", customerId)
-  .single();
+    const bookingServicesData = services.map(service => ({
+      booking_id: inserted.id,
+      service_id: service.id,
+      service_name: service.name,
+      service_price: service.price,
+    }));
 
-if (customerError || !customer) {
-  return res.status(404).json({ error: "Customer not found" });
-}
+    const { error: bookingServicesError } = await supabase
+      .from("booking_services")
+      .insert(bookingServicesData);
 
-let intent = null;
-if (paymentMethod === "cash") {
-  const depositAmount = Math.round(totalPrice * 0.2 * 100) / 100;
-  intent = await createPaymentIntent({
-    amount: depositAmount,
-    currency,
-    user: customer,
-  });
-} else {
-  intent = await createPaymentIntent({
-    amount: totalPrice,
-    currency,
-    user: customer,
-  });
-}
+    if (bookingServicesError) {
+      console.error(
+        "[BOOKINGS] booking_services insert error:",
+        bookingServicesError
+      );
+      throw bookingServicesError;
+    }
 
-// 4) Update booking with payment intent
-const { data: updatedBooking, error: updateErr } = await supabase
-  .from("bookings")
-  .update({
-    payment_intent_id: paymentMethod === "cash" ? null : intent.id,
-    deposit_payment_intent_id: paymentMethod === "cash" ? intent.id : null,
-    deposit_amount: paymentMethod === "cash" ? intent.amount : null,
-    payment_status: paymentMethod === "cash" ? "pending" : "preauthorized"
-  })
-  .eq("id", inserted.id)
-.select(`
-  id,
-  provider_id,
-  customer_id,
-  service_id,
-  provider_name,
-  service_name,
-  price,
-  transport_distance_km,
-  transport_fee,
-  customer_address_lat,
-  customer_address_lng,
-  currency,
-  date,
-  start_time,
-  end_time,
-  address,
-  status,
-  payment_status,
-  payment_intent_id,
-  payment_method,
-  deposit_amount,
-  deposit_payment_intent_id,
-  commission_rate,
-  invoice_sent,
-  provider_banner_url,
-  created_at
-  `
-)
-.single();
+    // 2) Fetch customer for payment intent
+    const { data: customer, error: customerError } = await supabase
+      .from("users")
+      .select("id, email, phone, stripe_customer_id")
+      .eq("id", customerId)
+      .single();
 
-if (updateErr) throw updateErr;
+    if (customerError || !customer) {
+      return res.status(404).json({ error: "Customer not found" });
+    }
 
-// 4) Return the updated booking (NEVER the old one)
-return res.status(201).json({
-  data: {
-    booking: updatedBooking,
-    clientSecret: intent?.clientSecret ?? null
-  }
-});
+    let intent = null;
+    if (paymentMethod === "cash") {
+      const depositAmount = Math.round(totalPrice * 0.2 * 100) / 100;
+      intent = await createPaymentIntent({
+        amount: depositAmount,
+        currency,
+        user: customer,
+      });
+    } else {
+      intent = await createPaymentIntent({
+        amount: totalPrice,
+        currency,
+        user: customer,
+      });
+    }
+
+    // 4) Update booking with payment intent
+    const { data: updatedBooking, error: updateErr } = await supabase
+      .from("bookings")
+      .update({
+        payment_intent_id: paymentMethod === "cash" ? null : intent.id,
+        deposit_payment_intent_id: paymentMethod === "cash" ? intent.id : null,
+        deposit_amount: paymentMethod === "cash" ? intent.amount : null,
+        payment_status: paymentMethod === "cash" ? "pending" : "preauthorized",
+      })
+      .eq("id", inserted.id)
+      .select(`
+        id,
+        provider_id,
+        customer_id,
+        service_id,
+        provider_name,
+        service_name,
+        price,
+        transport_distance_km,
+        transport_fee,
+        customer_address_lat,
+        customer_address_lng,
+        currency,
+        date,
+        start_time,
+        end_time,
+        address,
+        status,
+        payment_status,
+        payment_intent_id,
+        payment_method,
+        deposit_amount,
+        deposit_payment_intent_id,
+        commission_rate,
+        invoice_sent,
+        provider_banner_url,
+        created_at
+      `)
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    // 4) Return the updated booking (NEVER the old one)
+    return res.status(201).json({
+      data: {
+        booking: updatedBooking,
+        clientSecret: intent?.clientSecret ?? null,
+        services: services.map(service => ({
+          id: service.id,
+          name: service.name,
+          price: service.price,
+          durationMinutes: service.duration_minutes,
+        })),
+      },
+    });
 
 
 

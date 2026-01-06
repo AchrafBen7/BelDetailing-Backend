@@ -28,7 +28,22 @@ export async function getBookings({ userId, scope, status }) {
   const { data, error } = await query.order("created_at", { ascending: false });
   if (error) throw error;
 
-  return data;
+  const bookingsWithServices = await Promise.all(
+    data.map(async booking => {
+      const { data: services } = await supabase
+        .from("booking_services")
+        .select("service_id, service_name, service_price")
+        .eq("booking_id", booking.id);
+
+      return {
+        ...booking,
+        services: services || [],
+        servicesCount: services?.length || 0,
+      };
+    })
+  );
+
+  return bookingsWithServices;
 }
 
 export async function getBookingDetail(id) {
@@ -39,7 +54,37 @@ export async function getBookingDetail(id) {
     .single();
 
   if (error) throw error;
-  return data;
+  if (!data) return null;
+
+  const { data: bookingServices, error: servicesError } = await supabase
+    .from("booking_services")
+    .select(
+      `
+        service_id,
+        service_name,
+        service_price,
+        services (
+          id,
+          name,
+          category,
+          price,
+          duration_minutes,
+          description,
+          image_url
+        )
+      `
+    )
+    .eq("booking_id", id);
+
+  if (servicesError) {
+    console.warn("[BOOKINGS] Error fetching booking services:", servicesError);
+  }
+
+  return {
+    ...data,
+    services: bookingServices || [],
+    servicesCount: bookingServices?.length || 0,
+  };
 }
 
 export async function createBookingService(payload, customer) {
