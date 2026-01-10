@@ -11,6 +11,7 @@ import {
   refundPayment,
   capturePayment,
 } from "../services/payment.service.js";
+import { sendNotificationToUser } from "../services/onesignal.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 const COMMISSION_RATE = 0.10;
@@ -416,6 +417,35 @@ export async function createBooking(req, res) {
 
     if (updateErr) throw updateErr;
 
+    // ✅ ENVOYER NOTIFICATION AU PROVIDER (nouvelle réservation créée)
+    try {
+      // Récupérer les infos du customer pour le message (customer est déjà récupéré plus haut)
+      const { data: customerProfile } = await supabase
+        .from("customer_profiles")
+        .select("first_name, last_name")
+        .eq("user_id", customerId)
+        .maybeSingle();
+      
+      const customerName = customerProfile
+        ? `${customerProfile.first_name || ""} ${customerProfile.last_name || ""}`.trim() || customer.email?.split("@")[0] || "Un client"
+        : customer.email?.split("@")[0] || "Un client";
+
+      await sendNotificationToUser({
+        userId: provider_id, // Provider reçoit la notification
+        title: "Nouvelle demande de réservation",
+        message: `${customerName} souhaite réserver ${serviceNames}`,
+        data: {
+          type: "booking_created",
+          booking_id: updatedBooking.id,
+          customer_id: customerId,
+          provider_id: provider_id,
+        },
+      });
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+      // ⚠️ Ne pas bloquer la création de booking si la notification échoue
+    }
+
     // 4) Return the updated booking (NEVER the old one)
     return res.status(201).json({
       data: {
@@ -474,6 +504,23 @@ export async function startService(req, res) {
       status: "started",
       progress,
     });
+
+    // ✅ ENVOYER NOTIFICATION AU CUSTOMER (service démarré)
+    try {
+      await sendNotificationToUser({
+        userId: booking.customer_id, // Customer reçoit la notification
+        title: "Service démarré",
+        message: `${booking.provider_name || "Le prestataire"} a commencé le service ${booking.service_name || ""}`,
+        data: {
+          type: "service_started",
+          booking_id: bookingId,
+          provider_id: booking.provider_id,
+        },
+      });
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+      // ⚠️ Ne pas bloquer le démarrage si la notification échoue
+    }
 
     return res.json({ data: updated });
   } catch (err) {
@@ -556,6 +603,30 @@ export async function updateProgress(req, res) {
       progress: updatedProgress,
     });
 
+    // ✅ ENVOYER NOTIFICATION AU CUSTOMER (progression service)
+    // Notifier seulement pour les étapes importantes (25%, 50%, 75%, 100%)
+    try {
+      const shouldNotify = [25, 50, 75, 100].includes(totalProgress);
+      if (shouldNotify) {
+        const stepName = steps[stepIndex]?.name || "Étape en cours";
+        await sendNotificationToUser({
+          userId: booking.customer_id, // Customer reçoit la notification
+          title: "Mise à jour du service",
+          message: `${stepName} — Avancement: ${totalProgress}%`,
+          data: {
+            type: "progress_update",
+            booking_id: bookingId,
+            progress: totalProgress,
+            step_name: stepName,
+            provider_id: booking.provider_id,
+          },
+        });
+      }
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+      // ⚠️ Ne pas bloquer la mise à jour si la notification échoue
+    }
+
     return res.json({ data: updated });
   } catch (err) {
     console.error("[BOOKINGS] updateProgress error:", err);
@@ -610,6 +681,23 @@ export async function completeService(req, res) {
         current_step_index: progress.steps.length - 1,
       },
     });
+
+    // ✅ ENVOYER NOTIFICATION AU CUSTOMER (service terminé)
+    try {
+      await sendNotificationToUser({
+        userId: booking.customer_id, // Customer reçoit la notification
+        title: "Service terminé",
+        message: `${booking.provider_name || "Le prestataire"} a terminé le service ${booking.service_name || ""}`,
+        data: {
+          type: "service_completed",
+          booking_id: bookingId,
+          provider_id: booking.provider_id,
+        },
+      });
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+      // ⚠️ Ne pas bloquer la complétion si la notification échoue
+    }
 
     return res.json({ data: updated });
   } catch (err) {
@@ -674,6 +762,41 @@ export async function cancelBooking(req, res) {
     }
 
     const ok = await updateBookingStatus(bookingId, "cancelled");
+    
+    // ✅ ENVOYER NOTIFICATION À L'AUTRE PARTIE (réservation annulée)
+    try {
+      if (isCustomer) {
+        // Customer annule → Notifier le provider
+        await sendNotificationToUser({
+          userId: booking.provider_id,
+          title: "Réservation annulée",
+          message: "Un client a annulé sa réservation",
+          data: {
+            type: "booking_cancelled",
+            booking_id: bookingId,
+            cancelled_by: "customer",
+            customer_id: booking.customer_id,
+          },
+        });
+      } else if (isProvider) {
+        // Provider annule → Notifier le customer
+        await sendNotificationToUser({
+          userId: booking.customer_id,
+          title: "Réservation annulée",
+          message: `${booking.provider_name || "Le prestataire"} a annulé votre réservation`,
+          data: {
+            type: "booking_cancelled",
+            booking_id: bookingId,
+            cancelled_by: "provider",
+            provider_id: booking.provider_id,
+          },
+        });
+      }
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+      // ⚠️ Ne pas bloquer l'annulation si la notification échoue
+    }
+
     return res.json({ success: ok });
   } catch (err) {
     console.error("[BOOKINGS] cancel error:", err);
@@ -872,6 +995,23 @@ export async function confirmBooking(req, res) {
 
     if (updateErr) throw updateErr;
 
+    // ✅ ENVOYER NOTIFICATION AU CUSTOMER (réservation confirmée)
+    try {
+      await sendNotificationToUser({
+        userId: booking.customer_id, // Customer reçoit la notification
+        title: "Rendez-vous confirmé",
+        message: `${booking.provider_name || "Le prestataire"} a confirmé votre réservation`,
+        data: {
+          type: "booking_confirmed",
+          booking_id: bookingId,
+          provider_id: booking.provider_id,
+        },
+      });
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+      // ⚠️ Ne pas bloquer la confirmation si la notification échoue
+    }
+
     return res.json({
       success: true,
       data: updated,
@@ -932,6 +1072,23 @@ export async function declineBooking(req, res) {
       payment_status: booking.payment_intent_id ? "refunded" : "pending"
     });
 
+    // ✅ ENVOYER NOTIFICATION AU CUSTOMER (réservation refusée)
+    try {
+      await sendNotificationToUser({
+        userId: booking.customer_id, // Customer reçoit la notification
+        title: "Rendez-vous refusé",
+        message: `${booking.provider_name || "Le prestataire"} a refusé votre demande de réservation`,
+        data: {
+          type: "booking_declined",
+          booking_id: bookingId,
+          provider_id: booking.provider_id,
+        },
+      });
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+      // ⚠️ Ne pas bloquer le refus si la notification échoue
+    }
+
     return res.json({ success: true, data: updated });
   } catch (err) {
     console.error("[BOOKINGS] decline error:", err);
@@ -983,6 +1140,25 @@ export async function refundBooking(req, res) {
       status: "cancelled",
       payment_status: "refunded"
     });
+
+    // ✅ ENVOYER NOTIFICATION AU CUSTOMER (remboursement effectué)
+    try {
+      const refundAmount = booking.price || 0;
+      await sendNotificationToUser({
+        userId: booking.customer_id, // Customer reçoit la notification
+        title: "Remboursement effectué",
+        message: `Votre remboursement de ${refundAmount.toFixed(2)}€ a été effectué`,
+        data: {
+          type: "refund_processed",
+          booking_id: bookingId,
+          amount: refundAmount,
+          provider_id: booking.provider_id,
+        },
+      });
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+      // ⚠️ Ne pas bloquer le remboursement si la notification échoue
+    }
 
     return res.json({ success: true, data: updated });
 

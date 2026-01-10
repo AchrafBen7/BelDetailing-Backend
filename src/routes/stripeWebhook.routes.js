@@ -2,6 +2,7 @@
 import express from "express";
 import Stripe from "stripe";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { sendNotificationToUser } from "../services/onesignal.service.js";
 
 const router = express.Router();
 
@@ -78,12 +79,15 @@ router.post(
         case "payment_intent.succeeded": {
           const intent = event.data.object;
           const bookingId = intent.metadata?.bookingId;
+          const userId = intent.metadata?.userId ?? null;
+          const amount = intent.amount / 100;
+          const currency = intent.currency;
 
           await supabase.from("payment_transactions").insert({
-            user_id: intent.metadata?.userId ?? null,
+            user_id: userId,
             stripe_object_id: intent.id,
-            amount: intent.amount / 100,
-            currency: intent.currency,
+            amount: amount,
+            currency: currency,
             status: intent.status,
             type: "payment",
           });
@@ -103,12 +107,33 @@ router.post(
             })
             .eq("id", bookingId);
 
+          // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement réussi)
+          try {
+            if (userId) {
+              await sendNotificationToUser({
+                userId: userId, // Customer reçoit la notification
+                title: "Paiement confirmé",
+                message: `Votre paiement de ${amount.toFixed(2)}${currency === "eur" ? "€" : currency.toUpperCase()} a été confirmé`,
+                data: {
+                  type: "payment_succeeded",
+                  booking_id: bookingId,
+                  transaction_id: intent.id,
+                  amount: amount,
+                },
+              });
+            }
+          } catch (notifError) {
+            console.error("[WEBHOOK] Notification send failed:", notifError);
+            // ⚠️ Ne pas bloquer le webhook si la notification échoue
+          }
+
           break;
         }
 
         case "payment_intent.payment_failed": {
           const intent = event.data.object;
           const bookingId = intent.metadata?.bookingId;
+          const userId = intent.metadata?.userId ?? null;
 
           if (!bookingId) {
             console.log("payment_intent.failed (no bookingId), skipping");
@@ -123,6 +148,25 @@ router.post(
               payment_status: "failed",
             })
             .eq("id", bookingId);
+
+          // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement échoué)
+          try {
+            if (userId) {
+              await sendNotificationToUser({
+                userId: userId, // Customer reçoit la notification
+                title: "Paiement échoué",
+                message: "Votre paiement a échoué. Veuillez réessayer.",
+                data: {
+                  type: "payment_failed",
+                  booking_id: bookingId,
+                  transaction_id: intent.id,
+                },
+              });
+            }
+          } catch (notifError) {
+            console.error("[WEBHOOK] Notification send failed:", notifError);
+            // ⚠️ Ne pas bloquer le webhook si la notification échoue
+          }
 
           break;
         }
@@ -149,17 +193,19 @@ case "setup_intent.succeeded": {
 }
         case "refund.succeeded": {
           const refund = event.data.object;
+          const paymentIntentId = refund.payment_intent;
+          const refundAmount = refund.amount / 100;
+          const currency = refund.currency;
 
           await supabase.from("payment_transactions").insert({
             user_id: refund.metadata?.userId ?? null,
             stripe_object_id: refund.id,
-            amount: -(refund.amount / 100),
-            currency: refund.currency,
+            amount: -refundAmount,
+            currency: currency,
             status: refund.status,
             type: "refund",
           });
 
-          const paymentIntentId = refund.payment_intent;
           if (!paymentIntentId) {
             console.log("refund event without payment_intent, skipping");
             break;
@@ -169,6 +215,13 @@ case "setup_intent.succeeded": {
             `💸 Refund detected for payment_intent ${paymentIntentId}`
           );
 
+          // Récupérer le booking pour connaître le customer_id
+          const { data: booking } = await supabase
+            .from("bookings")
+            .select("id, customer_id")
+            .eq("payment_intent_id", paymentIntentId)
+            .maybeSingle();
+
           await supabase
             .from("bookings")
             .update({
@@ -177,12 +230,33 @@ case "setup_intent.succeeded": {
             })
             .eq("payment_intent_id", paymentIntentId);
 
+          // ✅ ENVOYER NOTIFICATION AU CUSTOMER (remboursement effectué)
+          try {
+            const userId = booking?.customer_id || refund.metadata?.userId;
+            if (userId) {
+              await sendNotificationToUser({
+                userId: userId, // Customer reçoit la notification
+                title: "Remboursement effectué",
+                message: `Votre remboursement de ${refundAmount.toFixed(2)}${currency === "eur" ? "€" : currency.toUpperCase()} a été effectué`,
+                data: {
+                  type: "refund_processed",
+                  booking_id: booking?.id ?? null,
+                  transaction_id: refund.id,
+                  amount: refundAmount,
+                },
+              });
+            }
+          } catch (notifError) {
+            console.error("[WEBHOOK] Notification send failed:", notifError);
+            // ⚠️ Ne pas bloquer le webhook si la notification échoue
+          }
+
           break;
         }
 
         case "charge.refunded":
         case "charge.refund.updated": {
-          // Selon l’event que tu actives
+          // Selon l'event que tu actives
           const chargeOrRefund = event.data.object;
           const paymentIntentId = chargeOrRefund.payment_intent;
 
@@ -195,6 +269,17 @@ case "setup_intent.succeeded": {
             `💸 Refund detected for payment_intent ${paymentIntentId}`
           );
 
+          // Récupérer le booking pour connaître le customer_id
+          const { data: booking } = await supabase
+            .from("bookings")
+            .select("id, customer_id, price")
+            .eq("payment_intent_id", paymentIntentId)
+            .maybeSingle();
+
+          const refundAmount = chargeOrRefund.amount_refunded 
+            ? chargeOrRefund.amount_refunded / 100 
+            : (booking?.price || 0);
+
           await supabase
             .from("bookings")
             .update({
@@ -202,6 +287,26 @@ case "setup_intent.succeeded": {
               status: "cancelled", // ou "refunded" selon ta logique
             })
             .eq("payment_intent_id", paymentIntentId);
+
+          // ✅ ENVOYER NOTIFICATION AU CUSTOMER (remboursement effectué)
+          try {
+            if (booking?.customer_id) {
+              await sendNotificationToUser({
+                userId: booking.customer_id, // Customer reçoit la notification
+                title: "Remboursement effectué",
+                message: `Votre remboursement de ${refundAmount.toFixed(2)}€ a été effectué`,
+                data: {
+                  type: "refund_processed",
+                  booking_id: booking.id,
+                  transaction_id: chargeOrRefund.id,
+                  amount: refundAmount,
+                },
+              });
+            }
+          } catch (notifError) {
+            console.error("[WEBHOOK] Notification send failed:", notifError);
+            // ⚠️ Ne pas bloquer le webhook si la notification échoue
+          }
 
           break;
         }

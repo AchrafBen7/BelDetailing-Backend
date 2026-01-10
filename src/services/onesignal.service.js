@@ -13,6 +13,23 @@ function ensureConfigured() {
   }
 }
 
+/**
+ * ⚠️ DÉPRÉCIÉ pour iOS - Utilisé uniquement pour compatibilité Android si nécessaire.
+ * 
+ * Pour iOS :
+ * - OneSignal SDK iOS fait automatiquement le registerDevice lors de OneSignal.initialize()
+ * - OneSignal.login(userId) associe automatiquement external_user_id
+ * - AUCUN appel backend nécessaire
+ * 
+ * Pour Android :
+ * - Généralement le SDK Android fait aussi le registerDevice automatiquement
+ * - Cette fonction peut servir si tu veux forcer un registerDevice côté backend
+ * 
+ * @param {string} userId - User ID de votre backend (devient external_user_id dans OneSignal)
+ * @param {string} token - Device token (APNs pour iOS, FCM pour Android)
+ * @param {string} platform - "ios" ou "android"
+ * @returns {Promise<Object>} OneSignal Player object
+ */
 export async function registerDevice({ userId, token, platform = "ios" }) {
   ensureConfigured();
 

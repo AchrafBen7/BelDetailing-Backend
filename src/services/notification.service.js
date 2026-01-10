@@ -1,6 +1,5 @@
 // src/services/notification.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
-import { registerDevice } from "./onesignal.service.js";
 
 export async function getNotifications(userId, { limit, unreadOnly } = {}) {
   let query = supabase
@@ -33,15 +32,36 @@ export async function markNotificationAsRead(notificationId, userId) {
   return true;
 }
 
-export async function subscribeDeviceToken(userId, deviceToken, platform = "ios") {
-  if (!deviceToken) {
-    throw new Error("Missing device token");
+/**
+ * Enregistre un device token (Player ID) dans la base de données pour référence.
+ * 
+ * ⚠️ IMPORTANT : Cette fonction est OPTIONNELLE pour iOS.
+ * 
+ * OneSignal SDK iOS fait automatiquement :
+ * 1. Le registerDevice (via OneSignal.initialize)
+ * 2. L'association avec external_user_id (via OneSignal.login(userId))
+ * 
+ * Cette fonction sert uniquement à :
+ * - Garder une référence locale du token dans device_tokens (pour logs/débogage)
+ * - Compatibilité avec Android si besoin (Android peut nécessiter un appel manuel)
+ * 
+ * @param {string} userId - User ID de votre backend (devient external_user_id dans OneSignal)
+ * @param {string} playerId - OneSignal Player ID (identifier) ou APNs Device Token
+ * @param {string} platform - "ios" ou "android"
+ * @returns {Promise<boolean>}
+ */
+export async function subscribeDeviceToken(userId, playerId, platform = "ios") {
+  if (!playerId) {
+    throw new Error("Missing player ID");
   }
 
-  const actualToken = deviceToken.startsWith("device-")
-    ? deviceToken.replace("device-", "")
-    : deviceToken;
+  const actualToken = playerId.startsWith("player-")
+    ? playerId.replace("player-", "")
+    : playerId.startsWith("device-")
+    ? playerId.replace("device-", "")
+    : playerId;
 
+  // ✅ Enregistrer le token dans la DB pour référence locale (optionnel)
   const { error } = await supabase
     .from("device_tokens")
     .upsert(
@@ -55,6 +75,15 @@ export async function subscribeDeviceToken(userId, deviceToken, platform = "ios"
     );
 
   if (error) throw error;
-  await registerDevice({ userId, token: actualToken, platform });
+  
+  // ⚠️ NOTE : On ne fait PAS d'appel à registerDevice() ici car :
+  // - iOS : OneSignal SDK fait automatiquement registerDevice + OneSignal.login(userId) associe external_user_id
+  // - Android : Si besoin, on peut appeler registerDevice manuellement, mais généralement le SDK le fait aussi
+  // 
+  // Si tu veux forcer un registerDevice pour Android, décommenter :
+  // if (platform === "android") {
+  //   await registerDevice({ userId, token: actualToken, platform });
+  // }
+  
   return true;
 }
