@@ -11,7 +11,7 @@ import {
   refundPayment,
   capturePayment,
 } from "../services/payment.service.js";
-import { sendNotificationToUser } from "../services/onesignal.service.js";
+import { sendNotificationToUser, sendNotificationWithDeepLink } from "../services/onesignal.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 const COMMISSION_RATE = 0.10;
@@ -419,6 +419,11 @@ export async function createBooking(req, res) {
 
     // ✅ ENVOYER NOTIFICATION AU PROVIDER (nouvelle réservation créée)
     try {
+      // ⚠️ IMPORTANT : OneSignal utilise external_user_id qui correspond au user_id (users.id)
+      // provider.user_id = le vrai ID de l'utilisateur dans la table users
+      // provider_id peut être provider_profiles.id ou user_id selon le contexte
+      const providerUserId = provider.user_id || provider_id;
+
       // Récupérer les infos du customer pour le message (customer est déjà récupéré plus haut)
       const { data: customerProfile } = await supabase
         .from("customer_profiles")
@@ -430,16 +435,14 @@ export async function createBooking(req, res) {
         ? `${customerProfile.first_name || ""} ${customerProfile.last_name || ""}`.trim() || customer.email?.split("@")[0] || "Un client"
         : customer.email?.split("@")[0] || "Un client";
 
-      await sendNotificationToUser({
-        userId: provider_id, // Provider reçoit la notification
+      // ✅ Utiliser sendNotificationWithDeepLink pour améliorer le routing iOS
+      await sendNotificationWithDeepLink({
+        userId: providerUserId, // ✅ Utiliser user_id pour OneSignal (external_user_id)
         title: "Nouvelle demande de réservation",
         message: `${customerName} souhaite réserver ${serviceNames}`,
-        data: {
-          type: "booking_created",
-          booking_id: updatedBooking.id,
-          customer_id: customerId,
-          provider_id: provider_id,
-        },
+        type: "booking_created",
+        id: updatedBooking.id.toString(),
+        // Deep link automatique: beldetailing://booking_created/{booking_id}
       });
     } catch (notifError) {
       console.error("[BOOKINGS] Notification send failed:", notifError);
