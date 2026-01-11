@@ -4,6 +4,10 @@ import jwksClient from "jwks-rsa";
 
 const APPLE_BUNDLE_ID = process.env.APPLE_BUNDLE_ID;
 
+if (!APPLE_BUNDLE_ID) {
+  console.error("⚠️ APPLE_BUNDLE_ID environment variable is not set");
+}
+
 // Client JWKS pour récupérer les clés publiques Apple
 const client = jwksClient({
   jwksUri: "https://appleid.apple.com/auth/keys",
@@ -30,6 +34,14 @@ function getAppleKey(header, callback) {
  * @returns {Promise<{userId: string, emailFromToken: string, emailVerified: boolean}>}
  */
 export async function verifyAppleToken({ identityToken }) {
+  if (!APPLE_BUNDLE_ID) {
+    throw new Error("APPLE_BUNDLE_ID environment variable is not set");
+  }
+
+  if (!identityToken) {
+    throw new Error("identityToken is required");
+  }
+
   return new Promise((resolve, reject) => {
     jwt.verify(
       identityToken,
