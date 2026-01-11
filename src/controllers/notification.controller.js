@@ -3,6 +3,7 @@ import {
   getNotifications,
   markNotificationAsRead,
   subscribeDeviceToken,
+  deleteNotification,
 } from "../services/notification.service.js";
 
 export async function listNotifications(req, res) {
@@ -71,5 +72,16 @@ export async function subscribeToTopic(req, res) {
   } catch (err) {
     console.error("[NOTIFICATIONS] subscribe error:", err);
     return res.status(500).json({ error: "Could not subscribe" });
+  }
+}
+
+export async function deleteNotificationController(req, res) {
+  try {
+    const { id } = req.params;
+    await deleteNotification(id, req.user.id);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[NOTIFICATIONS] delete error:", err);
+    return res.status(500).json({ error: "Could not delete notification" });
   }
 }

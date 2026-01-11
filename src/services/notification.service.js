@@ -33,6 +33,23 @@ export async function markNotificationAsRead(notificationId, userId) {
 }
 
 /**
+ * Supprime une notification
+ * @param {string} notificationId - ID de la notification
+ * @param {string} userId - User ID (pour vérifier la propriété)
+ * @returns {Promise<boolean>}
+ */
+export async function deleteNotification(notificationId, userId) {
+  const { error } = await supabase
+    .from("notifications")
+    .delete()
+    .eq("id", notificationId)
+    .eq("user_id", userId);
+
+  if (error) throw error;
+  return true;
+}
+
+/**
  * Enregistre un device token (Player ID) dans la base de données pour référence.
  * 
  * ⚠️ IMPORTANT : Cette fonction est OPTIONNELLE pour iOS.
