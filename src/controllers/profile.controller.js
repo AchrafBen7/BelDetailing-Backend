@@ -185,6 +185,7 @@ export async function updateProfile(req, res) {
       services,
       transportPricePerKm,
       transportEnabled,
+      serviceArea, // ✅ Zone d'intervention (JSON)
     } = providerProfile;
 
     const { error: providerError } = await supabase
@@ -202,6 +203,7 @@ export async function updateProfile(req, res) {
           services,
           transport_price_per_km: transportPricePerKm,
           transport_enabled: transportEnabled,
+          service_area: serviceArea, // ✅ Zone d'intervention (JSON)
         },
         { onConflict: "user_id" }
       );

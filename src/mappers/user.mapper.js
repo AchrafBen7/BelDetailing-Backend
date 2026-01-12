@@ -81,6 +81,7 @@ export function mapUserRowToDto(row) {
           bannerUrl: cleanNull(p.banner_url),
           transportPricePerKm: cleanNull(p.transport_price_per_km),
           transportEnabled: p.transport_enabled ?? false,
+          serviceArea: p.service_area ?? null, // ✅ Zone d'intervention (JSON)
         }
       : null,
   };

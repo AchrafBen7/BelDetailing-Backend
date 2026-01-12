@@ -61,6 +61,7 @@ function mapProviderRow(row) {
 
     teamSize: row.team_size ?? 1,
     yearsOfExperience: row.years_of_experience ?? 0,
+    serviceArea: row.service_area ?? null, // ✅ Zone d'intervention (JSON)
   };
 }
 
