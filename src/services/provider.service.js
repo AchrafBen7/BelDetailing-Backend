@@ -311,7 +311,7 @@ export async function createProviderService(userId, service) {
     console.error("[SERVICE] Stripe product creation failed:", stripeError);
 
     // ❗ Très important :
-    // On ne bloque JAMAIS la création d’un service si Stripe tombe
+    // On ne bloque JAMAIS la création d'un service si Stripe tombe
     return {
       ...data,
       stripe_product_id: null,
@@ -319,6 +319,58 @@ export async function createProviderService(userId, service) {
       stripeError: true,
     };
   }
+}
+
+// 🟦 Supprimer un service d'un prestataire
+export async function deleteProviderService(serviceId, userId) {
+  // 1) Vérifier que le provider existe
+  const { data: provider, error: providerError } = await supabase
+    .from("provider_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (providerError) throw providerError;
+  if (!provider) {
+    const err = new Error("Provider profile not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const providerProfileId = provider.id ?? provider.user_id;
+
+  // 2) Vérifier que le service appartient à ce provider
+  const { data: service, error: serviceError } = await supabase
+    .from("services")
+    .select("id, provider_id")
+    .eq("id", serviceId)
+    .single();
+
+  if (serviceError) {
+    if (serviceError.code === "PGRST116") {
+      // Service not found
+      const err = new Error("Service not found");
+      err.statusCode = 404;
+      throw err;
+    }
+    throw serviceError;
+  }
+
+  if (service.provider_id !== providerProfileId) {
+    const err = new Error("Forbidden: Service does not belong to this provider");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  // 3) Supprimer le service
+  const { error: deleteError } = await supabase
+    .from("services")
+    .delete()
+    .eq("id", serviceId);
+
+  if (deleteError) throw deleteError;
+
+  return true;
 }
 
 // 🟦 Détail d’un prestataire

@@ -5,6 +5,7 @@ import {
   getProvider,
   updateMyProviderProfile,
   createService,
+  deleteServiceController,
   getProviderServicesController,
   getProviderReviewsController,
   getProviderStatsController,
@@ -15,25 +16,23 @@ import {
 
 const router = Router();
 
-// ⭐ Services d’un prestataire
+// ⭐ Routes spécifiques (doivent être avant les routes paramétrées)
 router.get("/me/services", requireAuth, getMyProviderServicesController);
-router.get("/:id/services", getProviderServicesController);
 router.get("/me/reviews", requireAuth, getMyProviderReviews);
-
-router.patch("/me", requireAuth, updateMyProviderProfile);
-router.post("/services", requireAuth, createService);
-
-// ⭐ Avis d’un prestataire
-router.get("/:id/reviews", getProviderReviewsController);
-
-// ⭐ Stats d’un prestataire (dashboard prestataire)
 router.get("/me/stats", requireAuth, getMyProviderStatsController);
-router.get("/:id/stats", requireAuth, getProviderStatsController);
+router.patch("/me", requireAuth, updateMyProviderProfile);
 
-// ⭐ Détail d’un prestataire
+// ⭐ Routes services (doivent être avant /:id pour éviter les conflits)
+router.post("/services", requireAuth, createService);
+router.delete("/services/:id", requireAuth, deleteServiceController);
+
+// ⭐ Routes paramétrées
+router.get("/:id/services", getProviderServicesController);
+router.get("/:id/reviews", getProviderReviewsController);
+router.get("/:id/stats", requireAuth, getProviderStatsController);
 router.get("/:id", getProvider);
 
-// ⭐ Liste de tous les prestataires
+// ⭐ Liste de tous les prestataires (doit être en dernier)
 router.get("/", listProviders);
 
 

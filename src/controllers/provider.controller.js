@@ -4,6 +4,7 @@ import {
   getProviderById,
   updateProviderProfile,
   createProviderService,
+  deleteProviderService,
   getProviderServices,
   getProviderReviews,
   getProviderStats,
@@ -162,4 +163,21 @@ export async function getProviderStatsController(req, res) {
 
 export async function getMyProviderStatsController(req, res) {
   return getProviderStatsController(req, res);
+}
+
+// Delete a service
+export async function deleteServiceController(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can delete services" });
+    }
+
+    const { id } = req.params;
+    await deleteProviderService(id, req.user.id);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[PROVIDERS] deleteService error:", err);
+    const status = err.statusCode || 500;
+    return res.status(status).json({ error: err.message || "Could not delete service" });
+  }
 }
