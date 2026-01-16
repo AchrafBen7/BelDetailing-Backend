@@ -108,6 +108,9 @@ export async function sendNotificationToUser({ userId, title, message, data, url
  * 
  * Facilite l'envoi de notifications avec routing automatique vers les bonnes écrans iOS.
  * 
+ * ⚠️ IMPORTANT : Cette fonction enregistre aussi la notification dans la table notifications
+ * pour que l'utilisateur puisse la voir dans la page de notifications de l'app.
+ * 
  * @param {Object} params - Paramètres de notification
  * @param {string} params.userId - User ID (devient external_user_id dans OneSignal)
  * @param {string} params.title - Titre de la notification
@@ -131,6 +134,19 @@ export async function sendNotificationWithDeepLink({ userId, title, message, typ
   // Générer le deep link automatiquement si non fourni
   const finalDeepLink = deepLink || `beldetailing://${type}/${id}`;
 
+  // ✅ Enregistrer la notification dans la table notifications AVANT l'envoi OneSignal
+  try {
+    const { createNotification } = await import("./notification.service.js");
+    // Normaliser le type (ex: "booking_created" → "booking", "service_started" → "service")
+    const normalizedType = type.includes("_") ? type.split("_")[0] : type;
+    await createNotification(userId, title, message, normalizedType);
+  } catch (dbError) {
+    // ⚠️ Si l'enregistrement en DB échoue, on continue quand même avec OneSignal
+    // (ne pas bloquer l'envoi de la notification push)
+    console.error("[ONESIGNAL] Failed to save notification to DB:", dbError);
+  }
+
+  // Envoyer la notification push via OneSignal
   return sendNotificationToUser({
     userId,
     title,

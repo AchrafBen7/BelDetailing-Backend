@@ -33,9 +33,34 @@ export async function markNotificationAsRead(notificationId, userId) {
 }
 
 /**
+ * Crée une notification dans la table notifications
+ * @param {string} userId - User ID
+ * @param {string} title - Titre de la notification
+ * @param {string} message - Message de la notification
+ * @param {string} type - Type de notification (ex: "booking", "offer", "payment")
+ * @returns {Promise<Object>} Notification créée
+ */
+export async function createNotification(userId, title, message, type) {
+  const { data, error } = await supabase
+    .from("notifications")
+    .insert({
+      user_id: userId,
+      title,
+      message,
+      type,
+      is_read: false,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Supprime une notification
  * @param {string} notificationId - ID de la notification
- * @param {string} userId - User ID (pour vérifier la propriété)
+ * @param {string} userId - User ID (pour vérification de sécurité)
  * @returns {Promise<boolean>}
  */
 export async function deleteNotification(notificationId, userId) {
