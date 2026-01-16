@@ -17,7 +17,7 @@ export async function createPaymentIntent({ amount, currency, user }) {
     currency,
     customer: customerId, // ✅ LIGNE CRUCIALE
     capture_method: "manual",
-    payment_method_types: ["card", "apple_pay"], // ✅ Activer Apple Pay
+    payment_method_types: ["card"], // ✅ PaymentSheet iOS gère Apple Pay automatiquement
     metadata: {
       userId: user.id,
       source: "beldetailing-app",
@@ -49,7 +49,7 @@ export async function createPaymentIntentForOrder({
     amount: Math.round(amount * 100),
     currency,
     customer: customerId,
-    payment_method_types: ["card", "apple_pay"], // ✅ Activer Apple Pay
+    payment_method_types: ["card"], // ✅ PaymentSheet iOS gère Apple Pay automatiquement
     metadata: {
       userId: user.id,
       source: "beldetailing-app",
