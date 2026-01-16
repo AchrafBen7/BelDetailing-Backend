@@ -175,6 +175,7 @@ export async function getBooking(req, res) {
 ----------------------------------------------------- */
 export async function createBooking(req, res) {
   try {
+    console.log("🔵 [BOOKINGS] createBooking START - Body:", JSON.stringify(req.body, null, 2));
     const customerId = req.user.id;
     const {
       provider_id,
@@ -187,7 +188,13 @@ export async function createBooking(req, res) {
       payment_method,
       customer_address_lat,
       customer_address_lng,
+      transport_fee, // ⚠️ Peut être envoyé par l'app
+      transport_distance_km, // ⚠️ Peut être envoyé par l'app
     } = req.body;
+
+    console.log("🔵 [BOOKINGS] createBooking - customerId:", customerId);
+    console.log("🔵 [BOOKINGS] createBooking - service_id:", service_id);
+    console.log("🔵 [BOOKINGS] createBooking - provider_id:", provider_id);
 
     let serviceIdsToBook = [];
 
@@ -200,14 +207,23 @@ export async function createBooking(req, res) {
     }
 
     // 1) Fetch services
+    console.log("🔵 [BOOKINGS] createBooking - Fetching services with IDs:", serviceIdsToBook);
     const { data: services, error: servicesError } = await supabase
       .from("services")
       .select("*")
       .in("id", serviceIdsToBook);
 
-    if (servicesError || !services || services.length === 0) {
+    if (servicesError) {
+      console.error("❌ [BOOKINGS] createBooking - Services fetch error:", servicesError);
+      return res.status(500).json({ error: "Could not fetch services", details: servicesError.message });
+    }
+
+    if (!services || services.length === 0) {
+      console.error("❌ [BOOKINGS] createBooking - No services found for IDs:", serviceIdsToBook);
       return res.status(404).json({ error: "Services not found" });
     }
+
+    console.log("✅ [BOOKINGS] createBooking - Services fetched:", services.length);
 
     const allFromSameProvider = services.every(
       service => service.provider_id === provider_id
@@ -242,7 +258,12 @@ export async function createBooking(req, res) {
     let transportDistanceKm = null;
     let transportFee = 0;
 
-    if (!provider.has_mobile_service) {
+    // ⚠️ Utiliser les valeurs envoyées par l'app si présentes, sinon calculer
+    if (transport_distance_km != null && transport_fee != null) {
+      console.log("🔵 [BOOKINGS] createBooking - Using transport values from request");
+      transportDistanceKm = Number(transport_distance_km);
+      transportFee = Number(transport_fee);
+    } else if (!provider.has_mobile_service) {
       transportDistanceKm = null;
       transportFee = 0;
     } else if (
@@ -251,6 +272,7 @@ export async function createBooking(req, res) {
       customerAddressLat != null &&
       customerAddressLng != null
     ) {
+      console.log("🔵 [BOOKINGS] createBooking - Calculating transport values");
       transportDistanceKm = calculateDistanceKm(
         Number(providerLat),
         Number(providerLng),
@@ -260,11 +282,15 @@ export async function createBooking(req, res) {
       transportFee = calculateTransportFeeByZone(transportDistanceKm);
     }
 
+    console.log("🔵 [BOOKINGS] createBooking - Transport distance (km):", transportDistanceKm);
+    console.log("🔵 [BOOKINGS] createBooking - Transport fee:", transportFee);
+
     const totalPrice = servicesTotalPrice + transportFee;
     const paymentMethod = payment_method || "card";
     const serviceNames = services.map(service => service.name).join(", ");
 
     // 3) Create booking (WITHOUT payment yet)
+    console.log("🔵 [BOOKINGS] createBooking - Creating booking record...");
     // 1) Insert booking
     const { data: inserted, error: bookingError } = await supabase
       .from("bookings")
@@ -327,8 +353,16 @@ export async function createBooking(req, res) {
       `)
       .single();
 
-    if (bookingError) throw bookingError;
+    if (bookingError) {
+      console.error("❌ [BOOKINGS] createBooking - Booking insert error:", bookingError);
+      console.error("❌ [BOOKINGS] createBooking - Booking insert error details:", JSON.stringify(bookingError, null, 2));
+      throw bookingError;
+    }
 
+    console.log("✅ [BOOKINGS] createBooking - Booking created with ID:", inserted.id);
+
+    // Insertion optionnelle dans booking_services (pour multi-services)
+    // Si la table n'existe pas ou s'il y a une erreur, on continue quand même
     const bookingServicesData = services.map(service => ({
       booking_id: inserted.id,
       service_id: service.id,
@@ -336,44 +370,75 @@ export async function createBooking(req, res) {
       service_price: service.price,
     }));
 
-    const { error: bookingServicesError } = await supabase
-      .from("booking_services")
-      .insert(bookingServicesData);
+    try {
+      const { error: bookingServicesError } = await supabase
+        .from("booking_services")
+        .insert(bookingServicesData);
 
-    if (bookingServicesError) {
-      console.error(
-        "[BOOKINGS] booking_services insert error:",
-        bookingServicesError
+      if (bookingServicesError) {
+        console.warn(
+          "[BOOKINGS] booking_services insert failed (non-blocking):",
+          bookingServicesError.message
+        );
+        // ⚠️ On ne bloque PAS le flux si booking_services échoue
+        // Le booking principal est déjà créé, on continue
+      } else {
+        console.log(
+          "[BOOKINGS] booking_services inserted successfully for booking:",
+          inserted.id
+        );
+      }
+    } catch (err) {
+      console.warn(
+        "[BOOKINGS] booking_services insert exception (non-blocking):",
+        err.message
       );
-      throw bookingServicesError;
+      // Continue même si booking_services échoue
     }
 
     // 2) Fetch customer for payment intent
+    console.log("🔵 [BOOKINGS] createBooking - Fetching customer:", customerId);
     const { data: customer, error: customerError } = await supabase
       .from("users")
       .select("id, email, phone, stripe_customer_id")
       .eq("id", customerId)
       .single();
 
-    if (customerError || !customer) {
+    if (customerError) {
+      console.error("❌ [BOOKINGS] createBooking - Customer fetch error:", customerError);
+      return res.status(500).json({ error: "Could not fetch customer", details: customerError.message });
+    }
+
+    if (!customer) {
+      console.error("❌ [BOOKINGS] createBooking - Customer not found:", customerId);
       return res.status(404).json({ error: "Customer not found" });
     }
 
+    console.log("✅ [BOOKINGS] createBooking - Customer fetched:", customer.email);
+
+    console.log("🔵 [BOOKINGS] createBooking - Creating payment intent...");
+    console.log("🔵 [BOOKINGS] createBooking - Payment method:", paymentMethod);
+    console.log("🔵 [BOOKINGS] createBooking - Total price:", totalPrice);
+    
     let intent = null;
     if (paymentMethod === "cash") {
       const depositAmount = Math.round(totalPrice * 0.2 * 100) / 100;
+      console.log("🔵 [BOOKINGS] createBooking - Creating deposit payment intent:", depositAmount);
       intent = await createPaymentIntent({
         amount: depositAmount,
         currency,
         user: customer,
       });
     } else {
+      console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent:", totalPrice);
       intent = await createPaymentIntent({
         amount: totalPrice,
         currency,
         user: customer,
       });
     }
+
+    console.log("✅ [BOOKINGS] createBooking - Payment intent created:", intent?.id);
 
     // 4) Update booking with payment intent
     const { data: updatedBooking, error: updateErr } = await supabase
@@ -467,7 +532,14 @@ export async function createBooking(req, res) {
 
   } catch (err) {
     console.error("[BOOKINGS] createBooking error:", err);
-    return res.status(500).json({ error: "Could not create booking" });
+    console.error("[BOOKINGS] createBooking error stack:", err.stack);
+    console.error("[BOOKINGS] createBooking error message:", err.message);
+    return res.status(500).json({ 
+      error: "Could not create booking",
+      details: err.message,
+      // ⚠️ En production, ne pas exposer le stack, mais pour debug c'est utile
+      // stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+    });
   }
 }
 
