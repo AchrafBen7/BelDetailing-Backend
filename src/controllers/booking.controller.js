@@ -12,6 +12,7 @@ import {
   capturePayment,
 } from "../services/payment.service.js";
 import { sendNotificationToUser, sendNotificationWithDeepLink } from "../services/onesignal.service.js";
+import { sendPeppolInvoice } from "../services/peppol.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 const COMMISSION_RATE = 0.10;
@@ -190,6 +191,12 @@ export async function createBooking(req, res) {
       customer_address_lng,
       transport_fee, // ⚠️ Peut être envoyé par l'app
       transport_distance_km, // ⚠️ Peut être envoyé par l'app
+      // Peppol fields
+      peppol_requested,
+      company_name,
+      company_vat,
+      company_address,
+      company_peppol_id,
     } = req.body;
 
     console.log("🔵 [BOOKINGS] createBooking - customerId:", customerId);
@@ -322,6 +329,13 @@ export async function createBooking(req, res) {
         transport_fee: transportFee,
         customer_address_lat: customerAddressLat,
         customer_address_lng: customerAddressLng,
+        // Peppol fields
+        peppol_requested: peppol_requested === true,
+        peppol_status: peppol_requested === true ? "pending" : null,
+        company_name: company_name || null,
+        company_vat: company_vat || null,
+        company_address: company_address || null,
+        company_peppol_id: company_peppol_id || null,
       })
       .select(`
         id,
@@ -756,6 +770,49 @@ export async function completeService(req, res) {
         current_step_index: progress.steps.length - 1,
       },
     });
+
+    // ✅ ENVOYER FACTURE PEPPOL (si demandée)
+    if (booking.peppol_requested && booking.peppol_status === "pending") {
+      try {
+        console.log(`🔵 [BOOKINGS] Sending Peppol invoice for booking ${bookingId}`);
+        
+        // Récupérer le provider profile complet
+        const { data: providerProfile, error: providerError } = await supabase
+          .from("provider_profiles")
+          .select("*")
+          .eq("user_id", booking.provider_id)
+          .or(`id.eq.${booking.provider_id}`)
+          .maybeSingle();
+
+        if (providerError) {
+          console.error("❌ [BOOKINGS] Error fetching provider for Peppol:", providerError);
+        } else if (providerProfile) {
+          const peppolResult = await sendPeppolInvoice(booking, providerProfile);
+          
+          if (peppolResult.success) {
+            // Mettre à jour le statut Peppol
+            await updateBookingService(bookingId, {
+              peppol_status: "sent",
+              peppol_invoice_id: peppolResult.invoiceId || null,
+              peppol_sent_at: new Date().toISOString(),
+            });
+            console.log(`✅ [BOOKINGS] Peppol invoice sent successfully: ${peppolResult.invoiceId}`);
+          } else {
+            // Marquer comme failed mais ne pas bloquer la complétion
+            await updateBookingService(bookingId, {
+              peppol_status: "failed",
+            });
+            console.error(`❌ [BOOKINGS] Peppol invoice failed: ${peppolResult.error}`);
+          }
+        }
+      } catch (peppolError) {
+        console.error("❌ [BOOKINGS] Peppol invoice error (non-blocking):", peppolError);
+        // ⚠️ Ne pas bloquer la complétion si Peppol échoue
+        await updateBookingService(bookingId, {
+          peppol_status: "failed",
+        });
+      }
+    }
 
     // ✅ ENVOYER NOTIFICATION AU CUSTOMER (service terminé)
     try {

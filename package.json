@@ -9,6 +9,7 @@
     "test:coverage": "npm test -- --coverage",
     "test:chat": "npm test -- chat.service.test.js",
     "test:google-review": "npm test -- googleReview.service.test.js",
+    "test:billit": "node scripts/test-billit-connection.js",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js"
   },
