@@ -111,6 +111,8 @@ export async function register(req, res) {
     role: finalRole,
     vat_number: finalRole !== "customer" ? vat_number : null,
     is_vat_valid: finalRole !== "customer" ? false : null,
+    welcoming_offer_used: false, // ✅ Explicitement FALSE pour tous les nouveaux comptes
+    dismissed_first_booking_offer: false, // ✅ Explicitement FALSE pour tous les nouveaux comptes
   });
 
   if (insertError) {
