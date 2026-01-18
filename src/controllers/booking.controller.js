@@ -1052,6 +1052,189 @@ export async function refuseCounterProposal(req, res) {
 }
 
 
+/* -----------------------------------------------------
+   REQUEST MODIFICATION (customer)
+----------------------------------------------------- */
+export async function requestModification(req, res) {
+  try {
+    const { id } = req.params;
+    const { date, start_time, end_time, message } = req.body;
+    const userId = req.user.id;
+
+    if (req.user.role !== "customer") {
+      return res.status(403).json({ error: "Only customers can request modifications" });
+    }
+
+    const booking = await getBookingDetail(id);
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    // Vérifier que c'est le customer qui fait la demande
+    if (booking.customer_id !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Vérifier que le booking peut être modifié (status confirmed/started)
+    if (!["confirmed", "started"].includes(booking.status)) {
+      return res.status(400).json({ 
+        error: "Cannot request modification for this booking status" 
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("bookings")
+      .update({
+        modification_request_date: date,
+        modification_request_start_time: start_time,
+        modification_request_end_time: end_time || start_time, // Si pas de end_time, utiliser start_time
+        modification_request_message: message || null,
+        modification_request_status: "pending",
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    // ✅ ENVOYER NOTIFICATION AU PROVIDER
+    try {
+      await sendNotificationToUser({
+        userId: booking.provider_id,
+        title: "Demande de modification",
+        message: `Le client demande un changement de date/heure pour la réservation ${booking.service_name || ""}`,
+        data: {
+          type: "modification_requested",
+          booking_id: id,
+          customer_id: booking.customer_id,
+        },
+      });
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+    }
+
+    return res.json({ data });
+  } catch (err) {
+    console.error("[BOOKINGS] requestModification error:", err);
+    return res.status(500).json({ error: "Could not request modification" });
+  }
+}
+
+/* -----------------------------------------------------
+   ACCEPT MODIFICATION REQUEST (provider)
+----------------------------------------------------- */
+export async function acceptModificationRequest(req, res) {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can accept modification requests" });
+    }
+
+    const booking = await getBookingDetail(id);
+    if (!booking || booking.modification_request_status !== "pending") {
+      return res.status(400).json({ error: "No pending modification request" });
+    }
+
+    const providerProfileId = await getProviderProfileIdForUser(userId);
+    if (!providerProfileId || booking.provider_id !== providerProfileId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Appliquer la modification
+    const { data, error } = await supabase
+      .from("bookings")
+      .update({
+        date: booking.modification_request_date,
+        start_time: booking.modification_request_start_time,
+        end_time: booking.modification_request_end_time,
+        modification_request_status: "accepted",
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    // ✅ ENVOYER NOTIFICATION AU CUSTOMER
+    try {
+      await sendNotificationToUser({
+        userId: booking.customer_id,
+        title: "Modification acceptée",
+        message: `Votre demande de modification a été acceptée. Nouvelle date: ${booking.modification_request_date}`,
+        data: {
+          type: "modification_accepted",
+          booking_id: id,
+        },
+      });
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+    }
+
+    return res.json({ data });
+  } catch (err) {
+    console.error("[BOOKINGS] acceptModificationRequest error:", err);
+    return res.status(500).json({ error: "Could not accept modification request" });
+  }
+}
+
+/* -----------------------------------------------------
+   REFUSE MODIFICATION REQUEST (provider)
+----------------------------------------------------- */
+export async function refuseModificationRequest(req, res) {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can refuse modification requests" });
+    }
+
+    const booking = await getBookingDetail(id);
+    if (!booking || booking.modification_request_status !== "pending") {
+      return res.status(400).json({ error: "No pending modification request" });
+    }
+
+    const providerProfileId = await getProviderProfileIdForUser(userId);
+    if (!providerProfileId || booking.provider_id !== providerProfileId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Marquer comme refusé
+    const { data, error } = await supabase
+      .from("bookings")
+      .update({
+        modification_request_status: "refused",
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    // ✅ ENVOYER NOTIFICATION AU CUSTOMER
+    try {
+      await sendNotificationToUser({
+        userId: booking.customer_id,
+        title: "Modification refusée",
+        message: `Votre demande de modification a été refusée. La réservation reste à la date initiale.`,
+        data: {
+          type: "modification_refused",
+          booking_id: id,
+        },
+      });
+    } catch (notifError) {
+      console.error("[BOOKINGS] Notification send failed:", notifError);
+    }
+
+    return res.json({ data });
+  } catch (err) {
+    console.error("[BOOKINGS] refuseModificationRequest error:", err);
+    return res.status(500).json({ error: "Could not refuse modification request" });
+  }
+}
+
 export async function confirmBooking(req, res) {
   try {
     const bookingId = req.params.id;
