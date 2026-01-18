@@ -25,6 +25,8 @@ export function mapUserRowToDto(row) {
 
     vatNumber: cleanNull(row.vat_number),
     isVatValid: cleanNull(row.is_vat_valid),
+    
+    welcomingOfferUsed: row.welcoming_offer_used ?? false, // ✅ Offre de bienvenue utilisée
 
     createdAt: cleanNull(row.created_at),
     updatedAt: cleanNull(row.updated_at),
@@ -82,6 +84,7 @@ export function mapUserRowToDto(row) {
           transportPricePerKm: cleanNull(p.transport_price_per_km),
           transportEnabled: p.transport_enabled ?? false,
           serviceArea: p.service_area ?? null, // ✅ Zone d'intervention (JSON)
+          welcomingOfferEnabled: p.welcoming_offer_enabled ?? false, // ✅ Offre de bienvenue
         }
       : null,
   };

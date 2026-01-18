@@ -353,7 +353,50 @@ export async function createBooking(req, res) {
     console.log("🔵 [BOOKINGS] createBooking - Transport distance (km):", transportDistanceKm);
     console.log("🔵 [BOOKINGS] createBooking - Transport fee:", transportFee);
 
-    const totalPrice = servicesTotalPrice + transportFee;
+    // ✅ VÉRIFIER OFFRE DE BIENVENUE
+    // 1) Vérifier si le customer a déjà utilisé son offre (on récupère customer plus bas, donc on fait une requête séparée)
+    const { data: customerCheckData, error: customerCheckError } = await supabase
+      .from("users")
+      .select("welcoming_offer_used")
+      .eq("id", customerId)
+      .single();
+
+    const hasUsedWelcomingOffer = customerCheckData?.welcoming_offer_used === true;
+
+    // 2) Vérifier si c'est le premier booking confirmé du customer
+    const { data: previousConfirmedBookings, error: previousBookingsError } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("customer_id", customerId)
+      .eq("status", "confirmed")
+      .limit(1);
+
+    const isFirstBooking = !hasUsedWelcomingOffer && 
+                           (!previousConfirmedBookings || previousConfirmedBookings.length === 0);
+
+    // 3) Vérifier si le provider participe à l'offre
+    const providerParticipates = provider.welcoming_offer_enabled === true;
+
+    // 4) Calculer l'offre de bienvenue
+    let welcomingOfferAmount = 0;
+    let welcomingOfferApplied = false;
+    const WELCOMING_OFFER_MAX = 20.0; // Plafond 20€
+
+    if (isFirstBooking && providerParticipates && transportFee > 0) {
+      // CAS 1: Detailer AVEC frais de transport → frais offerts (max 20€)
+      welcomingOfferAmount = Math.min(transportFee, WELCOMING_OFFER_MAX);
+      welcomingOfferApplied = true;
+      console.log("🎁 [BOOKINGS] Welcoming offer applied:", welcomingOfferAmount, "€");
+    } else if (isFirstBooking && providerParticipates && transportFee === 0) {
+      // CAS 2: Detailer SANS frais de transport → pas de réduction financière, juste badge
+      welcomingOfferApplied = true;
+      welcomingOfferAmount = 0;
+      console.log("🎁 [BOOKINGS] Welcoming offer eligible (no transport fee, badge only)");
+    }
+
+    // 5) Calculer le prix total avec l'offre
+    const totalPriceBeforeOffer = servicesTotalPrice + transportFee;
+    const totalPrice = totalPriceBeforeOffer - welcomingOfferAmount;
     const paymentMethod = payment_method || "card";
     const serviceNames = services.map(service => service.name).join(", ");
 
@@ -397,6 +440,10 @@ export async function createBooking(req, res) {
         company_vat: company_vat || null,
         company_address: company_address || null,
         company_peppol_id: company_peppol_id || null,
+        // Welcoming offer fields
+        is_first_booking: isFirstBooking,
+        welcoming_offer_applied: welcomingOfferApplied,
+        welcoming_offer_amount: welcomingOfferAmount,
       })
       .select(`
         id,
@@ -551,6 +598,9 @@ export async function createBooking(req, res) {
         commission_rate,
         invoice_sent,
         provider_banner_url,
+        is_first_booking,
+        welcoming_offer_applied,
+        welcoming_offer_amount,
         created_at
       `)
       .single();
@@ -1368,6 +1418,16 @@ export async function confirmBooking(req, res) {
     const ok = await capturePayment(booking.payment_intent_id);
     if (!ok) {
       return res.status(500).json({ error: "Could not capture payment" });
+    }
+
+    // ✅ VÉRIFIER ET MARQUER L'OFFRE DE BIENVENUE COMME UTILISÉE
+    // Si c'est le premier booking et que l'offre a été appliquée, marquer comme utilisé
+    if (booking.is_first_booking === true && booking.welcoming_offer_applied === true) {
+      await supabase
+        .from("users")
+        .update({ welcoming_offer_used: true })
+        .eq("id", booking.customer_id);
+      console.log("🎁 [BOOKINGS] Welcoming offer marked as used for customer:", booking.customer_id);
     }
 
     // Update DB

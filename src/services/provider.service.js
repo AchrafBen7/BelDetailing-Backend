@@ -96,6 +96,7 @@ function mapProviderRowToDetailer(row) {
     yearsOfExperience: row.years_of_experience ?? 0,
     maxRadiusKm: row.max_radius_km ?? null,
     serviceArea: row.service_area ?? null, // ✅ Zone d'intervention (JSON)
+    welcomingOfferEnabled: row.welcoming_offer_enabled ?? false, // ✅ Offre de bienvenue
   };
 }
 

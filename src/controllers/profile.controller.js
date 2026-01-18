@@ -20,6 +20,7 @@ export async function getProfile(req, res) {
     role,
     vat_number,
     is_vat_valid,
+    welcoming_offer_used,
     created_at,
     updated_at,
     customer_profiles (
@@ -55,7 +56,8 @@ export async function getProfile(req, res) {
       logo_url,
       banner_url,
       transport_price_per_km,
-      transport_enabled
+      transport_enabled,
+      welcoming_offer_enabled
     )
   `)
   .eq("id", userId)
@@ -186,27 +188,32 @@ export async function updateProfile(req, res) {
       transportPricePerKm,
       transportEnabled,
       serviceArea, // ✅ Zone d'intervention (JSON)
+      welcomingOfferEnabled,
     } = providerProfile;
+
+    const providerUpdate = {
+      user_id: userId,
+      display_name: displayName,
+      bio,
+      base_city: baseCity,
+      postal_code: postalCode,
+      has_mobile_service: hasMobileService,
+      min_price: minPrice,
+      // rating : calculé côté système → on ne le touche pas ici
+      services,
+      transport_price_per_km: transportPricePerKm,
+      transport_enabled: transportEnabled,
+      service_area: serviceArea, // ✅ Zone d'intervention (JSON)
+    };
+    
+    // Ajouter welcoming_offer_enabled seulement si défini
+    if (welcomingOfferEnabled !== undefined) {
+      providerUpdate.welcoming_offer_enabled = welcomingOfferEnabled;
+    }
 
     const { error: providerError } = await supabase
       .from("provider_profiles")
-      .upsert(
-        {
-          user_id: userId,
-          display_name: displayName,
-          bio,
-          base_city: baseCity,
-          postal_code: postalCode,
-          has_mobile_service: hasMobileService,
-          min_price: minPrice,
-          // rating : calculé côté système → on ne le touche pas ici
-          services,
-          transport_price_per_km: transportPricePerKm,
-          transport_enabled: transportEnabled,
-          service_area: serviceArea, // ✅ Zone d'intervention (JSON)
-        },
-        { onConflict: "user_id" }
-      );
+      .upsert(providerUpdate, { onConflict: "user_id" });
 
     if (providerError) {
       return res.status(500).json({ error: providerError.message });
