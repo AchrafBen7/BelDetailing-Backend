@@ -207,9 +207,23 @@ async function fetchProviderProfileByAnyId(identifier) {
 export async function listBookings(req, res) {
   try {
     const { scope, status } = req.query;
-    const userId = req.user.id;
+    const userId = req.user?.id;
+
+    console.log("🔍 [BOOKINGS CONTROLLER] listBookings called with:", {
+      userId,
+      scope,
+      status,
+      hasUser: !!req.user,
+      userEmail: req.user?.email
+    });
+
+    if (!userId) {
+      console.error("❌ [BOOKINGS CONTROLLER] req.user.id is missing!");
+      return res.status(401).json({ error: "User ID is missing" });
+    }
 
     const items = await getBookings({ userId, scope, status });
+    console.log(`✅ [BOOKINGS CONTROLLER] Returning ${items?.length || 0} bookings`);
     return res.json({ data: items });
   } catch (err) {
     console.error("[BOOKINGS] list error:", err);

@@ -3,9 +3,16 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { refundPayment } from "./payment.service.js";
 
 export async function getBookings({ userId, scope, status }) {
+  console.log("🔍 [BOOKINGS SERVICE] getBookings called with:", { userId, scope, status });
+  
   let query = supabase.from("bookings").select("*");
 
   if (scope === "customer") {
+    if (!userId) {
+      console.error("❌ [BOOKINGS SERVICE] userId is missing for customer scope!");
+      throw new Error("userId is required for customer scope");
+    }
+    console.log("✅ [BOOKINGS SERVICE] Filtering by customer_id:", userId);
     query.eq("customer_id", userId);
   }
 
@@ -27,6 +34,18 @@ export async function getBookings({ userId, scope, status }) {
 
   const { data, error } = await query.order("created_at", { ascending: false });
   if (error) throw error;
+
+  console.log(`✅ [BOOKINGS SERVICE] Found ${data?.length || 0} bookings for userId: ${userId}, scope: ${scope}`);
+  if (data && data.length > 0 && scope === "customer") {
+    // Vérifier que toutes les réservations appartiennent bien au customer
+    const allBelongToCustomer = data.every(booking => booking.customer_id === userId);
+    if (!allBelongToCustomer) {
+      console.error("❌ [BOOKINGS SERVICE] Some bookings don't belong to the customer!", {
+        userId,
+        bookingCustomerIds: data.map(b => b.customer_id)
+      });
+    }
+  }
 
   const bookingsWithServices = await Promise.all(
     data.map(async booking => {
