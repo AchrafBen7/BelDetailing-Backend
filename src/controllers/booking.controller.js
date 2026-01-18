@@ -16,6 +16,8 @@ import { sendPeppolInvoice } from "../services/peppol.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 const COMMISSION_RATE = 0.10;
+const NIOS_MANAGEMENT_FEE_RATE = 0.05; // 5% frais de gestion NIOS
+const NIOS_MANAGEMENT_FEE_MIN = 10.0; // Minimum 10€ de frais de gestion
 let providerProfilesSupportsIdColumn;
 
 function degreesToRadians(value) {
@@ -54,6 +56,65 @@ function buildBookingDateTime(dateValue, timeValue) {
   const isoString = `${dateValue}T${timeValue}`;
   const parsed = new Date(isoString);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * Calcule le montant remboursable selon la politique NIOS:
+ * - Plus de 48h: 100% (tout remboursé)
+ * - 24h-48h: Service + Transport - Frais NIOS (~5%)
+ * - Moins de 24h: Service seulement (Transport + Frais NIOS retenus)
+ */
+function calculateRefundAmount(booking, hoursUntilBooking) {
+  const totalPrice = booking.price || 0;
+  const transportFee = booking.transport_fee || 0;
+  const servicePrice = totalPrice - transportFee;
+
+  // 🟢 Plus de 48h avant: remboursement intégral (100%)
+  if (hoursUntilBooking >= 48) {
+    return {
+      refundAmount: totalPrice,
+      retainedAmount: 0,
+      retainedItems: {
+        niosFee: 0,
+        transportFee: 0,
+      },
+    };
+  }
+
+  // 🟡 Entre 24h et 48h: Service + Transport - Frais NIOS (~5%)
+  if (hoursUntilBooking >= 24) {
+    // Frais NIOS = 5% du total, minimum 10€
+    const niosFee = Math.max(
+      totalPrice * NIOS_MANAGEMENT_FEE_RATE,
+      NIOS_MANAGEMENT_FEE_MIN
+    );
+    const refundAmount = totalPrice - niosFee;
+
+    return {
+      refundAmount: Math.max(0, refundAmount), // S'assurer que ce n'est pas négatif
+      retainedAmount: niosFee,
+      retainedItems: {
+        niosFee: niosFee,
+        transportFee: 0, // Transport remboursé
+      },
+    };
+  }
+
+  // 🔴 Moins de 24h: Service seulement (Transport + Frais NIOS retenus)
+  const niosFee = Math.max(
+    totalPrice * NIOS_MANAGEMENT_FEE_RATE,
+    NIOS_MANAGEMENT_FEE_MIN
+  );
+  const refundAmount = servicePrice; // Seulement le service
+
+  return {
+    refundAmount: Math.max(0, refundAmount),
+    retainedAmount: transportFee + niosFee,
+    retainedItems: {
+      niosFee: niosFee,
+      transportFee: transportFee,
+    },
+  };
 }
 
 const DEFAULT_SERVICE_STEPS = [
@@ -875,6 +936,7 @@ export async function cancelBooking(req, res) {
       return res.status(403).json({ error: "You are not allowed to cancel this booking" });
     }
 
+    // ✅ NOUVEAU SYSTÈME: Calcul du remboursement selon politique NIOS
     if (booking.payment_intent_id && booking.payment_status === "paid") {
       const bookingDateTime = buildBookingDateTime(
         booking.date,
@@ -883,12 +945,23 @@ export async function cancelBooking(req, res) {
       const hoursUntilBooking = bookingDateTime
         ? (bookingDateTime.getTime() - Date.now()) / 1000 / 3600
         : null;
-      const transportFee = booking.transport_fee || 0;
 
-      if (hoursUntilBooking != null && hoursUntilBooking < 24) {
-        const servicePrice = booking.price - transportFee;
-        await refundPayment(booking.payment_intent_id, servicePrice);
+      if (hoursUntilBooking != null) {
+        const { refundAmount, retainedAmount, retainedItems } = 
+          calculateRefundAmount(booking, hoursUntilBooking);
+
+        // Effectuer le remboursement partiel (si montant < total)
+        if (refundAmount > 0 && refundAmount < booking.price) {
+          await refundPayment(booking.payment_intent_id, refundAmount);
+        } else if (refundAmount >= booking.price) {
+          // Remboursement intégral
+          await refundPayment(booking.payment_intent_id);
+        }
+        // Si refundAmount = 0, pas de remboursement (ne devrait pas arriver selon les règles)
+
+        console.log(`💰 [CANCEL] Booking ${bookingId}: Refund ${refundAmount.toFixed(2)}€, Retained: ${retainedAmount.toFixed(2)}€ (NIOS: ${retainedItems.niosFee.toFixed(2)}€, Transport: ${retainedItems.transportFee.toFixed(2)}€)`);
       } else {
+        // Si on ne peut pas calculer les heures, remboursement intégral par sécurité
         await refundPayment(booking.payment_intent_id);
       }
     }
