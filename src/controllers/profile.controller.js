@@ -21,6 +21,7 @@ export async function getProfile(req, res) {
     vat_number,
     is_vat_valid,
     welcoming_offer_used,
+    dismissed_first_booking_offer,
     created_at,
     updated_at,
     customer_profiles (

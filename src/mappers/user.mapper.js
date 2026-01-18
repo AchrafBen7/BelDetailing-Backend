@@ -27,6 +27,7 @@ export function mapUserRowToDto(row) {
     isVatValid: cleanNull(row.is_vat_valid),
     
     welcomingOfferUsed: row.welcoming_offer_used ?? false, // ✅ Offre de bienvenue utilisée
+    dismissedFirstBookingOffer: row.dismissed_first_booking_offer ?? false, // ✅ Offre de bienvenue fermée définitivement
 
     createdAt: cleanNull(row.created_at),
     updatedAt: cleanNull(row.updated_at),
