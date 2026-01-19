@@ -82,8 +82,10 @@ app.use("/api/v1/services", servicePhotosRoutes);
 app.use("/api/v1/media", mediaRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/stripe", stripeConnectRoutes);
-app.use("/api/v1/products", productRoutes);
+// ⚠️ IMPORTANT: Les routes de favoris doivent être AVANT productRoutes
+// pour éviter que /favorites soit capturé par /:id
 app.use("/api/v1/products", productFavoriteRoutes);
+app.use("/api/v1/products", productRoutes);
 app.use("/api/v1/taxes", taxesRoutes);
 app.use("/api/v1/orders", orderRoutes);
 app.use("/api/v1/notifications", notificationRoutes);

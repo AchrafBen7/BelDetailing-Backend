@@ -83,12 +83,7 @@ export async function listFavoritesController(req, res) {
     const userId = req.user.id;
     console.log(`[PRODUCT_FAVORITES] listFavoritesController: userId=${userId}`);
 
-    const favorites = await getUserFavorites(userId);
-
-    // Retourner directement les produits (les nulls sont déjà filtrés dans getUserFavorites)
-    const products = favorites
-      .map((fav) => fav.product)
-      .filter((product) => product != null && product.id != null);
+    const products = await getUserFavorites(userId);
 
     console.log(`[PRODUCT_FAVORITES] listFavoritesController: found ${products.length} products for user ${userId}`);
     

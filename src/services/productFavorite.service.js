@@ -102,27 +102,22 @@ export async function getUserFavorites(userId) {
       });
     }
 
-    // Transformer les données pour retourner directement les produits
-    const favorites = [];
+    // Retourner directement les produits (pas besoin de wrapper)
+    const products = [];
     
     for (const favoriteItem of favoritesData) {
       const product = productsMap.get(favoriteItem.product_id);
       
       // Ne garder que les favoris avec un produit valide
       if (product != null && product.id != null) {
-        favorites.push({
-          id: favoriteItem.id,
-          productId: favoriteItem.product_id,
-          createdAt: favoriteItem.created_at,
-          product: product,
-        });
+        products.push(product);
       } else {
         console.warn(`[PRODUCT_FAVORITES] getUserFavorites: skipping favorite ${favoriteItem.id} - product ${favoriteItem.product_id} not found`);
       }
     }
 
-    console.log(`[PRODUCT_FAVORITES] getUserFavorites: returning ${favorites.length} valid favorites`);
-    return favorites;
+    console.log(`[PRODUCT_FAVORITES] getUserFavorites: returning ${products.length} valid products`);
+    return products;
   } catch (err) {
     console.error("[PRODUCT_FAVORITES] getUserFavorites exception:", err);
     throw err;
