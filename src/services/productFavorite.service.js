@@ -58,47 +58,75 @@ export async function isProductFavorite(userId, productId) {
  * Récupérer tous les favoris d'un utilisateur avec les détails des produits
  */
 export async function getUserFavorites(userId) {
-  const { data, error } = await supabase
-    .from("product_favorites")
-    .select(`
-      id,
-      product_id,
-      created_at,
-      products (
-        id,
-        name,
-        description,
-        category,
-        level,
-        price,
-        promo_price,
-        image_url,
-        affiliate_url,
-        partner_name,
-        rating,
-        review_count
-      )
-    `)
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
+  try {
+    console.log(`[PRODUCT_FAVORITES] getUserFavorites: fetching favorites for user ${userId}`);
+    
+    // D'abord, récupérer les favoris sans la relation
+    const { data: favoritesData, error: favoritesError } = await supabase
+      .from("product_favorites")
+      .select("id, product_id, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
 
-  if (error) throw error;
+    if (favoritesError) {
+      console.error("[PRODUCT_FAVORITES] getUserFavorites favoritesError:", favoritesError);
+      throw favoritesError;
+    }
 
-  // Transformer les données pour retourner directement les produits
-  // Note: Supabase retourne les relations comme un tableau même pour une relation unique
-  return data
-    .filter((item) => item.products != null) // Filtrer les produits qui n'existent plus
-    .map((item) => {
-      // Si products est un tableau (relation Supabase), prendre le premier élément
-      const productData = Array.isArray(item.products) ? item.products[0] : item.products;
+    if (!favoritesData || favoritesData.length === 0) {
+      console.log(`[PRODUCT_FAVORITES] getUserFavorites: no favorites found for user ${userId}`);
+      return [];
+    }
+
+    console.log(`[PRODUCT_FAVORITES] getUserFavorites: found ${favoritesData.length} favorite records`);
+
+    // Récupérer les IDs des produits
+    const productIds = favoritesData.map((fav) => fav.product_id);
+    
+    // Récupérer les produits correspondants
+    const { data: productsData, error: productsError } = await supabase
+      .from("products")
+      .select("id, name, description, category, level, price, promo_price, image_url, affiliate_url, partner_name, rating, review_count")
+      .in("id", productIds);
+
+    if (productsError) {
+      console.error("[PRODUCT_FAVORITES] getUserFavorites productsError:", productsError);
+      throw productsError;
+    }
+
+    // Créer un map pour accéder rapidement aux produits par ID
+    const productsMap = new Map();
+    if (productsData) {
+      productsData.forEach((product) => {
+        productsMap.set(product.id, product);
+      });
+    }
+
+    // Transformer les données pour retourner directement les produits
+    const favorites = [];
+    
+    for (const favoriteItem of favoritesData) {
+      const product = productsMap.get(favoriteItem.product_id);
       
-      return {
-        id: item.id,
-        productId: item.product_id,
-        createdAt: item.created_at,
-        product: productData,
-      };
-    });
+      // Ne garder que les favoris avec un produit valide
+      if (product != null && product.id != null) {
+        favorites.push({
+          id: favoriteItem.id,
+          productId: favoriteItem.product_id,
+          createdAt: favoriteItem.created_at,
+          product: product,
+        });
+      } else {
+        console.warn(`[PRODUCT_FAVORITES] getUserFavorites: skipping favorite ${favoriteItem.id} - product ${favoriteItem.product_id} not found`);
+      }
+    }
+
+    console.log(`[PRODUCT_FAVORITES] getUserFavorites: returning ${favorites.length} valid favorites`);
+    return favorites;
+  } catch (err) {
+    console.error("[PRODUCT_FAVORITES] getUserFavorites exception:", err);
+    throw err;
+  }
 }
 
 /**

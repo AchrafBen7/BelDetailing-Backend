@@ -81,19 +81,29 @@ export async function checkFavoriteController(req, res) {
 export async function listFavoritesController(req, res) {
   try {
     const userId = req.user.id;
+    console.log(`[PRODUCT_FAVORITES] listFavoritesController: userId=${userId}`);
 
     const favorites = await getUserFavorites(userId);
 
-    // Retourner directement les produits (filtrer les nulls)
+    // Retourner directement les produits (les nulls sont déjà filtrés dans getUserFavorites)
     const products = favorites
       .map((fav) => fav.product)
-      .filter((product) => product != null);
+      .filter((product) => product != null && product.id != null);
 
-    console.log(`[PRODUCT_FAVORITES] list: found ${products.length} favorites for user ${userId}`);
+    console.log(`[PRODUCT_FAVORITES] listFavoritesController: found ${products.length} products for user ${userId}`);
     
     return res.json({ data: products });
   } catch (err) {
-    console.error("[PRODUCT_FAVORITES] list error:", err);
-    return res.status(500).json({ error: "Could not fetch favorites" });
+    console.error("[PRODUCT_FAVORITES] listFavoritesController error:", err);
+    console.error("[PRODUCT_FAVORITES] listFavoritesController error details:", {
+      message: err.message,
+      code: err.code,
+      details: err.details,
+      hint: err.hint,
+    });
+    return res.status(500).json({ 
+      error: "Could not fetch favorites",
+      details: err.message 
+    });
   }
 }
