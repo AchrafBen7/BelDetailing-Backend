@@ -85,14 +85,20 @@ export async function getUserFavorites(userId) {
   if (error) throw error;
 
   // Transformer les données pour retourner directement les produits
+  // Note: Supabase retourne les relations comme un tableau même pour une relation unique
   return data
-    .filter((item) => item.products) // Filtrer les produits qui n'existent plus
-    .map((item) => ({
-      id: item.id,
-      productId: item.product_id,
-      createdAt: item.created_at,
-      product: item.products,
-    }));
+    .filter((item) => item.products != null) // Filtrer les produits qui n'existent plus
+    .map((item) => {
+      // Si products est un tableau (relation Supabase), prendre le premier élément
+      const productData = Array.isArray(item.products) ? item.products[0] : item.products;
+      
+      return {
+        id: item.id,
+        productId: item.product_id,
+        createdAt: item.created_at,
+        product: productData,
+      };
+    });
 }
 
 /**
