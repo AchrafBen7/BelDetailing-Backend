@@ -50,15 +50,11 @@ export async function getOrderByNumber(req, res) {
     }
 
     const order = await getOrderByOrderNumber(orderNumber);
-
-    if (!order) {
-      return res.status(404).json({ error: "Order not found" });
-    }
-
     return res.json({ data: order });
   } catch (err) {
     console.error("[ORDERS] getByNumber error:", err);
-    return res.status(500).json({ error: "Could not fetch order" });
+    const status = err.statusCode || 500;
+    return res.status(status).json({ error: err.message || "Could not fetch order" });
   }
 }
 

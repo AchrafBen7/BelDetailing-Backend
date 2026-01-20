@@ -34,9 +34,14 @@ export async function getOrderByOrderNumber(orderNumber) {
     .from("orders")
     .select("*")
     .eq("order_number", orderNumber)
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
+  if (!data) {
+    const err = new Error("Order not found");
+    err.statusCode = 404;
+    throw err;
+  }
   return data;
 }
 
