@@ -74,6 +74,7 @@ function mapProviderRowToDetailer(row) {
     id: getProviderIdentity(row), // provider_profiles.id (fallback user_id)
     userId: row.user_id ?? null, // auth.users.id
     displayName: row.display_name,
+    companyName: row.company_name ?? null, // ✅ Ajouté pour correspondre au modèle iOS
     bio: row.bio,
     city: row.base_city ?? "",
     postalCode: row.postal_code ?? "",
