@@ -6,6 +6,7 @@ import {
   getOrder,
   getOrderByNumber,
   createOrder,
+  createOrderPaymentIntent,
   cancelOrder,
   updateOrderTrackingController,
   updateOrderStatusController,
@@ -14,6 +15,7 @@ import {
 const router = Router();
 
 router.get("/", requireAuth, listOrders);
+router.post("/payment-intent", requireAuth, createOrderPaymentIntent);
 router.post("/", requireAuth, createOrder);
 router.get("/number/:orderNumber", getOrderByNumber); // Public pour le tracking
 router.get("/:id", requireAuth, getOrder);

@@ -58,17 +58,36 @@ export async function getOrderByNumber(req, res) {
   }
 }
 
-export async function createOrder(req, res) {
+/**
+ * POST /api/v1/orders/payment-intent
+ * Crée un PaymentIntent pour une commande (sans créer la commande)
+ */
+export async function createOrderPaymentIntent(req, res) {
   try {
     const customerId = req.user.id;
     const { items, shipping_address } = req.body;
 
-    const order = await createOrderService({
-      customerId,
-      items,
-      shippingAddress: shipping_address,
-    });
+    // Calculer le montant total sans créer la commande
+    let totalAmount = 0;
+    for (const item of items) {
+      const productId = item?.product?.id || item?.product_id;
+      const quantity = item?.quantity || 1;
 
+      const { data: product, error } = await supabase
+        .from("products")
+        .select("*")
+        .eq("id", productId)
+        .single();
+
+      if (error || !product) {
+        return res.status(404).json({ error: `Product ${productId} not found` });
+      }
+
+      const unitPrice = product.promo_price ?? product.price;
+      totalAmount += unitPrice * quantity;
+    }
+
+    // Récupérer le customer
     const { data: customer, error: customerError } = await supabase
       .from("users")
       .select("id, email, phone, stripe_customer_id")
@@ -79,16 +98,70 @@ export async function createOrder(req, res) {
       return res.status(404).json({ error: "Customer not found" });
     }
 
+    // Créer le PaymentIntent (sans orderId car la commande n'existe pas encore)
     const intent = await createPaymentIntentForOrder({
-      amount: order.total_amount,
+      amount: totalAmount,
       currency: "eur",
       user: customer,
-      orderId: order.id,
+      orderId: null, // Pas encore de commande
     });
 
+    return res.status(200).json({
+      data: {
+        payment_intent_id: intent.id,
+        client_secret: intent.clientSecret,
+        amount: totalAmount,
+      },
+    });
+  } catch (err) {
+    console.error("[ORDERS] createPaymentIntent error:", err);
+    return res.status(500).json({ error: "Could not create payment intent" });
+  }
+}
+
+/**
+ * POST /api/v1/orders
+ * Crée une commande après confirmation du paiement
+ */
+export async function createOrder(req, res) {
+  try {
+    const customerId = req.user.id;
+    const { items, shipping_address, payment_intent_id } = req.body;
+
+    // ✅ VÉRIFIER QUE LE PAIEMENT EST BIEN CONFIRMÉ
+    if (!payment_intent_id) {
+      return res.status(400).json({ error: "payment_intent_id is required" });
+    }
+
+    // Vérifier le statut du PaymentIntent via Stripe
+    const Stripe = (await import("stripe")).default;
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: "2025-11-17.clover",
+    });
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
+
+    if (paymentIntent.status !== "succeeded") {
+      return res.status(400).json({
+        error: `Payment not confirmed. Status: ${paymentIntent.status}`,
+      });
+    }
+
+    // ✅ Maintenant créer la commande
+    const order = await createOrderService({
+      customerId,
+      items,
+      shippingAddress: shipping_address,
+    });
+
+    // Mettre à jour la commande avec le payment_intent_id et le statut "paid"
     const { data: updatedOrder, error: updateError } = await supabase
       .from("orders")
-      .update({ payment_intent_id: intent.id })
+      .update({
+        payment_intent_id: paymentIntent.id,
+        payment_status: "paid",
+        status: "confirmed",
+      })
       .eq("id", order.id)
       .select("*")
       .single();
@@ -98,7 +171,6 @@ export async function createOrder(req, res) {
     return res.status(201).json({
       data: {
         order: updatedOrder,
-        client_secret: intent.clientSecret,
       },
     });
   } catch (err) {
