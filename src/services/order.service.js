@@ -26,6 +26,20 @@ export async function getOrderDetail(orderId, userId) {
   return data;
 }
 
+/**
+ * Récupérer une commande par son order_number (public, pour le tracking)
+ */
+export async function getOrderByOrderNumber(orderNumber) {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("order_number", orderNumber)
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 export async function createOrderService({ customerId, items, shippingAddress }) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("Items are required");
@@ -117,4 +131,45 @@ export async function cancelOrderService(orderId, userId) {
 
   if (error) throw error;
   return true;
+}
+
+/**
+ * Mettre à jour le tracking_number et carrier d'une commande
+ * Appelé quand une commande est expédiée
+ */
+export async function updateOrderTracking(orderId, trackingNumber, carrier, supplierId) {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      tracking_number: trackingNumber,
+      carrier: carrier,
+      supplier_id: supplierId || null,
+      status: "shipped",
+      shipped_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Mettre à jour le statut d'une commande (ex: delivered)
+ */
+export async function updateOrderStatus(orderId, status) {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data;
 }
