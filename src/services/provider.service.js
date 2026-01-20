@@ -59,7 +59,7 @@ async function fetchProviderProfileByAnyId(identifier) {
 }
 
 // DB → DTO
-function mapProviderRowToDetailer(row) {
+export function mapProviderRowToDetailer(row) {
   const prices =
     Array.isArray(row.providerServices)
       ? row.providerServices
@@ -101,7 +101,7 @@ function mapProviderRowToDetailer(row) {
   };
 }
 
-async function fetchProviderServicesMap(providerIds) {
+export async function fetchProviderServicesMap(providerIds) {
   if (!Array.isArray(providerIds) || providerIds.length === 0) {
     return new Map();
   }

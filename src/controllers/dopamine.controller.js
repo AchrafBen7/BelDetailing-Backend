@@ -190,8 +190,8 @@ export async function listMyFavoritesController(req, res) {
       return res.json({ data: [] });
     }
 
-    // Utiliser getAllProviders et mapProviderRowToDetailer pour mapper correctement
-    const { getAllProviders, mapProviderRowToDetailer, fetchProviderServicesMap } = await import("../services/provider.service.js");
+    // Utiliser mapProviderRowToDetailer et fetchProviderServicesMap pour mapper correctement
+    const { mapProviderRowToDetailer, fetchProviderServicesMap } = await import("../services/provider.service.js");
     
     // Récupérer les IDs des providers favoris
     const providerIds = favorites.map(f => f.user_id || f.id).filter(Boolean);
