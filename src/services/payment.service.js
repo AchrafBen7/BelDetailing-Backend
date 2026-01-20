@@ -52,6 +52,8 @@ export async function createPaymentIntentForOrder({
     amount: Math.round(amount * 100),
     currency,
     customer: customerId,
+    // ✅ Capture automatique pour les orders (paiement immédiat)
+    capture_method: "automatic",
     // ✅ Utiliser automatic_payment_methods pour permettre Apple Pay natif
     automatic_payment_methods: {
       enabled: true,
