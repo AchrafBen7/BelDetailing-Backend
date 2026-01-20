@@ -5,6 +5,7 @@ import {
   removeFavorite,
   isFavorite,
   getFavoritesCount,
+  getCustomerFavoritesWithDetails,
 } from "../services/favorite.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
@@ -169,5 +170,50 @@ export async function getFavoritesCountController(req, res) {
   } catch (err) {
     console.error("[FAVORITE] getFavoritesCount error:", err);
     return res.status(500).json({ error: "Could not fetch favorites count" });
+  }
+}
+
+/**
+ * GET /api/v1/providers/favorites
+ * Liste des providers favoris d'un customer avec leurs détails complets
+ */
+export async function listMyFavoritesController(req, res) {
+  try {
+    if (req.user.role !== "customer") {
+      return res.status(403).json({ error: "Only customers can list favorites" });
+    }
+
+    const customerId = req.user.id;
+    const favorites = await getCustomerFavoritesWithDetails(customerId);
+
+    if (favorites.length === 0) {
+      return res.json({ data: [] });
+    }
+
+    // Utiliser getAllProviders et mapProviderRowToDetailer pour mapper correctement
+    const { getAllProviders, mapProviderRowToDetailer, fetchProviderServicesMap } = await import("../services/provider.service.js");
+    
+    // Récupérer les IDs des providers favoris
+    const providerIds = favorites.map(f => f.user_id || f.id).filter(Boolean);
+    
+    // Récupérer les services pour ces providers
+    const servicesMap = await fetchProviderServicesMap(providerIds);
+    
+    // Mapper chaque provider favori
+    const favoriteProviders = favorites
+      .map(fav => {
+        // Ajouter les services au provider
+        const providerWithServices = {
+          ...fav,
+          providerServices: servicesMap.get(fav.user_id) || []
+        };
+        return mapProviderRowToDetailer(providerWithServices);
+      })
+      .filter(Boolean);
+
+    return res.json({ data: favoriteProviders });
+  } catch (err) {
+    console.error("[FAVORITE] listMyFavoritesController error:", err);
+    return res.status(500).json({ error: "Could not fetch favorites" });
   }
 }

@@ -20,6 +20,7 @@ import {
   removeFavoriteController,
   checkFavoriteController,
   getFavoritesCountController,
+  listMyFavoritesController,
 } from "../controllers/dopamine.controller.js";
 import {
   sendMessage,
@@ -38,6 +39,7 @@ router.get("/me/stats", requireAuth, getMyProviderStatsController);
 router.patch("/me", requireAuth, updateMyProviderProfile);
 
 // ⭐ Routes Dopamine (tracking, favoris, messages)
+router.get("/favorites", requireAuth, listMyFavoritesController); // Customer uniquement - Liste des favoris
 router.post("/:id/track-view", trackView); // Public (peut être anonyme)
 router.get("/:id/views-stats", requireAuth, getViewsStats); // Provider uniquement
 router.post("/:id/favorite", requireAuth, addFavoriteController); // Customer uniquement

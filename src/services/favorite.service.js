@@ -130,7 +130,7 @@ export async function getFavoritesCount(providerId, period = "total") {
 }
 
 /**
- * Liste des favoris d'un customer
+ * Liste des favoris d'un customer (IDs seulement)
  * @param {string} customerId - ID du customer
  */
 export async function getCustomerFavorites(customerId) {
@@ -146,6 +146,50 @@ export async function getCustomerFavorites(customerId) {
     return data || [];
   } catch (err) {
     console.error("[FAVORITE] getCustomerFavorites error:", err);
+    throw err;
+  }
+}
+
+/**
+ * Liste des providers favoris d'un customer avec leurs détails complets
+ * @param {string} customerId - ID du customer
+ */
+export async function getCustomerFavoritesWithDetails(customerId) {
+  try {
+    // 1. Récupérer les IDs des providers favoris
+    const favorites = await getCustomerFavorites(customerId);
+    
+    if (favorites.length === 0) {
+      return [];
+    }
+    
+    const providerIds = favorites.map(f => f.provider_id);
+    
+    // 2. Récupérer les profils complets des providers
+    const { data: profiles, error } = await supabase
+      .from("provider_profiles")
+      .select("*")
+      .in("user_id", providerIds);
+    
+    if (error) throw error;
+    
+    // 3. Mapper les résultats avec l'ordre des favoris
+    const favoritesMap = new Map(
+      favorites.map(f => [f.provider_id, f.created_at])
+    );
+    
+    return (profiles || [])
+      .map(profile => ({
+        ...profile,
+        favoritedAt: favoritesMap.get(profile.user_id)
+      }))
+      .sort((a, b) => {
+        const dateA = new Date(a.favoritedAt || 0);
+        const dateB = new Date(b.favoritedAt || 0);
+        return dateB - dateA; // Plus récent en premier
+      });
+  } catch (err) {
+    console.error("[FAVORITE] getCustomerFavoritesWithDetails error:", err);
     throw err;
   }
 }
