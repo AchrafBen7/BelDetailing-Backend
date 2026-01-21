@@ -44,7 +44,8 @@ export async function createOfferController(req, res) {
     // Invalider le cache de la liste des offres
     await invalidateOfferCache(created.id);
     
-    return res.status(201).json(created);
+    // Envelopper dans { data: ... } pour cohérence avec les autres endpoints
+    return res.status(201).json({ data: created });
   } catch (err) {
     console.error("[OFFERS] create error:", err);
     const status = err.statusCode || 500;
@@ -64,7 +65,8 @@ export async function updateOfferController(req, res) {
     // Invalider le cache de l'offre modifiée
     await invalidateOfferCache(id);
     
-    return res.json(updated);
+    // Envelopper dans { data: ... } pour cohérence avec les autres endpoints
+    return res.json({ data: updated });
   } catch (err) {
     console.error("[OFFERS] update error:", err);
     const status = err.statusCode || 500;
@@ -84,7 +86,8 @@ export async function closeOfferController(req, res) {
     // Invalider le cache de l'offre fermée
     await invalidateOfferCache(id);
     
-    return res.json(updated);
+    // Envelopper dans { data: ... } pour cohérence avec les autres endpoints
+    return res.json({ data: updated });
   } catch (err) {
     console.error("[OFFERS] close error:", err);
     const status = err.statusCode || 500;

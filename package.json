@@ -11,6 +11,7 @@
     "test:google-review": "npm test -- googleReview.service.test.js",
     "test:billit": "node scripts/test-billit-connection.js",
     "test:redis": "node scripts/test-redis.js",
+    "test:offer": "node scripts/test-offer-creation.js",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js"
   },

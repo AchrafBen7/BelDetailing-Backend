@@ -96,7 +96,6 @@ export async function createOffer(payload, user) {
   const insertPayload = {
     title: payload.title,
     category: categoryValue, // Première catégorie pour compatibilité avec la colonne existante
-    categories: categoriesArray, // Array de toutes les catégories (text[] en PostgreSQL)
     description: payload.description,
     vehicle_count: payload.vehicleCount,
     price_min: payload.priceMin,
@@ -113,13 +112,58 @@ export async function createOffer(payload, user) {
     company_logo_url: companyProfile?.logo_url ?? null,
   };
 
+  // 🔥 Ajouter categories seulement si la colonne existe (sinon on ignore silencieusement)
+  // Si la migration n'est pas encore appliquée, on stocke seulement dans category
+  if (categoriesArray.length > 0) {
+    insertPayload.categories = categoriesArray;
+  }
+
+  console.log("[OFFERS] Creating offer with payload:", {
+    title: insertPayload.title,
+    category: insertPayload.category,
+    categories: insertPayload.categories,
+    vehicle_count: insertPayload.vehicle_count,
+    price_min: insertPayload.price_min,
+    price_max: insertPayload.price_max,
+    city: insertPayload.city,
+    type: insertPayload.type,
+  });
+
   const { data, error } = await supabase
     .from("offers")
     .insert(insertPayload)
     .select("*")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error("[OFFERS] Insert error:", error);
+    // Si l'erreur est due à la colonne categories qui n'existe pas, on réessaie sans
+    if (error.code === "42703" && error.message?.includes("categories")) {
+      console.warn("[OFFERS] Column 'categories' does not exist, retrying without it...");
+      delete insertPayload.categories;
+      const { data: retryData, error: retryError } = await supabase
+        .from("offers")
+        .insert(insertPayload)
+        .select("*")
+        .single();
+      
+      if (retryError) {
+        console.error("[OFFERS] Retry insert error:", retryError);
+        throw retryError;
+      }
+      
+      console.log("[OFFERS] Offer created successfully (without categories column)");
+      return mapOfferRowToDto(retryData);
+    }
+    throw error;
+  }
+
+  console.log("[OFFERS] Offer created successfully:", {
+    id: data.id,
+    title: data.title,
+    category: data.category,
+    categories: data.categories,
+  });
 
   return mapOfferRowToDto(data);
 }
