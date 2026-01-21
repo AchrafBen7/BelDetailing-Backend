@@ -1,5 +1,6 @@
 // src/services/missionInvoice.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { MISSION_COMMISSION_RATE } from "../config/commission.js";
 
 /**
  * DB → DTO (iOS Mission Invoice)
@@ -113,14 +114,14 @@ export async function createCompanyInvoice({
  * @param {string} params.missionAgreementId - ID du Mission Agreement
  * @param {string} params.missionPaymentId - ID du paiement associé (optionnel)
  * @param {number} params.totalAmount - Montant total avant commission
- * @param {number} params.commissionRate - Taux de commission NIOS (ex: 0.07 pour 7%)
+ * @param {number} params.commissionRate - Taux de commission NIOS (optionnel, default: MISSION_COMMISSION_RATE = 7%)
  * @param {string} params.pdfUrl - URL du PDF facture
  */
 export async function createDetailerInvoice({
   missionAgreementId,
   missionPaymentId = null,
   totalAmount,
-  commissionRate = 0.07, // 7% par défaut
+  commissionRate = MISSION_COMMISSION_RATE, // 7% pour les missions
   pdfUrl,
 }) {
   const commissionAmount = Math.round(totalAmount * commissionRate * 100) / 100;

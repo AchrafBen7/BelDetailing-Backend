@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { BOOKING_COMMISSION_RATE } from "../config/commission.js";
 import { getMonthRange } from "../utils/date.utils.js";
 
 /**
@@ -40,7 +41,7 @@ export async function computeMonthlySummary(providerUserId, month) {
 
   const revenue = data.reduce((sum, b) => sum + Number(b.price), 0);
   const servicesCount = data.length;
-  const commissions = Math.round(revenue * 0.10 * 100) / 100;
+  const commissions = Math.round(revenue * BOOKING_COMMISSION_RATE * 100) / 100; // 10% pour les bookings
   const net = Math.round((revenue - commissions) * 100) / 100;
 
   return {

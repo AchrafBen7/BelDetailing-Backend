@@ -9,6 +9,7 @@ import {
   getMissionInvoiceByNumber,
 } from "../services/missionInvoice.service.js";
 import { getMissionAgreementById } from "../services/missionAgreement.service.js";
+import { MISSION_COMMISSION_RATE } from "../config/commission.js";
 
 /**
  * 🔹 POST /api/v1/mission-invoices/company
@@ -72,7 +73,7 @@ export async function createDetailerInvoiceController(req, res) {
       missionAgreementId,
       missionPaymentId,
       totalAmount,
-      commissionRate: commissionRate || 0.07,
+      commissionRate: commissionRate || MISSION_COMMISSION_RATE, // 7% pour les missions
       pdfUrl,
     });
 

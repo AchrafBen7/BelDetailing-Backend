@@ -7,6 +7,7 @@ import {
   updateMissionAgreementStripeInfo,
   updateMissionAgreementStatus,
 } from "./missionAgreement.service.js";
+import { autoTransferOnPaymentCapture } from "./missionPayout.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -50,6 +51,8 @@ export async function createPaymentIntentForMission({
       missionAgreementId,
       paymentId,
       paymentType: type,
+      userId: agreement.companyId, // Pour les transactions
+      type: "mission", // Pour identifier les paiements de missions
     },
   });
 
@@ -110,6 +113,16 @@ export async function captureMissionPayment(paymentId) {
     if (agreement && agreement.status === "draft") {
       await updateMissionAgreementStatus(agreement.id, "active");
     }
+  }
+
+  // 5) Transférer automatiquement vers le detailer (après capture)
+  try {
+    const { MISSION_COMMISSION_RATE } = await import("../config/commission.js");
+    await autoTransferOnPaymentCapture(paymentId, MISSION_COMMISSION_RATE); // 7% commission pour missions
+  } catch (payoutError) {
+    console.error(`❌ [MISSION PAYMENT] Auto-transfer failed for payment ${paymentId}:`, payoutError);
+    // Ne pas faire échouer la capture si le transfert échoue
+    // Le transfert pourra être retenté manuellement ou via webhook
   }
 
   return {

@@ -97,6 +97,16 @@ app.use("/api/v1/mission-agreements", missionInvoiceRoutes);
 app.use("/api/v1/mission-invoices", missionInvoiceRoutes);
 console.log("✅ [APP] Mission Invoice routes configured");
 
+import missionPayoutRoutes from "./routes/missionPayout.routes.js";
+console.log("✅ [APP] Mission Payout routes loaded");
+app.use("/api/v1/mission-payouts", missionPayoutRoutes);
+console.log("✅ [APP] Mission Payout routes configured");
+
+import missionPaymentScheduleRoutes from "./routes/missionPaymentSchedule.routes.js";
+console.log("✅ [APP] Mission Payment Schedule routes loaded");
+app.use("/api/v1/mission-payments/schedule", missionPaymentScheduleRoutes);
+console.log("✅ [APP] Mission Payment Schedule routes configured");
+
 app.use("/api/v1/reviews", reviewRoutes);
 app.use("/api/v1/cities", cityRoutes);
 app.use("/api/v1/search", searchRoutes);
