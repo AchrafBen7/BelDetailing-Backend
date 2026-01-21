@@ -9,6 +9,10 @@ import {
   updateMissionAgreementDatesController,
   updateMissionAgreementPdfController,
 } from "../controllers/missionAgreement.controller.js";
+import {
+  downloadMissionAgreementPdfController,
+  generateMissionAgreementPdfController,
+} from "../controllers/missionAgreementPdf.controller.js";
 
 const router = Router();
 
@@ -18,6 +22,12 @@ router.use(requireAuth);
 // ⚠️ Routes spécifiques AVANT les routes paramétrées
 // GET /api/v1/mission-agreements (doit être avant /:id)
 router.get("/", listMissionAgreementsController);
+
+// GET /api/v1/mission-agreements/:id/pdf (télécharger) - AVANT /:id pour éviter les conflits
+router.get("/:id/pdf", downloadMissionAgreementPdfController);
+
+// POST /api/v1/mission-agreements/:id/pdf/generate (générer et sauvegarder)
+router.post("/:id/pdf/generate", generateMissionAgreementPdfController);
 
 // GET /api/v1/mission-agreements/:id
 router.get("/:id", getMissionAgreementController);

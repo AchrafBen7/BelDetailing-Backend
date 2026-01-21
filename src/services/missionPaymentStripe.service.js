@@ -125,6 +125,24 @@ export async function captureMissionPayment(paymentId) {
     // Le transfert pourra être retenté manuellement ou via webhook
   }
 
+  // 6) Générer automatiquement les factures (company et detailer)
+  try {
+    const {
+      generateCompanyInvoiceOnPaymentCapture,
+      generateDetailerInvoiceOnPaymentCapture,
+    } = await import("./missionInvoiceAuto.service.js");
+
+    // Générer la facture pour la company
+    await generateCompanyInvoiceOnPaymentCapture(paymentId);
+
+    // Générer la facture de reversement pour le detailer
+    await generateDetailerInvoiceOnPaymentCapture(paymentId);
+  } catch (invoiceError) {
+    console.error(`❌ [MISSION PAYMENT] Auto-invoice generation failed for payment ${paymentId}:`, invoiceError);
+    // Ne pas faire échouer la capture si la génération des factures échoue
+    // Les factures pourront être générées manuellement plus tard
+  }
+
   return {
     paymentId,
     status: "captured",

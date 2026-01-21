@@ -71,7 +71,7 @@ export async function applyToOfferController(req, res) {
       // ⚠️ Ne pas bloquer la candidature si la notification échoue
     }
     
-    return res.status(201).json(created);
+    return res.status(201).json({ data: created });
   } catch (err) {
     console.error("[APPLICATIONS] apply error:", err);
     const status = err.statusCode || 500;
@@ -104,7 +104,31 @@ export async function acceptApplicationController(req, res) {
     }
 
     const { id } = req.params;
-    await acceptApplication(id, req.user);
+    const { finalPrice, depositPercentage, paymentSchedule } = req.body; 
+    // finalPrice : Prix final accepté
+    // depositPercentage : Pourcentage d'acompte (20, 30, etc.)
+    // paymentSchedule : Plan de paiement JSON (optionnel, défaut: one_shot)
+    
+    // 1) Accepter la candidature (met à jour le statut, calcule les montants, rejette les autres)
+    const acceptResult = await acceptApplication(id, finalPrice, depositPercentage, req.user);
+    
+    // 2) Créer le Mission Agreement
+    const missionAgreement = await createMissionAgreement({
+      applicationId: id,
+      offerId: acceptResult.offerId,
+      companyId: acceptResult.companyId,
+      detailerId: acceptResult.detailerId,
+      finalPrice: acceptResult.finalPrice,
+      depositPercentage: acceptResult.depositPercentage,
+      paymentSchedule: paymentSchedule || { type: "one_shot" },
+      offerData: {
+        title: acceptResult.offerTitle,
+        description: acceptResult.offerDescription,
+        vehicleCount: acceptResult.vehicleCount,
+        city: acceptResult.city,
+        postalCode: acceptResult.postalCode,
+      },
+    });
     
     // ✅ ENVOYER NOTIFICATION AU PROVIDER (candidature acceptée)
     try {
@@ -133,6 +157,7 @@ export async function acceptApplicationController(req, res) {
             type: "application_accepted",
             offer_id: application.offer_id,
             application_id: id,
+            mission_agreement_id: missionAgreement.id,
           },
         });
       }
@@ -141,7 +166,47 @@ export async function acceptApplicationController(req, res) {
       // ⚠️ Ne pas bloquer l'acceptation si la notification échoue
     }
     
-    return res.json({ success: true });
+    // ✅ CRÉER LES PAIEMENTS INITIAUX AUTOMATIQUEMENT
+    try {
+      const { createInitialMissionPayments } = await import("../services/missionPaymentSchedule.service.js");
+      await createInitialMissionPayments(missionAgreement.id, true); // authorizeAll = true
+      console.log(`✅ [APPLICATIONS] Initial payments created for agreement ${missionAgreement.id}`);
+    } catch (paymentError) {
+      console.error("[APPLICATIONS] Failed to create initial payments:", paymentError);
+      // Ne pas faire échouer l'acceptation si la création des paiements échoue
+      // Les paiements pourront être créés manuellement plus tard
+    }
+
+    // ✅ GÉNÉRER LE PDF DU MISSION AGREEMENT AUTOMATIQUEMENT
+    try {
+      const { generateAndSaveMissionAgreementPdf } = await import("../services/missionAgreementPdf.service.js");
+      await generateAndSaveMissionAgreementPdf(missionAgreement.id);
+      console.log(`✅ [APPLICATIONS] PDF generated for agreement ${missionAgreement.id}`);
+    } catch (pdfError) {
+      console.error("[APPLICATIONS] Failed to generate PDF:", pdfError);
+      // Ne pas faire échouer l'acceptation si la génération du PDF échoue
+      // Le PDF pourra être généré manuellement plus tard
+    }
+
+    // ✅ CRÉER LA CONVERSATION DE CHAT AUTOMATIQUEMENT
+    try {
+      const { createMissionChat } = await import("../services/missionChat.service.js");
+      const conversation = await createMissionChat(missionAgreement.id);
+      if (conversation) {
+        console.log(`✅ [APPLICATIONS] Chat conversation created for agreement ${missionAgreement.id}`);
+      }
+    } catch (chatError) {
+      console.error("[APPLICATIONS] Failed to create chat conversation:", chatError);
+      // Ne pas faire échouer l'acceptation si la création de la conversation échoue
+      // La conversation pourra être créée manuellement plus tard
+    }
+    
+    return res.json({ 
+      data: {
+        ...acceptResult,
+        missionAgreement,
+      }
+    });
   } catch (err) {
     console.error("[APPLICATIONS] accept error:", err);
     const status = err.statusCode || 500;
