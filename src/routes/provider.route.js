@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middlewares/auth.middleware.js";
+import { cacheMiddleware } from "../middlewares/cache.middleware.js";
 import {
   listProviders,
   getProvider,
@@ -62,10 +63,29 @@ router.delete("/services/:id", requireAuth, deleteServiceController);
 router.get("/:id/services", getProviderServicesController);
 router.get("/:id/reviews", getProviderReviewsController);
 router.get("/:id/stats", requireAuth, getProviderStatsController);
-router.get("/:id", getProvider);
+// Détail d'un provider (cache 15 min)
+router.get(
+  "/:id",
+  cacheMiddleware({
+    ttl: 900, // 15 minutes
+    keyGenerator: (req) => `provider:${req.params.id}`,
+  }),
+  getProvider
+);
 
-// ⭐ Liste de tous les prestataires (doit être en dernier)
-router.get("/", listProviders);
+// ⭐ Liste de tous les prestataires (doit être en dernier) - Cache 10 min
+router.get(
+  "/",
+  cacheMiddleware({
+    ttl: 600, // 10 minutes
+    keyGenerator: (req) => {
+      // Inclure les query params dans la clé pour différencier les filtres
+      const params = new URLSearchParams(req.query).toString();
+      return `providers:list:${params || "default"}`;
+    },
+  }),
+  listProviders
+);
 
 
 export default router;

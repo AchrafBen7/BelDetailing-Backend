@@ -6,6 +6,7 @@ import {
   closeOffer,
   deleteOffer,
 } from "../services/offer.service.js";
+import { invalidateOfferCache } from "../middlewares/cache.middleware.js";
 
 export async function listOffers(req, res) {
   try {
@@ -39,6 +40,10 @@ export async function createOfferController(req, res) {
     }
 
     const created = await createOffer(req.body, req.user);
+    
+    // Invalider le cache de la liste des offres
+    await invalidateOfferCache(created.id);
+    
     return res.status(201).json(created);
   } catch (err) {
     console.error("[OFFERS] create error:", err);
@@ -55,6 +60,10 @@ export async function updateOfferController(req, res) {
 
     const { id } = req.params;
     const updated = await updateOffer(id, req.body, req.user);
+    
+    // Invalider le cache de l'offre modifiée
+    await invalidateOfferCache(id);
+    
     return res.json(updated);
   } catch (err) {
     console.error("[OFFERS] update error:", err);
@@ -71,6 +80,10 @@ export async function closeOfferController(req, res) {
 
     const { id } = req.params;
     const updated = await closeOffer(id, req.user);
+    
+    // Invalider le cache de l'offre fermée
+    await invalidateOfferCache(id);
+    
     return res.json(updated);
   } catch (err) {
     console.error("[OFFERS] close error:", err);
@@ -87,6 +100,10 @@ export async function deleteOfferController(req, res) {
 
     const { id } = req.params;
     await deleteOffer(id, req.user);
+    
+    // Invalider le cache de l'offre supprimée
+    await invalidateOfferCache(id);
+    
     return res.json({ success: true });
   } catch (err) {
     console.error("[OFFERS] delete error:", err);

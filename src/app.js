@@ -7,6 +7,15 @@ import { autoCaptureBookings } from "./cron/autoCapture.js";
 import { supabaseAdmin as supabase } from "./config/supabase.js";
 import { httpLogger } from "./observability/logger.js";
 import { metricsEndpoint, metricsMiddleware } from "./observability/metrics.js";
+import { getRedisClient } from "./config/redis.js";
+
+// Initialiser Redis au démarrage (optionnel, mais recommandé pour tester la connexion)
+try {
+  const redis = getRedisClient();
+  console.log("🔵 [Redis] Initializing Redis connection...");
+} catch (err) {
+  console.warn("⚠️ [Redis] Redis not available, continuing without cache:", err.message);
+}
 
 import authRoutes from "./routes/auth.routes.js";
 import profileRoutes from "./routes/profile.routes.js";

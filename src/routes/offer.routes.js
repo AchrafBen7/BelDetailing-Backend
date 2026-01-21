@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middlewares/auth.middleware.js";
+import { cacheMiddleware } from "../middlewares/cache.middleware.js";
 
 import {
   listOffers,
@@ -24,11 +25,30 @@ import {
 const router = Router();
 
 // LIST & CREATE
-router.get("/", listOffers);
+// Liste des offres (cache 5 min)
+router.get(
+  "/",
+  cacheMiddleware({
+    ttl: 300, // 5 minutes
+    keyGenerator: (req) => {
+      const params = new URLSearchParams(req.query).toString();
+      return `offers:list:${params || "default"}`;
+    },
+  }),
+  listOffers
+);
 router.post("/", requireAuth, createOfferController);
 
 // DETAIL & UPDATE & DELETE & CLOSE
-router.get("/:id", getOffer);
+// Détail d'une offre (cache 10 min)
+router.get(
+  "/:id",
+  cacheMiddleware({
+    ttl: 600, // 10 minutes
+    keyGenerator: (req) => `offer:${req.params.id}`,
+  }),
+  getOffer
+);
 router.patch("/:id", requireAuth, updateOfferController);
 router.post("/:id/close", requireAuth, closeOfferController);
 router.delete("/:id", requireAuth, deleteOfferController);

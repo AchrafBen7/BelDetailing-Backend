@@ -10,6 +10,7 @@
     "test:chat": "npm test -- chat.service.test.js",
     "test:google-review": "npm test -- googleReview.service.test.js",
     "test:billit": "node scripts/test-billit-connection.js",
+    "test:redis": "node scripts/test-redis.js",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js"
   },
@@ -38,6 +39,7 @@
     "express-rate-limit": "^7.5.0",
     "fast-xml-parser": "^4.5.3",
     "helmet": "^8.1.0",
+    "ioredis": "^5.9.2",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.2.0",
     "multer": "^2.0.2",

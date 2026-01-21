@@ -10,6 +10,7 @@ import {
   getProviderStats,
   getProviderProfileIdForUser,
 } from "../services/provider.service.js";
+import { invalidateProviderCache } from "../middlewares/cache.middleware.js";
 
 export async function listProviders(req, res) {
   try {
@@ -61,6 +62,13 @@ export async function updateMyProviderProfile(req, res) {
     }
 
     const updated = await updateProviderProfile(req.user.id, req.body);
+    
+    // Invalider le cache du provider modifié
+    const provider = await getProviderProfileIdForUser(req.user.id);
+    if (provider?.id) {
+      await invalidateProviderCache(provider.id);
+    }
+    
     return res.json(updated);
   } catch (err) {
     console.error("[PROVIDERS] updateMyProviderProfile error:", err);

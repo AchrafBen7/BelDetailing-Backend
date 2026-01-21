@@ -2,6 +2,7 @@ import { shutdownTracing } from "./observability/tracing.js";
 import app from "./app.js";
 import "dotenv/config";
 import dotenv from "dotenv";
+import { getRedisClient } from "./config/redis.js";
 dotenv.config();
 
 console.log("SERVER ENV SUPABASE_URL =", process.env.SUPABASE_URL);
@@ -14,7 +15,18 @@ const server = app.listen(PORT, () => {
 
 const shutdown = signal => {
   console.log(`Received ${signal}, shutting down...`);
-  server.close(() => {
+  server.close(async () => {
+    // Fermer la connexion Redis proprement
+    try {
+      const redis = getRedisClient();
+      if (redis) {
+        await redis.quit();
+        console.log("✅ [Redis] Connection closed");
+      }
+    } catch (err) {
+      console.error("❌ [Redis] Error closing connection:", err);
+    }
+    
     shutdownTracing()
       .then(() => {
         console.log("HTTP server closed.");
