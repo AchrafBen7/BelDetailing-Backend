@@ -76,6 +76,27 @@ app.use("/api/v1/bookings", noShowRoutes);
 app.use("/api/v1/bookings", bookingsRoutes);
 app.use("/api/v1/offers", offerRoutes);
 app.use("/api/v1/applications", applicationRoutes);
+console.log("✅ [APP] Application routes configured");
+
+import missionAgreementRoutes from "./routes/missionAgreement.routes.js";
+import missionPaymentRoutes from "./routes/missionPayment.routes.js";
+import missionInvoiceRoutes from "./routes/missionInvoice.routes.js";
+console.log("✅ [APP] Mission routes loaded");
+
+// Mission Agreements (doit être avant mission-payments pour éviter les conflits)
+app.use("/api/v1/mission-agreements", missionAgreementRoutes);
+console.log("✅ [APP] Mission Agreement routes configured");
+
+// Mission Payments (routes imbriquées pour /mission-agreements/:id/payments)
+app.use("/api/v1/mission-agreements", missionPaymentRoutes);
+app.use("/api/v1/mission-payments", missionPaymentRoutes);
+console.log("✅ [APP] Mission Payment routes configured");
+
+// Mission Invoices (routes imbriquées pour /mission-agreements/:id/invoices)
+app.use("/api/v1/mission-agreements", missionInvoiceRoutes);
+app.use("/api/v1/mission-invoices", missionInvoiceRoutes);
+console.log("✅ [APP] Mission Invoice routes configured");
+
 app.use("/api/v1/reviews", reviewRoutes);
 app.use("/api/v1/cities", cityRoutes);
 app.use("/api/v1/search", searchRoutes);
@@ -84,6 +105,11 @@ app.use("/api/v1/services", servicePhotosRoutes);
 app.use("/api/v1/media", mediaRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/stripe", stripeConnectRoutes);
+
+import sepaDirectDebitRoutes from "./routes/sepaDirectDebit.routes.js";
+console.log("✅ [APP] SEPA Direct Debit routes loaded");
+app.use("/api/v1/sepa", sepaDirectDebitRoutes);
+console.log("✅ [APP] SEPA Direct Debit routes configured");
 // ⚠️ IMPORTANT: Les routes de favoris doivent être AVANT productRoutes
 // pour éviter que /favorites soit capturé par /:id
 app.use("/api/v1/products", productFavoriteRoutes);
