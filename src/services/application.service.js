@@ -8,7 +8,9 @@ function mapApplicationRowToDto(row) {
     id: row.id,
     offerId: row.offer_id,
     providerId: row.provider_id,
-    message: row.message,
+    message: row.message ?? null, // Message humain (optionnel)
+    proposedPrice: row.proposed_price ? Number(row.proposed_price) : null, // Contre-proposition detailer
+    finalPrice: row.final_price ? Number(row.final_price) : null, // Prix final accepté par company
     attachments: row.attachments ?? null, // JSON array → [Attachment]
     status: row.status,
     createdAt: row.created_at,
@@ -89,7 +91,8 @@ export async function applyToOffer(offerId, payload, user) {
   const insertPayload = {
     offer_id: offerId,
     provider_id: user.id,
-    message: payload.message ?? null,
+    message: payload.message ?? null, // Message humain (optionnel)
+    proposed_price: payload.proposedPrice ? Number(payload.proposedPrice) : null, // Contre-proposition prix (optionnel)
     attachments: payload.attachments ?? null, // JSON array of Attachment
     status: "submitted",
     provider_name: providerProfile?.display_name ?? null,
@@ -209,8 +212,121 @@ async function setApplicationStatusAsCompany(id, newStatus, user) {
 
 
 
-export async function acceptApplication(id, user) {
-  return setApplicationStatusAsCompany(id, "accepted", user);
+// 🟦 ACCEPT – POST /applications/:id/accept  (company)
+// Accepte une candidature et prépare la création du Mission Agreement
+export async function acceptApplication(id, finalPrice, depositPercentage, user) {
+  // 1) Récupérer l'application
+  const { data: appRow, error: appError } = await supabase
+    .from("applications")
+    .select("id, offer_id, provider_id, proposed_price, status")
+    .eq("id", id)
+    .single();
+
+  if (appError) throw appError;
+  if (!appRow) {
+    const err = new Error("Application not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // 2) Vérifier que l'offre appartient à cette company
+  const { data: offerRow, error: offerError } = await supabase
+    .from("offers")
+    .select("id, created_by, title, description, vehicle_count, city, postal_code")
+    .eq("id", appRow.offer_id)
+    .single();
+
+  if (offerError) throw offerError;
+  if (!offerRow || offerRow.created_by !== user.id) {
+    const err = new Error("Forbidden");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  // 🚫 RÈGLE : impossible d'accepter une application retirée ou déjà acceptée/refusée
+  if (appRow.status === "withdrawn") {
+    const err = new Error("Cannot accept an application that was withdrawn by the provider");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (appRow.status === "accepted" || appRow.status === "refused") {
+    const err = new Error("Application is already finalized (" + appRow.status + ")");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 3) Calculer les montants (acompte et solde)
+  const price = finalPrice ?? appRow.proposed_price ?? null;
+  if (!price || price <= 0) {
+    const err = new Error("Final price must be provided and greater than 0");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const depositPct = depositPercentage ?? 30; // Par défaut 30%
+  const depositAmount = Math.round((price * depositPct) / 100 * 100) / 100; // Arrondi à 2 décimales
+  const remainingAmount = Math.round((price - depositAmount) * 100) / 100;
+
+  // 4) Mettre à jour l'application (statut + prix final)
+  const { error: updateError } = await supabase
+    .from("applications")
+    .update({
+      status: "accepted",
+      final_price: price,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+
+  if (updateError) throw updateError;
+
+  // 5) Rejeter automatiquement toutes les autres candidatures pour cette offre
+  const { error: rejectOthersError } = await supabase
+    .from("applications")
+    .update({
+      status: "refused",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("offer_id", appRow.offer_id)
+    .neq("id", id)
+    .eq("status", "submitted"); // Seulement celles en attente
+
+  if (rejectOthersError) {
+    console.warn("[APPLICATIONS] Error rejecting other applications:", rejectOthersError);
+    // Ne pas faire échouer l'acceptation si cette étape échoue
+  }
+
+  // 6) Fermer l'offre (ou la mettre en "in_progress")
+  const { error: closeOfferError } = await supabase
+    .from("offers")
+    .update({
+      status: "closed", // ou "in_progress" selon ta logique
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", appRow.offer_id);
+
+  if (closeOfferError) {
+    console.warn("[APPLICATIONS] Error closing offer:", closeOfferError);
+    // Ne pas faire échouer l'acceptation si cette étape échoue
+  }
+
+  // 7) Retourner les données pour créer le Mission Agreement (sera fait dans le controller)
+  return {
+    success: true,
+    applicationId: id,
+    offerId: appRow.offer_id,
+    companyId: user.id,
+    detailerId: appRow.provider_id,
+    finalPrice: price,
+    depositPercentage: depositPct,
+    depositAmount,
+    remainingAmount,
+    offerTitle: offerRow.title,
+    offerDescription: offerRow.description,
+    vehicleCount: offerRow.vehicle_count,
+    city: offerRow.city,
+    postalCode: offerRow.postal_code,
+  };
 }
 
 export async function refuseApplication(id, user) {
