@@ -75,9 +75,28 @@ export async function createOffer(payload, user) {
     console.warn("[OFFERS] company_profiles lookup error:", companyError);
   }
 
+  // 🔥 Support pour catégories multiples (array) ou une seule (string) pour compatibilité
+  let categoryValue;
+  let categoriesArray = [];
+  
+  if (Array.isArray(payload.categories) && payload.categories.length > 0) {
+    // Si plusieurs catégories → on prend la première pour la colonne category (compatibilité)
+    // et on stocke toutes les catégories dans un champ JSON/array si la DB le supporte
+    categoryValue = payload.categories[0];
+    categoriesArray = payload.categories;
+  } else if (payload.category) {
+    // Compatibilité avec l'ancien format
+    categoryValue = payload.category;
+    categoriesArray = [payload.category];
+  } else {
+    categoryValue = "carCleaning"; // Fallback
+    categoriesArray = ["carCleaning"];
+  }
+
   const insertPayload = {
     title: payload.title,
-    category: payload.category, // ex: "carCleaning"
+    category: categoryValue, // Première catégorie pour compatibilité avec la colonne existante
+    categories: categoriesArray, // Array de toutes les catégories (text[] en PostgreSQL)
     description: payload.description,
     vehicle_count: payload.vehicleCount,
     price_min: payload.priceMin,
