@@ -51,6 +51,7 @@ export function cacheMiddleware(options = {}) {
 
       if (cached) {
         console.log(`✅ [CACHE] Hit: ${cacheKey}`);
+        console.log(`🔑 [CACHE] Key in Redis: ${cacheKey}`);
         const data = JSON.parse(cached);
         
         // Ajouter les headers de cache
@@ -68,6 +69,9 @@ export function cacheMiddleware(options = {}) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           redis
             .setex(cacheKey, ttl, JSON.stringify(data))
+            .then(() => {
+              console.log(`💾 [CACHE] Saved to Redis: ${cacheKey} (TTL: ${ttl}s)`);
+            })
             .catch((err) => {
               console.error(`❌ [CACHE] Error setting cache for ${cacheKey}:`, err);
             });
