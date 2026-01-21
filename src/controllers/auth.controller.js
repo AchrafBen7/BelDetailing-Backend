@@ -243,8 +243,9 @@ export async function login(req, res) {
 
   const { session, user } = data;
 
-  // Lecture public.users
-  let { data: userRow, error: userError } = await supabase
+  // ⚠️ IMPORTANT : Utiliser supabaseAdmin pour éviter les problèmes de RLS
+  // Lecture public.users avec SERVICE_ROLE (bypass RLS)
+  let { data: userRow, error: userError } = await supabaseAdmin
     .from("users")
     .select("*")
     .eq("id", user.id)
@@ -252,9 +253,9 @@ export async function login(req, res) {
 
   if (userError) return res.status(500).json({ error: userError.message });
 
-  // Si absent → recreate automatiquement
+  // Si absent → recreate automatiquement avec SERVICE_ROLE (bypass RLS)
   if (!userRow) {
-    const { data: upserted, error: upsertError } = await supabase
+    const { data: upserted, error: upsertError } = await supabaseAdmin
       .from("users")
       .upsert(
         {
@@ -311,7 +312,8 @@ export async function refreshToken(req, res) {
 
   const { session, user } = data;
 
-  const { data: userRow, error: userError } = await supabase
+  // ⚠️ IMPORTANT : Utiliser supabaseAdmin pour éviter les problèmes de RLS
+  const { data: userRow, error: userError } = await supabaseAdmin
     .from("users")
     .select("*")
     .eq("id", user.id)

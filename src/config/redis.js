@@ -8,7 +8,16 @@ let redisClient = null;
  */
 export function getRedisClient() {
   if (!redisClient) {
-    const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+    // ⚠️ IMPORTANT : En production (Render), REDIS_URL doit être défini dans les variables d'environnement
+    // Si REDIS_URL n'est pas défini, on ne crée PAS de client Redis (évite les erreurs de connexion)
+    const redisUrl = process.env.REDIS_URL;
+    
+    if (!redisUrl) {
+      console.warn("⚠️ [Redis] REDIS_URL not set - Redis cache will be disabled");
+      return null;
+    }
+    
+    console.log("🔵 [Redis] Connecting to:", redisUrl.replace(/:[^:@]+@/, ":****@"));
     
     redisClient = new Redis(redisUrl, {
       retryStrategy: (times) => {
