@@ -7,15 +7,7 @@ import { autoCaptureBookings } from "./cron/autoCapture.js";
 import { supabaseAdmin as supabase } from "./config/supabase.js";
 import { httpLogger } from "./observability/logger.js";
 import { metricsEndpoint, metricsMiddleware } from "./observability/metrics.js";
-import { getRedisClient } from "./config/redis.js";
-
-// Initialiser Redis au démarrage (optionnel, mais recommandé pour tester la connexion)
-try {
-  const redis = getRedisClient();
-  console.log("🔵 [Redis] Initializing Redis connection...");
-} catch (err) {
-  console.warn("⚠️ [Redis] Redis not available, continuing without cache:", err.message);
-}
+// Redis sera initialisé après le démarrage du serveur (dans server.js)
 
 import authRoutes from "./routes/auth.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
@@ -44,6 +36,7 @@ import googleReviewRoutes from "./routes/googleReview.routes.js";
 import portfolioRoutes from "./routes/portfolio.routes.js";
 import servicePhotosRoutes from "./routes/servicePhotos.routes.js";
 import noShowRoutes from "./routes/noShow.routes.js";
+console.log("✅ [APP] All routes loaded");
 const app = express();
 
 app.use(helmet());

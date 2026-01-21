@@ -15,7 +15,18 @@ export function cacheMiddleware(options = {}) {
   return async (req, res, next) => {
     // Si Redis n'est pas disponible, on passe sans cache
     const redis = getRedisClient();
-    if (!redis || redis.status !== "ready") {
+    
+    // Si Redis n'est pas connecté, essayer de se connecter (non-bloquant)
+    if (redis && redis.status === "end") {
+      try {
+        await redis.connect();
+      } catch (err) {
+        // Si connexion échoue, continuer sans cache
+        return next();
+      }
+    }
+    
+    if (!redis || (redis.status !== "ready" && redis.status !== "connecting")) {
       return next();
     }
 

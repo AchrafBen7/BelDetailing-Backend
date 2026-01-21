@@ -23,8 +23,11 @@ if (enabled) {
     instrumentations: [getNodeAutoInstrumentations()],
   });
 
-  sdk.start().catch(err => {
-    console.error("OpenTelemetry start error:", err);
+  // Démarrer OpenTelemetry de manière non-bloquante
+  setImmediate(() => {
+    sdk.start().catch(err => {
+      console.error("OpenTelemetry start error:", err);
+    });
   });
 }
 

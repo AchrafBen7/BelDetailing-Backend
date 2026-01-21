@@ -18,8 +18,9 @@ export function getRedisClient() {
       maxRetriesPerRequest: 3,
       enableReadyCheck: true,
       enableOfflineQueue: true, // Permet de mettre en queue si pas encore connecté
-      connectTimeout: 10000, // 10 secondes timeout
-      lazyConnect: false, // Se connecte immédiatement
+      connectTimeout: 5000, // 5 secondes timeout (réduit)
+      lazyConnect: true, // ⚡ Connexion lazy - ne bloque pas le démarrage
+      showFriendlyErrorStack: false,
     });
 
     redisClient.on("error", (err) => {

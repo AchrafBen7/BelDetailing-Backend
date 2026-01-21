@@ -4,10 +4,15 @@
 import axios from "axios";
 
 const BILLIT_API_BASE_URL = process.env.BILLIT_API_BASE_URL || "https://api.billit.be/v1";
+// Charger dotenv si pas déjà chargé
+import dotenv from "dotenv";
+dotenv.config();
+
 const BILLIT_API_KEY = process.env.BILLIT_API_KEY;
 
 if (!BILLIT_API_KEY) {
-  console.warn("⚠️ BILLIT_API_KEY not set - Peppol invoices will not be sent");
+  // Log seulement si vraiment utilisé, pas au chargement du module
+  // console.warn("⚠️ BILLIT_API_KEY not set - Peppol invoices will not be sent");
 }
 
 /**
