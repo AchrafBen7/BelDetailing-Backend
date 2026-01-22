@@ -46,8 +46,9 @@ export async function createOfferController(req, res) {
     console.log("🔄 [OFFERS] Checking SEPA mandate for company:", req.user.id);
     const sepaMandate = await getSepaMandate(req.user.id);
     
-    if (!sepaMandate || sepaMandate.status !== "active") {
-      console.warn("⚠️ [OFFERS] No active SEPA mandate found for company:", req.user.id);
+    // Accepter "active" et "pending" (pending = accepté par l'utilisateur, en attente de validation bancaire)
+    if (!sepaMandate || (sepaMandate.status !== "active" && sepaMandate.status !== "pending")) {
+      console.warn("⚠️ [OFFERS] No active/pending SEPA mandate found for company:", req.user.id);
       return res.status(400).json({ 
         error: "SEPA_MANDATE_REQUIRED",
         message: "Un mandat SEPA actif est requis pour créer une offre. Veuillez configurer votre mandat SEPA avant de continuer.",

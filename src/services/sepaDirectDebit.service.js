@@ -201,9 +201,10 @@ export async function getSepaMandate(companyUserId) {
 
         console.log("[SEPA] Retrieved mandate:", mandate.id, "status:", mandate.status);
 
-        // 5) Vérifier que le mandate est actif
-        // Selon Stripe, un mandate "active" est le seul qui permet les prélèvements
-        if (mandate.status === "active") {
+        // 5) Vérifier que le mandate est actif ou pending
+        // "active" = mandate validé et utilisable
+        // "pending" = mandate accepté par l'utilisateur mais en attente de validation bancaire (acceptable pour créer des offres)
+        if (mandate.status === "active" || mandate.status === "pending") {
           return {
             id: mandate.id,
             status: mandate.status, // "active"
