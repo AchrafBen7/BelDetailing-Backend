@@ -174,7 +174,64 @@ export async function getSepaMandate(companyUserId) {
 
     const customerId = companyUser.stripe_customer_id;
 
-    // 2) Récupérer TOUS les payment methods SEPA du customer
+    // 2) ✅ NOUVEAU : Chercher d'abord dans les Setup Intents récents (plus fiable pour SEPA)
+    // Les Setup Intents SEPA contiennent souvent le mandate directement
+    const setupIntents = await stripe.setupIntents.list({
+      customer: customerId,
+      limit: 20, // Récupérer les 20 derniers Setup Intents
+    });
+
+    // Parcourir les Setup Intents pour trouver un mandate
+    for (const si of setupIntents.data) {
+      // Vérifier si c'est un Setup Intent SEPA qui a réussi
+      if (si.status === "succeeded" && 
+          si.payment_method_types.includes("sepa_debit") && 
+          si.mandate) {
+        const mandateId = si.mandate;
+        console.log("[SEPA] Found mandate in Setup Intent:", si.id, "mandate:", mandateId);
+        
+        try {
+          const mandate = await stripe.mandates.retrieve(mandateId);
+          console.log("[SEPA] Retrieved mandate from Setup Intent:", mandate.id, "status:", mandate.status);
+          
+          if (mandate.status === "active" || mandate.status === "pending") {
+            // Récupérer le payment method associé pour les détails
+            const pmId = si.payment_method;
+            let pmDetails = null;
+            if (pmId) {
+              try {
+                const pm = await stripe.paymentMethods.retrieve(pmId);
+                pmDetails = pm.sepa_debit;
+              } catch (pmError) {
+                console.warn("[SEPA] Could not retrieve payment method details:", pmError.message);
+              }
+            }
+            
+            return {
+              id: mandate.id,
+              status: mandate.status,
+              type: mandate.type,
+              paymentMethodId: pmId,
+              customerId: customerId,
+              acceptance: mandate.acceptance,
+              customer_acceptance: mandate.customer_acceptance,
+              details: pmDetails ? {
+                bankCode: pmDetails.bank_code,
+                branchCode: pmDetails.branch_code,
+                last4: pmDetails.last4,
+                fingerprint: pmDetails.fingerprint,
+                country: pmDetails.country,
+              } : null,
+            };
+          }
+        } catch (mandateError) {
+          console.error("[SEPA] Error retrieving mandate from Setup Intent:", mandateError.message);
+          continue;
+        }
+      }
+    }
+
+    // 3) Fallback : Récupérer TOUS les payment methods SEPA du customer
     const paymentMethods = await stripe.paymentMethods.list({
       customer: customerId,
       type: "sepa_debit",
@@ -186,7 +243,7 @@ export async function getSepaMandate(companyUserId) {
       return null;
     }
 
-    // 3) Parcourir TOUS les payment methods SEPA pour trouver un mandate actif
+    // 4) Parcourir TOUS les payment methods SEPA pour trouver un mandate actif
     for (const sepaPaymentMethod of paymentMethods.data) {
       const mandateId = sepaPaymentMethod.sepa_debit?.mandate;
 
@@ -233,7 +290,7 @@ export async function getSepaMandate(companyUserId) {
       }
     }
 
-    // 6) Aucun mandate actif trouvé
+    // 7) Aucun mandate actif trouvé
     console.log("[SEPA] No active mandate found for customer:", customerId);
     return null;
   } catch (error) {

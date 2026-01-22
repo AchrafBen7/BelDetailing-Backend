@@ -76,8 +76,24 @@ async function checkSepaMandate() {
       console.log(`📋 Setup Intent: ${si.id}`);
       console.log(`   Status: ${si.status}`);
       console.log(`   Payment Method: ${si.payment_method || "❌ NO PAYMENT METHOD"}`);
+      console.log(`   Mandate: ${si.mandate || "❌ NO MANDATE"}`); // ✅ IMPORTANT : Afficher le mandate
       console.log(`   Created: ${new Date(si.created * 1000).toISOString()}`);
       console.log(`   Payment Method Types: ${si.payment_method_types.join(", ")}`);
+      
+      // Si un mandate existe, le récupérer et afficher son statut
+      if (si.mandate) {
+        try {
+          const mandate = await stripe.mandates.retrieve(si.mandate);
+          console.log(`   ✅ Mandate found: ${mandate.id}`);
+          console.log(`   Mandate Status: ${mandate.status}`);
+          console.log(`   Mandate Type: ${mandate.type}`);
+          if (mandate.customer_acceptance) {
+            console.log(`   Customer Acceptance Type: ${mandate.customer_acceptance.type}`);
+          }
+        } catch (err) {
+          console.error(`   ❌ Error retrieving mandate: ${err.message}`);
+        }
+      }
       console.log("");
     }
 
