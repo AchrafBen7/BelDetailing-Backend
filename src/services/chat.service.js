@@ -66,22 +66,14 @@ export async function createOrGetConversation({
     booking_id: booking_id || null,
   };
 
-  // Ajouter application_id si fourni (si la colonne existe)
+  // Ajouter application_id et offer_id seulement si fournis
+  // (ces colonnes peuvent ne pas exister dans toutes les versions de la DB)
   if (application_id) {
-    try {
-      insertPayload.application_id = application_id;
-    } catch (e) {
-      console.warn("[CHAT] application_id column may not exist, continuing without it");
-    }
+    insertPayload.application_id = application_id;
   }
 
-  // Ajouter offer_id si fourni (si la colonne existe)
   if (offer_id) {
-    try {
-      insertPayload.offer_id = offer_id;
-    } catch (e) {
-      console.warn("[CHAT] offer_id column may not exist, continuing without it");
-    }
+    insertPayload.offer_id = offer_id;
   }
 
   const { data: created, error: createError } = await supabase
@@ -89,6 +81,25 @@ export async function createOrGetConversation({
     .insert(insertPayload)
     .select("*")
     .single();
+
+  // Si l'erreur est due à une colonne inexistante, réessayer sans ces colonnes
+  if (createError && createError.code === "42703") {
+    console.warn("[CHAT] Column does not exist, retrying without application_id/offer_id");
+    const fallbackPayload = {
+      provider_id,
+      customer_id,
+      booking_id: booking_id || null,
+    };
+    
+    const { data: fallbackCreated, error: fallbackError } = await supabase
+      .from("conversations")
+      .insert(fallbackPayload)
+      .select("*")
+      .single();
+    
+    if (fallbackError) throw fallbackError;
+    return fallbackCreated;
+  }
 
   if (createError) throw createError;
   return created;

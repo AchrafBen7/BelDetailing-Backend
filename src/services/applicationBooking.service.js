@@ -71,20 +71,45 @@ export async function createBookingFromApplication({
     commission_rate: BOOKING_COMMISSION_RATE,
     invoice_sent: false,
     provider_banner_url: provider.banner_url || provider.logo_url || null,
-    // Métadonnées pour lier au système de missions
-    application_id: applicationId,
-    offer_id: offerId,
     transport_fee: 0, // Pas de transport pour les missions (service sur site company)
     transport_distance_km: null,
   };
 
-  const { data: booking, error: bookingError } = await supabase
+  // Ajouter application_id et offer_id seulement si fournis (colonnes optionnelles)
+  if (applicationId) {
+    bookingData.application_id = applicationId;
+  }
+  if (offerId) {
+    bookingData.offer_id = offerId;
+  }
+
+  let booking;
+  const { data: insertedBooking, error: bookingError } = await supabase
     .from("bookings")
     .insert(bookingData)
     .select("*")
     .single();
 
-  if (bookingError) throw bookingError;
+  // Si l'erreur est due à une colonne inexistante, réessayer sans ces colonnes
+  if (bookingError && bookingError.code === "42703") {
+    console.warn("[APPLICATION BOOKING] Column does not exist, retrying without application_id/offer_id");
+    const fallbackData = { ...bookingData };
+    delete fallbackData.application_id;
+    delete fallbackData.offer_id;
+    
+    const { data: fallbackBooking, error: fallbackError } = await supabase
+      .from("bookings")
+      .insert(fallbackData)
+      .select("*")
+      .single();
+    
+    if (fallbackError) throw fallbackError;
+    booking = fallbackBooking;
+  } else if (bookingError) {
+    throw bookingError;
+  } else {
+    booking = insertedBooking;
+  }
 
   // 4) Récupérer le customer (company) pour créer le payment intent
   const { data: customer, error: customerError } = await supabase
