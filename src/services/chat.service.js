@@ -22,12 +22,14 @@ export async function createOrGetConversation({
     query = query.is("booking_id", null);
     
     // Si application_id est fourni, chercher par application_id (si la colonne existe)
-    // Note: On ne peut pas utiliser try/catch ici car Supabase ne lance pas d'exception
-    // On va simplement essayer d'ajouter le filtre, et si la colonne n'existe pas,
-    // Supabase retournera une erreur qu'on gérera plus tard
     if (application_id) {
-      // On ajoute le filtre, mais si la colonne n'existe pas, l'erreur sera gérée lors de l'exécution
       query = query.eq("application_id", application_id);
+    }
+    
+    // Si offer_id est fourni (et pas d'application_id), chercher aussi par offer_id
+    // Cela permet de trouver une conversation existante même si le detailer n'a pas encore postulé
+    if (offer_id && !application_id) {
+      query = query.eq("offer_id", offer_id);
     }
   }
 
