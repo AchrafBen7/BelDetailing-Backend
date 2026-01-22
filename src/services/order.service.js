@@ -91,10 +91,14 @@ export async function createOrderService({ customerId, items, shippingAddress })
     totalAmount += totalPrice;
   }
 
+  // Générer un order_number unique
+  const orderNumber = `NIOS-${Date.now()}-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+
   const { data, error } = await supabase
     .from("orders")
     .insert({
       customer_id: customerId,
+      order_number: orderNumber,
       items: orderItems,
       total_amount: totalAmount,
       shipping_address: shippingAddress,

@@ -5,6 +5,7 @@ import {
   updateOffer,
   closeOffer,
   deleteOffer,
+  getMyOffers,
 } from "../services/offer.service.js";
 import { invalidateOfferCache } from "../middlewares/cache.middleware.js";
 
@@ -112,5 +113,23 @@ export async function deleteOfferController(req, res) {
     console.error("[OFFERS] delete error:", err);
     const status = err.statusCode || 500;
     return res.status(status).json({ error: "Could not delete offer" });
+  }
+}
+
+/**
+ * GET /api/v1/offers/my
+ * Liste des offres créées par l'utilisateur connecté (company)
+ */
+export async function listMyOffersController(req, res) {
+  try {
+    if (req.user.role !== "company") {
+      return res.status(403).json({ error: "Only companies can view their own offers" });
+    }
+
+    const items = await getMyOffers(req.user.id);
+    return res.json({ data: items });
+  } catch (err) {
+    console.error("[OFFERS] listMyOffers error:", err);
+    return res.status(500).json({ error: "Could not fetch your offers" });
   }
 }

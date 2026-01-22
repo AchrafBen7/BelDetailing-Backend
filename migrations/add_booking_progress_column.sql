@@ -1,0 +1,66 @@
+-- ============================================================
+-- MIGRATION: Add progress column to bookings table
+-- ============================================================
+-- Date: 2025-01-15
+-- Description: Ajout de la colonne progress (JSONB) pour le Service Progress Tracking
+-- ============================================================
+
+-- Ajouter la colonne progress si elle n'existe pas
+ALTER TABLE bookings 
+ADD COLUMN IF NOT EXISTS progress JSONB;
+
+-- Créer un index GIN pour les recherches dans le JSONB
+CREATE INDEX IF NOT EXISTS idx_bookings_progress ON bookings USING GIN (progress);
+
+-- ============================================================
+-- STRUCTURE DU JSON progress
+-- ============================================================
+-- {
+--   "booking_id": "uuid",
+--   "steps": [
+--     {
+--       "id": "step_1",
+--       "title": "Préparation",
+--       "percentage": 10,
+--       "is_completed": false,
+--       "order": 1,
+--       "completed_at": null
+--     },
+--     {
+--       "id": "step_2",
+--       "title": "Nettoyage extérieur",
+--       "percentage": 25,
+--       "is_completed": false,
+--       "order": 2,
+--       "completed_at": null
+--     },
+--     {
+--       "id": "step_3",
+--       "title": "Nettoyage intérieur",
+--       "percentage": 30,
+--       "is_completed": false,
+--       "order": 3,
+--       "completed_at": null
+--     },
+--     {
+--       "id": "step_4",
+--       "title": "Finitions",
+--       "percentage": 25,
+--       "is_completed": false,
+--       "order": 4,
+--       "completed_at": null
+--     },
+--     {
+--       "id": "step_5",
+--       "title": "Vérification finale",
+--       "percentage": 10,
+--       "is_completed": false,
+--       "order": 5,
+--       "completed_at": null
+--     }
+--   ],
+--   "current_step_index": 0,
+--   "total_progress": 0,
+--   "started_at": null,
+--   "completed_at": null
+-- }

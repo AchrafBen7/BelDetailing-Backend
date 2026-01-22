@@ -335,3 +335,16 @@ export async function deleteOffer(id, user) {
 
   return true;
 }
+
+// 🟦 GET MY OFFERS – GET /api/v1/offers/my (ROLE: company)
+export async function getMyOffers(userId) {
+  const { data, error } = await supabase
+    .from("offers")
+    .select("*")
+    .eq("created_by", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  return data.map(mapOfferRowToDto);
+}

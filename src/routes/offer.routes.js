@@ -9,6 +9,7 @@ import {
   updateOfferController,
   closeOfferController,
   deleteOfferController,
+  listMyOffersController,
 } from "../controllers/offer.controller.js";
 
 import {
@@ -37,6 +38,8 @@ router.get(
   }),
   listOffers
 );
+// GET /api/v1/offers/my - Offres créées par l'utilisateur connecté (company)
+router.get("/my", requireAuth, listMyOffersController);
 router.post("/", requireAuth, createOfferController);
 
 // DETAIL & UPDATE & DELETE & CLOSE
