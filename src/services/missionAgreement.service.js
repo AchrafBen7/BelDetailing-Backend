@@ -1,5 +1,7 @@
 // src/services/missionAgreement.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { logger } from "../observability/logger.js";
+import { missionAgreementsTotal } from "../observability/metrics.js";
 
 /**
  * DB → DTO (iOS Mission Agreement)
@@ -61,6 +63,21 @@ export async function createMissionAgreement({
   paymentSchedule,
   offerData,
 }) {
+  // ✅ VALIDATION : finalPrice doit être > 0
+  if (!finalPrice || finalPrice <= 0) {
+    throw new Error("finalPrice must be greater than 0");
+  }
+
+  // ✅ VALIDATION : depositPercentage doit être entre 0 et 100
+  if (depositPercentage < 0 || depositPercentage > 100) {
+    throw new Error("depositPercentage must be between 0 and 100");
+  }
+
+  // ✅ VALIDATION : companyId et detailerId doivent être fournis
+  if (!companyId || !detailerId) {
+    throw new Error("companyId and detailerId are required");
+  }
+
   // Calculer les montants
   const depositAmount = Math.round((finalPrice * depositPercentage) / 100 * 100) / 100;
   const remainingAmount = Math.round((finalPrice - depositAmount) * 100) / 100;
@@ -118,11 +135,15 @@ export async function createMissionAgreement({
     .single();
 
   if (error) {
-    console.error("[MISSION AGREEMENT] Insert error:", error);
+    logger.error({ error, missionAgreementId: data?.id, finalPrice, depositPercentage }, "[MISSION AGREEMENT] Insert error");
     throw error;
   }
 
-  console.log("✅ [MISSION AGREEMENT] Created:", data.id);
+  logger.info({ missionAgreementId: data.id, companyId, detailerId, finalPrice, status: data.status }, "[MISSION AGREEMENT] Created");
+  
+  // ✅ MÉTRIQUE : Incrémenter le compteur de mission agreements
+  missionAgreementsTotal.inc({ status: data.status });
+
   return mapMissionAgreementRowToDto(data);
 }
 
@@ -198,7 +219,41 @@ export async function updateMissionAgreementStatus(id, newStatus) {
 
   if (error) throw error;
 
-  return mapMissionAgreementRowToDto(data);
+  const updatedAgreement = mapMissionAgreementRowToDto(data);
+
+  // ✅ ENVOYER NOTIFICATIONS si mission terminée → company + detailer
+  if (newStatus === "completed") {
+    try {
+      const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
+      
+      // Notification à la company
+      if (updatedAgreement.companyId) {
+        await sendNotificationWithDeepLink({
+          userId: updatedAgreement.companyId,
+          title: "Mission terminée",
+          message: `La mission "${updatedAgreement.title || 'votre mission'}" est terminée`,
+          type: "mission_completed",
+          id: id,
+        });
+      }
+      
+      // Notification au detailer
+      if (updatedAgreement.detailerId) {
+        await sendNotificationWithDeepLink({
+          userId: updatedAgreement.detailerId,
+          title: "Mission terminée",
+          message: `La mission "${updatedAgreement.title || 'votre mission'}" est terminée`,
+          type: "mission_completed",
+          id: id,
+        });
+      }
+    } catch (notifError) {
+      console.error(`❌ [MISSION AGREEMENT] Notification send failed for completed mission ${id}:`, notifError);
+      // Ne pas faire échouer la mise à jour si la notification échoue
+    }
+  }
+
+  return updatedAgreement;
 }
 
 /**

@@ -4,6 +4,8 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { MISSION_COMMISSION_RATE } from "../config/commission.js";
 import { getMissionAgreementById } from "./missionAgreement.service.js";
 import { getMissionPaymentById, updateMissionPaymentStatus } from "./missionPayment.service.js";
+import { logger } from "../observability/logger.js";
+import { missionTransfersTotal, missionTransfersAmount } from "../observability/metrics.js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2025-11-17.clover",
@@ -203,7 +205,39 @@ export async function autoTransferOnPaymentCapture(paymentId, commissionRate = M
 
   // 3) Vérifier que le Connected Account existe
   if (!agreement.stripeConnectedAccountId) {
-    console.warn(`⚠️ [MISSION PAYOUT] No Stripe Connected Account for detailer ${agreement.detailerId}`);
+    const errorMessage = `No Stripe Connected Account for detailer ${agreement.detailerId}`;
+    console.warn(`⚠️ [MISSION PAYOUT] ${errorMessage}`);
+    
+    // ✅ NOTIFIER L'ADMIN si le Connected Account manque
+    try {
+      const { notifyAdmin, logCriticalError } = await import("./adminNotification.service.js");
+      logCriticalError({
+        service: "MISSION PAYOUT",
+        function: "autoTransferOnPaymentCapture",
+        error: new Error(errorMessage),
+        context: {
+          paymentId,
+          missionAgreementId: agreement.id,
+          detailerId: agreement.detailerId,
+          amount: payment.amount,
+        },
+      });
+      
+      await notifyAdmin({
+        title: "Transfert échoué - Connected Account manquant",
+        message: `Le transfert de ${payment.amount.toFixed(2)}€ pour le paiement ${paymentId} a échoué car le detailer n'a pas de Stripe Connected Account configuré.`,
+        type: "transfer_failed_no_account",
+        context: {
+          paymentId,
+          missionAgreementId: agreement.id,
+          detailerId: agreement.detailerId,
+          amount: payment.amount,
+        },
+      });
+    } catch (notifError) {
+      console.error("[MISSION PAYOUT] Failed to notify admin:", notifError);
+    }
+    
     return null; // Ne pas faire échouer, juste logger
   }
 
@@ -216,13 +250,69 @@ export async function autoTransferOnPaymentCapture(paymentId, commissionRate = M
       commissionRate,
     });
 
-    console.log(`✅ [MISSION PAYOUT] Auto-transfer created: ${transfer.id} for payment ${paymentId}`);
+    logger.info({ transferId: transfer.id, paymentId, missionAgreementId: agreement.id, amount: payment.amount, netAmount: transfer.netAmount }, "[MISSION PAYOUT] Auto-transfer created");
+    
+    // ✅ MÉTRIQUES : Incrémenter les compteurs de transferts
+    missionTransfersTotal.inc({ status: "succeeded" });
+    missionTransfersAmount.inc({ status: "succeeded" }, transfer.netAmount);
 
     return transfer;
   } catch (err) {
-    console.error(`❌ [MISSION PAYOUT] Auto-transfer failed for payment ${paymentId}:`, err);
+    // ✅ LOGGING AMÉLIORÉ avec contexte détaillé
+    const { logCriticalError, notifyAdmin } = await import("./adminNotification.service.js");
+    
+    logCriticalError({
+      service: "MISSION PAYOUT",
+      function: "autoTransferOnPaymentCapture",
+      error: err,
+      context: {
+        paymentId,
+        missionAgreementId: agreement.id,
+        detailerId: agreement.detailerId,
+        amount: payment.amount,
+        commissionRate,
+        stripeConnectedAccountId: agreement.stripeConnectedAccountId,
+      },
+    });
+
+    // ✅ ENREGISTRER L'ÉCHEC DANS LA TABLE failed_transfers pour retry automatique
+    try {
+      const { recordFailedTransfer } = await import("./failedTransfer.service.js");
+      await recordFailedTransfer({
+        missionAgreementId: agreement.id,
+        paymentId: payment.id,
+        detailerId: agreement.detailerId,
+        stripeConnectedAccountId: agreement.stripeConnectedAccountId,
+        amount: payment.amount,
+        commissionRate,
+        error: err,
+      });
+      console.log(`📝 [MISSION PAYOUT] Failed transfer recorded for payment ${paymentId}`);
+    } catch (recordError) {
+      console.error("[MISSION PAYOUT] Failed to record failed transfer:", recordError);
+      // Continuer même si l'enregistrement échoue
+    }
+
+    // ✅ NOTIFIER L'ADMIN en cas d'échec de transfert (première tentative)
+    try {
+      await notifyAdmin({
+        title: "Transfert échoué",
+        message: `Le transfert de ${payment.amount.toFixed(2)}€ pour le paiement ${paymentId} a échoué. Un retry automatique sera tenté. Erreur: ${err.message}`,
+        type: "transfer_failed",
+        context: {
+          paymentId,
+          missionAgreementId: agreement.id,
+          detailerId: agreement.detailerId,
+          amount: payment.amount,
+          error: err.message,
+        },
+      });
+    } catch (notifError) {
+      console.error("[MISSION PAYOUT] Failed to notify admin:", notifError);
+    }
+
     // Ne pas faire échouer le processus, juste logger l'erreur
-    // Le transfert pourra être retenté manuellement ou via webhook
+    // Le transfert sera retenté automatiquement via cron job
     return null;
   }
 }

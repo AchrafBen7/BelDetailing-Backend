@@ -79,6 +79,11 @@ router.post(
         case "payment_intent.succeeded": {
           const intent = event.data.object;
           const bookingId = intent.metadata?.bookingId;
+          const orderId = intent.metadata?.orderId;
+          const missionAgreementId = intent.metadata?.missionAgreementId;
+          const paymentId = intent.metadata?.paymentId;
+          const paymentType = intent.metadata?.paymentType;
+          const type = intent.metadata?.type;
           const userId = intent.metadata?.userId ?? null;
           const amount = intent.amount / 100;
           const currency = intent.currency;
@@ -92,39 +97,171 @@ router.post(
             type: "payment",
           });
 
-          if (!bookingId) {
-            console.log("payment_intent.succeeded (no bookingId), skipping");
-            break;
+          // ✅ Gérer les MISSION PAYMENTS
+          if (missionAgreementId && paymentId) {
+            console.log(`✅ PI succeeded for mission payment ${paymentId} (agreement: ${missionAgreementId})`);
+
+            // Mettre à jour le statut du paiement de mission
+            const { error: updateError } = await supabase
+              .from("mission_payments")
+              .update({
+                status: "captured",
+                stripe_charge_id: intent.latest_charge || null,
+                captured_at: new Date().toISOString(),
+              })
+              .eq("id", paymentId);
+
+            if (updateError) {
+              console.error("[WEBHOOK] Error updating mission payment:", updateError);
+            }
+
+            // Si c'est le paiement d'acompte, activer le Mission Agreement
+            if (paymentType === "deposit") {
+              const { error: agreementError } = await supabase
+                .from("mission_agreements")
+                .update({
+                  status: "active",
+                })
+                .eq("id", missionAgreementId)
+                .eq("status", "draft");
+
+              if (agreementError) {
+                console.error("[WEBHOOK] Error activating mission agreement:", agreementError);
+              }
+            }
+
+            // ✅ ENVOYER NOTIFICATION À LA COMPANY (paiement capturé)
+            try {
+              const { data: agreement } = await supabase
+                .from("mission_agreements")
+                .select("company_id, title")
+                .eq("id", missionAgreementId)
+                .single();
+
+              if (agreement?.company_id) {
+                await sendNotificationToUser({
+                  userId: agreement.company_id,
+                  title: "Paiement capturé",
+                  message: `Le paiement de ${amount.toFixed(2)}€ pour "${agreement.title}" a été capturé`,
+                  data: {
+                    type: "mission_payment_captured",
+                    mission_agreement_id: missionAgreementId,
+                    payment_id: paymentId,
+                    amount: amount,
+                  },
+                });
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
+            }
+
+            // ✅ TRANSFERT AUTOMATIQUE VERS LE DETAILER (après capture)
+            try {
+              const { autoTransferOnPaymentCapture } = await import("../services/missionPayout.service.js");
+              const { MISSION_COMMISSION_RATE } = await import("../config/commission.js");
+              
+              await autoTransferOnPaymentCapture(paymentId, MISSION_COMMISSION_RATE);
+              console.log(`✅ [WEBHOOK] Auto-transfer triggered for payment ${paymentId}`);
+            } catch (transferError) {
+              console.error(`❌ [WEBHOOK] Auto-transfer failed for payment ${paymentId}:`, transferError);
+              // Ne pas faire échouer le webhook, juste logger
+            }
+
+            // ✅ GÉNÉRATION AUTOMATIQUE DES FACTURES (company et detailer)
+            try {
+              const {
+                generateCompanyInvoiceOnPaymentCapture,
+                generateDetailerInvoiceOnPaymentCapture,
+              } = await import("../services/missionInvoiceAuto.service.js");
+
+              // Générer la facture pour la company
+              await generateCompanyInvoiceOnPaymentCapture(paymentId);
+              console.log(`✅ [WEBHOOK] Company invoice generated for payment ${paymentId}`);
+
+              // Générer la facture de reversement pour le detailer
+              await generateDetailerInvoiceOnPaymentCapture(paymentId);
+              console.log(`✅ [WEBHOOK] Detailer invoice generated for payment ${paymentId}`);
+            } catch (invoiceError) {
+              console.error(`❌ [WEBHOOK] Auto-invoice generation failed for payment ${paymentId}:`, invoiceError);
+              // Ne pas faire échouer le webhook, juste logger
+            }
           }
 
-          console.log(`✅ PI succeeded for booking ${bookingId}`);
+          // ✅ Gérer les BOOKINGS
+          if (bookingId || type === "booking") {
+            console.log(`✅ PI succeeded for booking ${bookingId}`);
 
-          await supabase
-            .from("bookings")
-            .update({
-              payment_status: "paid",
-              payment_intent_id: intent.id,
-            })
-            .eq("id", bookingId);
+            await supabase
+              .from("bookings")
+              .update({
+                payment_status: "paid",
+                payment_intent_id: intent.id,
+              })
+              .eq("id", bookingId);
 
-          // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement réussi)
-          try {
-            if (userId) {
-              await sendNotificationToUser({
-                userId: userId, // Customer reçoit la notification
-                title: "Paiement confirmé",
-                message: `Votre paiement de ${amount.toFixed(2)}${currency === "eur" ? "€" : currency.toUpperCase()} a été confirmé`,
-                data: {
-                  type: "payment_succeeded",
-                  booking_id: bookingId,
-                  transaction_id: intent.id,
-                  amount: amount,
-                },
-              });
+            // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement réussi)
+            try {
+              if (userId) {
+                await sendNotificationToUser({
+                  userId: userId,
+                  title: "Paiement confirmé",
+                  message: `Votre paiement de ${amount.toFixed(2)}${currency === "eur" ? "€" : currency.toUpperCase()} a été confirmé`,
+                  data: {
+                    type: "payment_succeeded",
+                    booking_id: bookingId,
+                    transaction_id: intent.id,
+                    amount: amount,
+                  },
+                });
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
             }
-          } catch (notifError) {
-            console.error("[WEBHOOK] Notification send failed:", notifError);
-            // ⚠️ Ne pas bloquer le webhook si la notification échoue
+          }
+          
+          // ✅ Gérer les ORDERS (e-commerce)
+          if (orderId || type === "order") {
+            console.log(`✅ PI succeeded for order ${orderId}`);
+
+            await supabase
+              .from("orders")
+              .update({
+                payment_status: "paid",
+                status: "confirmed",
+                payment_intent_id: intent.id,
+              })
+              .eq("id", orderId);
+
+            // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement réussi)
+            try {
+              if (userId) {
+                // Récupérer le order_number pour la notification
+                const { data: order } = await supabase
+                  .from("orders")
+                  .select("order_number")
+                  .eq("id", orderId)
+                  .single();
+
+                await sendNotificationToUser({
+                  userId: userId,
+                  title: "Commande confirmée",
+                  message: `Votre commande ${order?.order_number || orderId} a été confirmée. Montant: ${amount.toFixed(2)}${currency === "eur" ? "€" : currency.toUpperCase()}`,
+                  data: {
+                    type: "order_confirmed",
+                    order_id: orderId,
+                    order_number: order?.order_number,
+                    transaction_id: intent.id,
+                    amount: amount,
+                  },
+                });
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
+            }
+          }
+
+          if (!bookingId && !orderId && !missionAgreementId) {
+            console.log("payment_intent.succeeded (no bookingId, orderId, or missionAgreementId), skipping");
           }
 
           break;
@@ -133,39 +270,118 @@ router.post(
         case "payment_intent.payment_failed": {
           const intent = event.data.object;
           const bookingId = intent.metadata?.bookingId;
+          const orderId = intent.metadata?.orderId;
+          const missionAgreementId = intent.metadata?.missionAgreementId;
+          const paymentId = intent.metadata?.paymentId;
+          const type = intent.metadata?.type;
           const userId = intent.metadata?.userId ?? null;
 
-          if (!bookingId) {
-            console.log("payment_intent.failed (no bookingId), skipping");
-            break;
+          // ✅ Gérer les MISSION PAYMENTS
+          if (missionAgreementId && paymentId) {
+            console.log(`❌ PI failed for mission payment ${paymentId} (agreement: ${missionAgreementId})`);
+
+            // Mettre à jour le statut du paiement de mission
+            const { error: updateError } = await supabase
+              .from("mission_payments")
+              .update({
+                status: "failed",
+                failure_reason: intent.last_payment_error?.message || "Payment failed",
+                failed_at: new Date().toISOString(),
+              })
+              .eq("id", paymentId);
+
+            if (updateError) {
+              console.error("[WEBHOOK] Error updating mission payment:", updateError);
+            }
+
+            // ✅ ENVOYER NOTIFICATION À LA COMPANY (paiement échoué)
+            try {
+              const { data: agreement } = await supabase
+                .from("mission_agreements")
+                .select("company_id, title")
+                .eq("id", missionAgreementId)
+                .single();
+
+              if (agreement?.company_id) {
+                await sendNotificationToUser({
+                  userId: agreement.company_id,
+                  title: "Paiement échoué",
+                  message: `Le paiement pour "${agreement.title}" a échoué. Veuillez vérifier votre moyen de paiement.`,
+                  data: {
+                    type: "mission_payment_failed",
+                    mission_agreement_id: missionAgreementId,
+                    payment_id: paymentId,
+                  },
+                });
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
+            }
           }
 
-          console.log(`❌ PI failed for booking ${bookingId}`);
+          // ✅ Gérer les BOOKINGS
+          if (bookingId || type === "booking") {
+            console.log(`❌ PI failed for booking ${bookingId}`);
 
-          await supabase
-            .from("bookings")
-            .update({
-              payment_status: "failed",
-            })
-            .eq("id", bookingId);
+            await supabase
+              .from("bookings")
+              .update({
+                payment_status: "failed",
+              })
+              .eq("id", bookingId);
 
-          // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement échoué)
-          try {
-            if (userId) {
-              await sendNotificationToUser({
-                userId: userId, // Customer reçoit la notification
-                title: "Paiement échoué",
-                message: "Votre paiement a échoué. Veuillez réessayer.",
-                data: {
-                  type: "payment_failed",
-                  booking_id: bookingId,
-                  transaction_id: intent.id,
-                },
-              });
+            // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement échoué)
+            try {
+              if (userId) {
+                await sendNotificationToUser({
+                  userId: userId,
+                  title: "Paiement échoué",
+                  message: "Votre paiement a échoué. Veuillez réessayer.",
+                  data: {
+                    type: "payment_failed",
+                    booking_id: bookingId,
+                    transaction_id: intent.id,
+                  },
+                });
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
             }
-          } catch (notifError) {
-            console.error("[WEBHOOK] Notification send failed:", notifError);
-            // ⚠️ Ne pas bloquer le webhook si la notification échoue
+          }
+          
+          // ✅ Gérer les ORDERS (e-commerce)
+          if (orderId || type === "order") {
+            console.log(`❌ PI failed for order ${orderId}`);
+
+            await supabase
+              .from("orders")
+              .update({
+                payment_status: "failed",
+                status: "cancelled",
+              })
+              .eq("id", orderId);
+
+            // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement échoué)
+            try {
+              if (userId) {
+                await sendNotificationToUser({
+                  userId: userId,
+                  title: "Paiement échoué",
+                  message: "Votre paiement pour la commande a échoué. Veuillez réessayer.",
+                  data: {
+                    type: "payment_failed",
+                    order_id: orderId,
+                    transaction_id: intent.id,
+                  },
+                });
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
+            }
+          }
+
+          if (!bookingId && !orderId && !missionAgreementId) {
+            console.log("payment_intent.failed (no bookingId, orderId, or missionAgreementId), skipping");
           }
 
           break;
@@ -322,6 +538,145 @@ case "setup_intent.succeeded": {
             status: payout.status,
             type: "payout",
           });
+
+          break;
+        }
+
+        case "transfer.created": {
+          const transfer = event.data.object;
+          const missionAgreementId = transfer.metadata?.missionAgreementId;
+          const paymentId = transfer.metadata?.paymentId;
+
+          console.log(`✅ [WEBHOOK] Transfer created: ${transfer.id} to ${transfer.destination}`);
+
+          // Enregistrer le transfer dans payment_transactions
+          if (missionAgreementId && paymentId) {
+            // Récupérer le detailer_id depuis le Mission Agreement
+            const { data: agreement } = await supabase
+              .from("mission_agreements")
+              .select("detailer_id")
+              .eq("id", missionAgreementId)
+              .single();
+
+            if (agreement?.detailer_id) {
+              await supabase.from("payment_transactions").insert({
+                user_id: agreement.detailer_id,
+                stripe_object_id: transfer.id,
+                amount: transfer.amount / 100,
+                currency: transfer.currency,
+                status: "pending",
+                type: "payout",
+              });
+            }
+          }
+
+          break;
+        }
+
+        case "transfer.paid": {
+          const transfer = event.data.object;
+          const missionAgreementId = transfer.metadata?.missionAgreementId;
+          const paymentId = transfer.metadata?.paymentId;
+
+          console.log(`✅ [WEBHOOK] Transfer paid: ${transfer.id} to ${transfer.destination}`);
+
+          // Le transfert a été payé au detailer
+          if (paymentId) {
+            // Mettre à jour payment_transactions
+            await supabase
+              .from("payment_transactions")
+              .update({
+                status: "paid",
+              })
+              .eq("stripe_object_id", transfer.id);
+
+            // ✅ ENVOYER NOTIFICATION AU DETAILER (paiement reçu)
+            try {
+              if (missionAgreementId) {
+                const { data: agreement } = await supabase
+                  .from("mission_agreements")
+                  .select("detailer_id, title")
+                  .eq("id", missionAgreementId)
+                  .single();
+
+                if (agreement?.detailer_id) {
+                  await sendNotificationToUser({
+                    userId: agreement.detailer_id,
+                    title: "Paiement reçu",
+                    message: `Vous avez reçu ${(transfer.amount / 100).toFixed(2)}€ pour "${agreement.title}"`,
+                    data: {
+                      type: "mission_payout_received",
+                      mission_agreement_id: missionAgreementId,
+                      payment_id: paymentId,
+                      amount: transfer.amount / 100,
+                    },
+                  });
+                }
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
+            }
+          }
+
+          break;
+        }
+
+        case "transfer.failed": {
+          const transfer = event.data.object;
+          const missionAgreementId = transfer.metadata?.missionAgreementId;
+          const paymentId = transfer.metadata?.paymentId;
+
+          console.error(`❌ [WEBHOOK] Transfer failed: ${transfer.id} to ${transfer.destination}`);
+
+          // Le transfert a échoué
+          if (paymentId) {
+            // Mettre à jour payment_transactions
+            await supabase
+              .from("payment_transactions")
+              .update({
+                status: "failed",
+              })
+              .eq("stripe_object_id", transfer.id);
+
+            // ✅ ENVOYER NOTIFICATION AU DETAILER (échec transfert)
+            try {
+              if (missionAgreementId) {
+                const { data: agreement } = await supabase
+                  .from("mission_agreements")
+                  .select("detailer_id, title")
+                  .eq("id", missionAgreementId)
+                  .single();
+
+                if (agreement?.detailer_id) {
+                  await sendNotificationToUser({
+                    userId: agreement.detailer_id,
+                    title: "Échec du virement",
+                    message: `Le virement pour "${agreement.title}" a échoué. Veuillez vérifier vos informations bancaires.`,
+                    data: {
+                      type: "mission_payout_failed",
+                      mission_agreement_id: missionAgreementId,
+                      payment_id: paymentId,
+                    },
+                  });
+                }
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
+            }
+          }
+
+          break;
+        }
+
+        case "account.updated": {
+          const account = event.data.object;
+          console.log(`📝 [WEBHOOK] Connected Account updated: ${account.id}`);
+
+          // Mettre à jour le statut du compte connecté dans provider_profiles si nécessaire
+          // (charges_enabled, payouts_enabled, etc.)
+          if (account.metadata?.provider_user_id) {
+            // Optionnel : mettre à jour provider_profiles avec le nouveau statut
+          }
 
           break;
         }

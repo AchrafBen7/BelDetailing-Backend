@@ -8,6 +8,8 @@ import { getMissionAgreementById } from "./missionAgreement.service.js";
 import { getMissionPaymentById } from "./missionPayment.service.js";
 import { uploadMissionAgreementPdf } from "./missionAgreementPdf.service.js";
 import { MISSION_COMMISSION_RATE } from "../config/commission.js";
+import { logger } from "../observability/logger.js";
+import { missionInvoicesTotal } from "../observability/metrics.js";
 
 /**
  * 🟦 GENERATE COMPANY INVOICE ON PAYMENT CAPTURE – Générer automatiquement une facture pour la company
@@ -66,11 +68,62 @@ export async function generateCompanyInvoiceOnPaymentCapture(paymentId) {
       pdfUrl,
     });
 
-    console.log(`✅ [MISSION INVOICE] Company invoice created: ${invoice.invoiceNumber} for payment ${paymentId}`);
+    logger.info({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, paymentId, missionAgreementId: agreement.id, amount: payment.amount }, "[MISSION INVOICE] Company invoice created");
+    
+    // ✅ MÉTRIQUE : Incrémenter le compteur de factures
+    missionInvoicesTotal.inc({ type: "company_invoice" });
+
+    // ✅ ENVOYER NOTIFICATION À LA COMPANY (facture générée)
+    try {
+      const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
+      await sendNotificationWithDeepLink({
+        userId: agreement.companyId,
+        title: "Facture générée",
+        message: `Votre facture ${invoice.invoiceNumber} de ${payment.amount.toFixed(2)}€ a été générée pour le paiement ${payment.type === "deposit" ? "d'acompte" : payment.type === "final" ? "final" : "d'échéance"}.`,
+        type: "mission_invoice_generated",
+        id: agreement.id,
+      });
+    } catch (notifError) {
+      console.error(`⚠️ [MISSION INVOICE] Notification send failed for company invoice ${invoice.invoiceNumber}:`, notifError);
+      // Ne pas faire échouer la génération de facture si la notification échoue
+    }
 
     return invoice;
   } catch (err) {
-    console.error(`❌ [MISSION INVOICE] Failed to generate company invoice for payment ${paymentId}:`, err);
+    // ✅ LOGGING AMÉLIORÉ avec contexte détaillé
+    const { logCriticalError, notifyAdmin } = await import("./adminNotification.service.js");
+    
+    logCriticalError({
+      service: "MISSION INVOICE",
+      function: "generateCompanyInvoiceOnPaymentCapture",
+      error: err,
+      context: {
+        paymentId,
+        missionAgreementId: payment?.missionAgreementId,
+        companyId: agreement?.companyId,
+        amount: payment?.amount,
+      },
+    });
+
+    // ✅ NOTIFIER L'ADMIN en cas d'échec de génération de facture
+    try {
+      await notifyAdmin({
+        title: "Génération de facture échouée",
+        message: `La génération de la facture company pour le paiement ${paymentId} a échoué. Erreur: ${err.message}`,
+        type: "invoice_generation_failed",
+        context: {
+          paymentId,
+          missionAgreementId: payment?.missionAgreementId,
+          companyId: agreement?.companyId,
+          amount: payment?.amount,
+          invoiceType: "company_invoice",
+          error: err.message,
+        },
+      });
+    } catch (notifError) {
+      console.error("[MISSION INVOICE] Failed to notify admin:", notifError);
+    }
+
     // Ne pas faire échouer le processus, juste logger l'erreur
     return null;
   }
@@ -139,11 +192,64 @@ export async function generateDetailerInvoiceOnPaymentCapture(paymentId) {
       pdfUrl,
     });
 
-    console.log(`✅ [MISSION INVOICE] Detailer invoice created: ${invoice.invoiceNumber} for payment ${paymentId}`);
+    logger.info({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, paymentId, missionAgreementId: agreement.id, netAmount }, "[MISSION INVOICE] Detailer invoice created");
+    
+    // ✅ MÉTRIQUE : Incrémenter le compteur de factures
+    missionInvoicesTotal.inc({ type: "detailer_invoice" });
+
+    // ✅ ENVOYER NOTIFICATION AU DETAILER (facture de reversement générée)
+    try {
+      const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
+      await sendNotificationWithDeepLink({
+        userId: agreement.detailerId,
+        title: "Facture de reversement générée",
+        message: `Votre facture de reversement ${invoice.invoiceNumber} de ${netAmount.toFixed(2)}€ (après commission) a été générée pour le paiement ${payment.type === "deposit" ? "d'acompte" : payment.type === "final" ? "final" : "d'échéance"}.`,
+        type: "mission_invoice_generated",
+        id: agreement.id,
+      });
+    } catch (notifError) {
+      console.error(`⚠️ [MISSION INVOICE] Notification send failed for detailer invoice ${invoice.invoiceNumber}:`, notifError);
+      // Ne pas faire échouer la génération de facture si la notification échoue
+    }
 
     return invoice;
   } catch (err) {
-    console.error(`❌ [MISSION INVOICE] Failed to generate detailer invoice for payment ${paymentId}:`, err);
+    // ✅ LOGGING AMÉLIORÉ avec contexte détaillé
+    const { logCriticalError, notifyAdmin } = await import("./adminNotification.service.js");
+    
+    logCriticalError({
+      service: "MISSION INVOICE",
+      function: "generateDetailerInvoiceOnPaymentCapture",
+      error: err,
+      context: {
+        paymentId,
+        missionAgreementId: payment?.missionAgreementId,
+        detailerId: agreement?.detailerId,
+        amount: payment?.amount,
+        commissionAmount,
+        netAmount,
+      },
+    });
+
+    // ✅ NOTIFIER L'ADMIN en cas d'échec de génération de facture
+    try {
+      await notifyAdmin({
+        title: "Génération de facture échouée",
+        message: `La génération de la facture detailer pour le paiement ${paymentId} a échoué. Erreur: ${err.message}`,
+        type: "invoice_generation_failed",
+        context: {
+          paymentId,
+          missionAgreementId: payment?.missionAgreementId,
+          detailerId: agreement?.detailerId,
+          amount: payment?.amount,
+          invoiceType: "detailer_invoice",
+          error: err.message,
+        },
+      });
+    } catch (notifError) {
+      console.error("[MISSION INVOICE] Failed to notify admin:", notifError);
+    }
+
     // Ne pas faire échouer le processus, juste logger l'erreur
     return null;
   }

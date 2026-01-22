@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { cleanupExpiredBookings } from "../services/booking.service.js";
+import { captureScheduledPayments } from "../cron/captureScheduledPayments.js";
+import { retryFailedTransfers } from "../cron/retryFailedTransfers.js";
 
 const router = Router();
 
@@ -20,6 +22,76 @@ router.post("/cleanup-bookings", async (req, res) => {
   } catch (err) {
     console.error("[CRON] cleanup error:", err);
     return res.status(500).json({ error: "Cleanup failed" });
+  }
+});
+
+/**
+ * 🔹 POST /api/v1/cron/capture-scheduled-payments
+ * Capturer automatiquement les paiements programmés à leur date d'échéance
+ * 
+ * Ce endpoint doit être appelé par un cron job (ex: toutes les heures) pour
+ * capturer les paiements de mission qui sont autorisés et dont la date d'échéance est arrivée.
+ * 
+ * Query params:
+ * - date (optionnel): Date au format YYYY-MM-DD (défaut: aujourd'hui)
+ */
+router.post("/capture-scheduled-payments", async (req, res) => {
+  const cronSecret = req.headers["x-cron-secret"];
+
+  if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const { date } = req.query; // Optionnel: date au format YYYY-MM-DD
+    const result = await captureScheduledPayments(date || null);
+
+    return res.json({
+      success: result.success,
+      captured: result.captured,
+      failed: result.failed,
+      skipped: result.skipped,
+      payments: result.payments,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("[CRON] capture scheduled payments error:", err);
+    return res.status(500).json({ error: "Capture scheduled payments failed" });
+  }
+});
+
+/**
+ * 🔹 POST /api/v1/cron/retry-failed-transfers
+ * Retenter automatiquement les transferts échoués
+ * 
+ * Ce endpoint doit être appelé par un cron job (ex: toutes les 6 heures) pour
+ * retenter automatiquement les transferts Stripe qui ont échoué.
+ * 
+ * Query params:
+ * - limit (optionnel): Nombre maximum de transferts à retenter (défaut: 10)
+ */
+router.post("/retry-failed-transfers", async (req, res) => {
+  const cronSecret = req.headers["x-cron-secret"];
+
+  if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 10;
+    const result = await retryFailedTransfers(limit);
+
+    return res.json({
+      success: result.success,
+      total: result.total,
+      succeeded: result.succeeded,
+      failed: result.failed,
+      results: result.results,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("[CRON] retry failed transfers error:", err);
+    return res.status(500).json({ error: "Retry failed transfers failed" });
   }
 });
 

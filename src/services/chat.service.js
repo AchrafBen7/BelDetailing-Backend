@@ -4,28 +4,87 @@ export async function createOrGetConversation({
   provider_id,
   customer_id,
   booking_id,
+  application_id,
+  offer_id,
 }) {
-  const { data: existing, error: findError } = await supabase
+  // Construire la requête de recherche
+  let query = supabase
     .from("conversations")
     .select("*")
     .eq("provider_id", provider_id)
-    .eq("customer_id", customer_id)
-    .eq("booking_id", booking_id)
-    .maybeSingle();
+    .eq("customer_id", customer_id);
 
-  if (findError) throw findError;
+  // Si booking_id est fourni, chercher par booking_id
+  if (booking_id) {
+    query = query.eq("booking_id", booking_id);
+  } else {
+    // Sinon, chercher les conversations sans booking_id (pour applications/missions)
+    query = query.is("booking_id", null);
+    
+    // Si application_id est fourni, chercher par application_id (si la colonne existe)
+    // Note: On ne peut pas utiliser try/catch ici car Supabase ne lance pas d'exception
+    // On va simplement essayer d'ajouter le filtre, et si la colonne n'existe pas,
+    // Supabase retournera une erreur qu'on gérera plus tard
+    if (application_id) {
+      // On ajoute le filtre, mais si la colonne n'existe pas, l'erreur sera gérée lors de l'exécution
+      query = query.eq("application_id", application_id);
+    }
+  }
+
+  const { data: existing, error: findError } = await query.maybeSingle();
+
+  // Si l'erreur est due à une colonne inexistante (application_id), on ignore et on continue
+  if (findError) {
+    // Si c'est une erreur de colonne inexistante, on refait la requête sans application_id
+    if (findError.code === "42703" && application_id) {
+      console.warn("[CHAT] application_id column does not exist, searching without it");
+      const fallbackQuery = supabase
+        .from("conversations")
+        .select("*")
+        .eq("provider_id", provider_id)
+        .eq("customer_id", customer_id)
+        .is("booking_id", null);
+      
+      const { data: fallbackExisting, error: fallbackError } = await fallbackQuery.maybeSingle();
+      if (fallbackError) throw fallbackError;
+      if (fallbackExisting) return fallbackExisting;
+    } else {
+      throw findError;
+    }
+  }
 
   if (existing) {
     return existing;
   }
 
+  // Créer une nouvelle conversation
+  const insertPayload = {
+    provider_id,
+    customer_id,
+    booking_id: booking_id || null,
+  };
+
+  // Ajouter application_id si fourni (si la colonne existe)
+  if (application_id) {
+    try {
+      insertPayload.application_id = application_id;
+    } catch (e) {
+      console.warn("[CHAT] application_id column may not exist, continuing without it");
+    }
+  }
+
+  // Ajouter offer_id si fourni (si la colonne existe)
+  if (offer_id) {
+    try {
+      insertPayload.offer_id = offer_id;
+    } catch (e) {
+      console.warn("[CHAT] offer_id column may not exist, continuing without it");
+    }
+  }
+
   const { data: created, error: createError } = await supabase
     .from("conversations")
-    .insert({
-      provider_id,
-      customer_id,
-      booking_id,
-    })
+    .insert(insertPayload)
     .select("*")
     .single();
 

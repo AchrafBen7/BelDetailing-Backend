@@ -1,5 +1,7 @@
 // src/services/missionPayment.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { logger } from "../observability/logger.js";
+import { missionPaymentsTotal, missionPaymentsAmount } from "../observability/metrics.js";
 
 /**
  * DB → DTO (iOS Mission Payment)
@@ -48,6 +50,17 @@ export async function createMissionPayment({
   installmentNumber = null,
   monthNumber = null,
 }) {
+  // ✅ VALIDATION : missionAgreementId doit être fourni
+  if (!missionAgreementId) {
+    throw new Error("missionAgreementId is required");
+  }
+
+  // ✅ VALIDATION : amount doit être > 0
+  if (!amount || amount <= 0) {
+    throw new Error("amount must be greater than 0");
+  }
+
+  // ✅ VALIDATION : type doit être valide
   const validTypes = ["deposit", "installment", "final", "monthly"];
   if (!validTypes.includes(type)) {
     throw new Error(`Invalid payment type. Must be one of: ${validTypes.join(", ")}`);
@@ -70,11 +83,16 @@ export async function createMissionPayment({
     .single();
 
   if (error) {
-    console.error("[MISSION PAYMENT] Insert error:", error);
+    logger.error({ error, missionAgreementId, type, amount }, "[MISSION PAYMENT] Insert error");
     throw error;
   }
 
-  console.log("✅ [MISSION PAYMENT] Created:", data.id, type, amount);
+  logger.info({ paymentId: data.id, missionAgreementId, type, amount, status: data.status }, "[MISSION PAYMENT] Created");
+  
+  // ✅ MÉTRIQUES : Incrémenter les compteurs
+  missionPaymentsTotal.inc({ type, status: data.status });
+  missionPaymentsAmount.inc({ type, status: data.status }, amount);
+
   return mapMissionPaymentRowToDto(data);
 }
 

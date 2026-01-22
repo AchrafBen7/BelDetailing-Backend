@@ -41,6 +41,22 @@ export async function createPaymentIntentForMission({
     throw new Error("Company Stripe Customer ID not found. Please set up SEPA Direct Debit first.");
   }
 
+  // ✅ VALIDATION SEPA : Vérifier que le SEPA mandate est actif
+  const { getSepaMandate } = await import("./sepaDirectDebit.service.js");
+  const sepaMandate = await getSepaMandate(agreement.companyId);
+
+  if (!sepaMandate) {
+    throw new Error("No SEPA mandate found. Please set up SEPA Direct Debit first.");
+  }
+
+  if (sepaMandate.status !== "active") {
+    throw new Error(`SEPA mandate is not active. Current status: ${sepaMandate.status}. Please complete the SEPA setup.`);
+  }
+
+  // Vérifier que le mandate n'est pas expiré (si applicable)
+  // Note: Les mandates SEPA Stripe n'expirent pas automatiquement, mais on peut vérifier la date de création
+  // Pour l'instant, on se contente de vérifier le statut "active"
+
   // 3) Créer le Payment Intent SEPA
   const paymentIntent = await createSepaPaymentIntent({
     companyUserId: agreement.companyId,
@@ -143,6 +159,24 @@ export async function captureMissionPayment(paymentId) {
     // Les factures pourront être générées manuellement plus tard
   }
 
+  // 7) ✅ ENVOYER NOTIFICATION AU DETAILER (paiement reçu)
+  try {
+    const agreement = await getMissionAgreementById(payment.mission_agreement_id);
+    if (agreement && agreement.detailerId) {
+      const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
+      await sendNotificationWithDeepLink({
+        userId: agreement.detailerId,
+        title: "Paiement reçu",
+        message: `Un paiement de ${payment.amount.toFixed(2)}€ a été reçu pour la mission "${agreement.title || 'votre mission'}"`,
+        type: "mission_payment_received",
+        id: paymentId,
+      });
+    }
+  } catch (notifError) {
+    console.error(`❌ [MISSION PAYMENT] Notification send failed for payment ${paymentId}:`, notifError);
+    // Ne pas faire échouer la capture si la notification échoue
+  }
+
   return {
     paymentId,
     status: "captured",
@@ -184,6 +218,39 @@ export async function cancelMissionPayment(paymentId) {
   await updateMissionPaymentStatus(paymentId, "cancelled", {
     failedAt: new Date().toISOString(),
   });
+
+  // 4) ✅ ENVOYER NOTIFICATIONS (paiement échoué) → company + detailer
+  try {
+    const agreement = await getMissionAgreementById(payment.mission_agreement_id);
+    if (agreement) {
+      const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
+      
+      // Notification à la company
+      if (agreement.companyId) {
+        await sendNotificationWithDeepLink({
+          userId: agreement.companyId,
+          title: "Paiement échoué",
+          message: `Le paiement de ${payment.amount.toFixed(2)}€ pour la mission "${agreement.title || 'votre mission'}" a échoué`,
+          type: "mission_payment_failed",
+          id: paymentId,
+        });
+      }
+      
+      // Notification au detailer
+      if (agreement.detailerId) {
+        await sendNotificationWithDeepLink({
+          userId: agreement.detailerId,
+          title: "Paiement échoué",
+          message: `Le paiement de ${payment.amount.toFixed(2)}€ pour la mission "${agreement.title || 'votre mission'}" a échoué`,
+          type: "mission_payment_failed",
+          id: paymentId,
+        });
+      }
+    }
+  } catch (notifError) {
+    console.error(`❌ [MISSION PAYMENT] Notification send failed for cancelled payment ${paymentId}:`, notifError);
+    // Ne pas faire échouer l'annulation si la notification échoue
+  }
 
   return {
     paymentId,

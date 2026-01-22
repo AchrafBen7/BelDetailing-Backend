@@ -4,6 +4,8 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cron from "node-cron";
 import { autoCaptureBookings } from "./cron/autoCapture.js";
+import { captureScheduledPayments } from "./cron/captureScheduledPayments.js";
+import { retryFailedTransfers } from "./cron/retryFailedTransfers.js";
 import { supabaseAdmin as supabase } from "./config/supabase.js";
 import { httpLogger } from "./observability/logger.js";
 import { metricsEndpoint, metricsMiddleware } from "./observability/metrics.js";
@@ -170,6 +172,30 @@ app.get("/api/v1/health", async (req, res) => {
 cron.schedule("*/10 * * * *", async () => {
   console.log("CRON running autoCapture...");
   await autoCaptureBookings();
+});
+
+// Tâche cron pour capturer automatiquement les paiements programmés de missions
+// S'exécute toutes les heures (à la minute 0 de chaque heure)
+cron.schedule("0 * * * *", async () => {
+  console.log("CRON running captureScheduledPayments...");
+  try {
+    const result = await captureScheduledPayments();
+    console.log(`✅ CRON captureScheduledPayments completed: ${result.captured} captured, ${result.failed} failed, ${result.skipped} skipped`);
+  } catch (err) {
+    console.error("❌ CRON captureScheduledPayments error:", err);
+  }
+});
+
+// Tâche cron pour retenter automatiquement les transferts échoués
+// S'exécute toutes les 6 heures (à la minute 0 de chaque 6ème heure: 0, 6, 12, 18)
+cron.schedule("0 */6 * * *", async () => {
+  console.log("CRON running retryFailedTransfers...");
+  try {
+    const result = await retryFailedTransfers(10); // Limite de 10 transferts par exécution
+    console.log(`✅ CRON retryFailedTransfers completed: ${result.succeeded} succeeded, ${result.failed} failed out of ${result.total} total`);
+  } catch (err) {
+    console.error("❌ CRON retryFailedTransfers error:", err);
+  }
 });
 
 export default app;

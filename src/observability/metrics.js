@@ -16,8 +16,58 @@ const httpRequestsTotal = new client.Counter({
   labelNames: ["method", "route", "status_code"],
 });
 
+// ✅ NOUVELLES MÉTRIQUES : Missions et Paiements
+const missionAgreementsTotal = new client.Counter({
+  name: "mission_agreements_total",
+  help: "Total number of mission agreements created",
+  labelNames: ["status"],
+});
+
+const missionPaymentsTotal = new client.Counter({
+  name: "mission_payments_total",
+  help: "Total number of mission payments",
+  labelNames: ["type", "status"],
+});
+
+const missionPaymentsAmount = new client.Counter({
+  name: "mission_payments_amount_total",
+  help: "Total amount of mission payments in euros",
+  labelNames: ["type", "status"],
+});
+
+const missionTransfersTotal = new client.Counter({
+  name: "mission_transfers_total",
+  help: "Total number of transfers to detailers",
+  labelNames: ["status"],
+});
+
+const missionTransfersAmount = new client.Counter({
+  name: "mission_transfers_amount_total",
+  help: "Total amount transferred to detailers in euros",
+  labelNames: ["status"],
+});
+
+const missionInvoicesTotal = new client.Counter({
+  name: "mission_invoices_total",
+  help: "Total number of invoices generated",
+  labelNames: ["type"],
+});
+
+const failedTransfersTotal = new client.Counter({
+  name: "failed_transfers_total",
+  help: "Total number of failed transfers",
+  labelNames: ["retry_count"],
+});
+
 register.registerMetric(httpRequestDuration);
 register.registerMetric(httpRequestsTotal);
+register.registerMetric(missionAgreementsTotal);
+register.registerMetric(missionPaymentsTotal);
+register.registerMetric(missionPaymentsAmount);
+register.registerMetric(missionTransfersTotal);
+register.registerMetric(missionTransfersAmount);
+register.registerMetric(missionInvoicesTotal);
+register.registerMetric(failedTransfersTotal);
 
 export function metricsMiddleware(req, res, next) {
   const endTimer = httpRequestDuration.startTimer();
@@ -43,3 +93,14 @@ export async function metricsEndpoint(req, res) {
   res.set("Content-Type", register.contentType);
   res.end(await register.metrics());
 }
+
+// ✅ EXPORT DES MÉTRIQUES POUR UTILISATION DANS LES SERVICES
+export {
+  missionAgreementsTotal,
+  missionPaymentsTotal,
+  missionPaymentsAmount,
+  missionTransfersTotal,
+  missionTransfersAmount,
+  missionInvoicesTotal,
+  failedTransfersTotal,
+};

@@ -67,8 +67,85 @@ export async function createOrGetConversationController(req, res) {
   try {
     const userId = req.user.id;
     const userRole = req.user.role;
-    const { provider_id, customer_id, booking_id } = req.body;
+    const { provider_id, customer_id, booking_id, application_id, offer_id } = req.body;
 
+    // 🆕 Cas 1: Conversation pour une candidature (company ↔ detailer)
+    if (application_id) {
+      if (userRole !== "company" && userRole !== "provider") {
+        return res.status(403).json({
+          error: "Only companies and providers can create conversations for applications",
+        });
+      }
+
+      // Vérifier que l'application existe et appartient aux bons utilisateurs
+      const { data: application, error: appError } = await supabase
+        .from("applications")
+        .select("provider_id, offer_id, status")
+        .eq("id", application_id)
+        .single();
+
+      if (appError || !application) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+
+      // Vérifier les permissions
+      if (userRole === "company") {
+        // La company doit être le créateur de l'offre
+        const { data: offer, error: offerError } = await supabase
+          .from("offers")
+          .select("created_by")
+          .eq("id", application.offer_id)
+          .single();
+
+        if (offerError || !offer || offer.created_by !== userId) {
+          return res.status(403).json({
+            error: "You are not the creator of this offer",
+          });
+        }
+
+        // Créer la conversation: provider = detailer, customer = company
+        const conversation = await createOrGetConversation({
+          provider_id: application.provider_id,
+          customer_id: userId,
+          booking_id: null,
+          application_id,
+          offer_id: application.offer_id,
+        });
+
+        return res.json({ data: conversation });
+      } else if (userRole === "provider") {
+        // Le provider doit être celui qui a postulé
+        if (application.provider_id !== userId) {
+          return res.status(403).json({
+            error: "You are not the provider of this application",
+          });
+        }
+
+        // Récupérer l'ID de la company depuis l'offre
+        const { data: offer, error: offerError } = await supabase
+          .from("offers")
+          .select("created_by")
+          .eq("id", application.offer_id)
+          .single();
+
+        if (offerError || !offer) {
+          return res.status(404).json({ error: "Offer not found" });
+        }
+
+        // Créer la conversation: provider = detailer (userId), customer = company
+        const conversation = await createOrGetConversation({
+          provider_id: userId,
+          customer_id: offer.created_by,
+          booking_id: null,
+          application_id,
+          offer_id: application.offer_id,
+        });
+
+        return res.json({ data: conversation });
+      }
+    }
+
+    // Cas 2: Conversation pour un booking (comportement existant)
     if (userRole === "provider") {
       if (!customer_id || !booking_id) {
         return res
