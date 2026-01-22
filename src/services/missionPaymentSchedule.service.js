@@ -27,17 +27,18 @@ export async function createInitialMissionPayments(missionAgreementId, authorize
 
   const payments = [];
 
-  // 2) Créer le paiement d'acompte (deposit)
+  // 2) Créer le paiement d'acompte (deposit) - sera capturé au premier jour de la mission
+  const depositScheduledDate = agreement.startDate || null; // Capture au premier jour de la mission
   const depositPayment = await createMissionPayment({
     missionAgreementId,
     type: "deposit",
     amount: agreement.depositAmount,
-    scheduledDate: new Date().toISOString(), // Capture immédiate
+    scheduledDate: depositScheduledDate, // Capture au premier jour de la mission
   });
 
   payments.push(depositPayment);
 
-  // 3) Autoriser le paiement d'acompte immédiatement si demandé
+  // 3) Autoriser le paiement d'acompte immédiatement si demandé (mais ne pas capturer avant start_date)
   if (authorizeAll) {
     try {
       await createPaymentIntentForMission({
@@ -46,7 +47,7 @@ export async function createInitialMissionPayments(missionAgreementId, authorize
         amount: agreement.depositAmount,
         type: "deposit",
       });
-      console.log(`✅ [MISSION PAYMENT] Deposit payment authorized: ${depositPayment.id}`);
+      console.log(`✅ [MISSION PAYMENT] Deposit payment authorized (will be captured on mission start): ${depositPayment.id}`);
     } catch (err) {
       console.error(`❌ [MISSION PAYMENT] Failed to authorize deposit payment:`, err);
       // Ne pas faire échouer, le paiement pourra être autorisé plus tard
@@ -57,17 +58,18 @@ export async function createInitialMissionPayments(missionAgreementId, authorize
   const paymentSchedule = agreement.paymentSchedule || { type: "one_shot" };
 
   if (paymentSchedule.type === "one_shot") {
-    // Paiement unique du solde
+    // Paiement unique du solde - sera capturé à la fin de la mission
+    const finalScheduledDate = agreement.endDate || null; // Capture à la fin de la mission
     const finalPayment = await createMissionPayment({
       missionAgreementId,
       type: "final",
       amount: agreement.remainingAmount,
-      scheduledDate: paymentSchedule.finalDate || agreement.endDate || null,
+      scheduledDate: finalScheduledDate, // Capture à la fin de la mission
     });
 
     payments.push(finalPayment);
 
-    // Autoriser le paiement final si demandé
+    // Autoriser le paiement final si demandé (mais ne pas capturer avant end_date)
     if (authorizeAll) {
       try {
         await createPaymentIntentForMission({
@@ -76,7 +78,7 @@ export async function createInitialMissionPayments(missionAgreementId, authorize
           amount: agreement.remainingAmount,
           type: "final",
         });
-        console.log(`✅ [MISSION PAYMENT] Final payment authorized: ${finalPayment.id}`);
+        console.log(`✅ [MISSION PAYMENT] Final payment authorized (will be captured on mission end): ${finalPayment.id}`);
       } catch (err) {
         console.error(`❌ [MISSION PAYMENT] Failed to authorize final payment:`, err);
       }

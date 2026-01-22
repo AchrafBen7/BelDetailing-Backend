@@ -5,6 +5,8 @@ import {
   acceptApplication,
   refuseApplication,
 } from "../services/application.service.js";
+import { createBookingFromApplication } from "../services/applicationBooking.service.js";
+import { createMissionAgreement } from "../services/missionAgreement.service.js";
 import { sendNotificationToUser } from "../services/onesignal.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
@@ -54,16 +56,13 @@ export async function applyToOfferController(req, res) {
         
         const providerName = providerProfile?.display_name || created.providerName || "Un prestataire";
         
-        await sendNotificationToUser({
+        const { sendNotificationWithDeepLink } = await import("../services/onesignal.service.js");
+        await sendNotificationWithDeepLink({
           userId: offer.created_by, // Company reçoit la notification
           title: "Nouvelle candidature",
           message: `${providerName} a postulé pour votre offre "${offer.title}"`,
-          data: {
-            type: "application_received",
-            offer_id: offerId,
-            application_id: created.id,
-            provider_id: req.user.id,
-          },
+          type: "application_received",
+          id: created.id,
         });
       }
     } catch (notifError) {
@@ -109,10 +108,43 @@ export async function acceptApplicationController(req, res) {
     // depositPercentage : Pourcentage d'acompte (20, 30, etc.)
     // paymentSchedule : Plan de paiement JSON (optionnel, défaut: one_shot)
     
+    // 🔒 SÉCURITÉ SEPA : Vérifier que la company a un mandate SEPA actif
+    const { getSepaMandate } = await import("../services/sepaDirectDebit.service.js");
+    const sepaMandate = await getSepaMandate(req.user.id);
+    
+    if (!sepaMandate) {
+      return res.status(400).json({ 
+        error: "SEPA mandate required. Please set up SEPA Direct Debit before accepting applications." 
+      });
+    }
+    
+    if (sepaMandate.status !== "active") {
+      return res.status(400).json({ 
+        error: `SEPA mandate is not active. Current status: ${sepaMandate.status}. Please complete the SEPA setup.` 
+      });
+    }
+    
     // 1) Accepter la candidature (met à jour le statut, calcule les montants, rejette les autres)
     const acceptResult = await acceptApplication(id, finalPrice, depositPercentage, req.user);
     
-    // 2) Créer le Mission Agreement
+    // 2) Créer un booking réel avec payment intent (même logique que bookingCreate)
+    // La company doit payer avant que l'application soit acceptée
+    const bookingResult = await createBookingFromApplication({
+      applicationId: id,
+      companyId: acceptResult.companyId,
+      detailerId: acceptResult.detailerId,
+      finalPrice: acceptResult.finalPrice,
+      offerId: acceptResult.offerId,
+      offerData: {
+        title: acceptResult.offerTitle,
+        description: acceptResult.offerDescription,
+        city: acceptResult.city,
+        postalCode: acceptResult.postalCode,
+        vehicleCount: acceptResult.vehicleCount,
+      },
+    });
+    
+    // 3) Créer le Mission Agreement (seulement après que le booking soit créé)
     const missionAgreement = await createMissionAgreement({
       applicationId: id,
       offerId: acceptResult.offerId,
@@ -149,16 +181,13 @@ export async function acceptApplicationController(req, res) {
         
         const offerTitle = offer?.title || "votre offre";
         
-        await sendNotificationToUser({
+        const { sendNotificationWithDeepLink } = await import("../services/onesignal.service.js");
+        await sendNotificationWithDeepLink({
           userId: application.provider_id, // Provider reçoit la notification
           title: "Candidature acceptée",
           message: `Votre candidature pour "${offerTitle}" a été acceptée`,
-          data: {
-            type: "application_accepted",
-            offer_id: application.offer_id,
-            application_id: id,
-            mission_agreement_id: missionAgreement.id,
-          },
+          type: "application_accepted",
+          id: missionAgreement.id, // Deep link vers la mission
         });
       }
     } catch (notifError) {
@@ -204,6 +233,8 @@ export async function acceptApplicationController(req, res) {
     return res.json({ 
       data: {
         ...acceptResult,
+        booking: bookingResult.booking,
+        paymentIntent: bookingResult.paymentIntent, // clientSecret pour que la company paie
         missionAgreement,
       }
     });
@@ -243,15 +274,13 @@ export async function refuseApplicationController(req, res) {
         
         const offerTitle = offer?.title || "votre offre";
         
-        await sendNotificationToUser({
+        const { sendNotificationWithDeepLink } = await import("../services/onesignal.service.js");
+        await sendNotificationWithDeepLink({
           userId: application.provider_id, // Provider reçoit la notification
           title: "Candidature refusée",
           message: `Votre candidature pour "${offerTitle}" a été refusée`,
-          data: {
-            type: "application_refused",
-            offer_id: application.offer_id,
-            application_id: id,
-          },
+          type: "application_refused",
+          id: id,
         });
       }
     } catch (notifError) {

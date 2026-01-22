@@ -1,67 +1,115 @@
 // src/services/notification.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
-
-export async function getNotifications(userId, { limit, unreadOnly } = {}) {
-  let query = supabase
-    .from("notifications")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-
-  if (unreadOnly) {
-    query = query.eq("is_read", false);
-  }
-
-  if (limit) {
-    query = query.limit(Number(limit));
-  }
-
-  const { data, error } = await query;
-  if (error) throw error;
-  return data;
-}
-
-export async function markNotificationAsRead(notificationId, userId) {
-  const { error } = await supabase
-    .from("notifications")
-    .update({ is_read: true })
-    .eq("id", notificationId)
-    .eq("user_id", userId);
-
-  if (error) throw error;
-  return true;
-}
+import { sendNotificationToUser } from "./onesignal.service.js";
 
 /**
- * Crée une notification dans la table notifications
- * @param {string} userId - User ID
- * @param {string} title - Titre de la notification
- * @param {string} message - Message de la notification
- * @param {string} type - Type de notification (ex: "booking", "offer", "payment")
+ * Crée une notification dans la base de données
+ * @param {Object} params
+ * @param {string} params.userId - ID de l'utilisateur destinataire
+ * @param {string} params.title - Titre de la notification
+ * @param {string} params.message - Message de la notification
+ * @param {string} params.type - Type de notification (booking_created, service_started, etc.)
+ * @param {Object} params.data - Données additionnelles (booking_id, offer_id, etc.)
  * @returns {Promise<Object>} Notification créée
  */
-export async function createNotification(userId, title, message, type) {
-  const { data, error } = await supabase
+export async function createNotification({ userId, title, message, type, data = null }) {
+  const { data: notification, error } = await supabase
     .from("notifications")
     .insert({
       user_id: userId,
       title,
       message,
       type,
+      data,
       is_read: false,
     })
-    .select()
+    .select("*")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error("[NOTIFICATIONS] Error creating notification:", error);
+    throw error;
+  }
+
+  // Envoyer une push notification via OneSignal
+  try {
+    await sendNotificationToUser({
+      userId,
+      title,
+      message,
+      data: {
+        type,
+        ...data,
+      },
+    });
+  } catch (notifError) {
+    console.error("[NOTIFICATIONS] Error sending push notification:", notifError);
+    // Ne pas faire échouer la création de notification si la push échoue
+  }
+
+  return notification;
+}
+
+/**
+ * Récupère les notifications d'un utilisateur
+ * @param {string} userId - ID de l'utilisateur
+ * @param {Object} options - Options de filtrage
+ * @param {boolean} options.unreadOnly - Récupérer uniquement les non lues
+ * @param {number} options.limit - Nombre maximum de notifications
+ * @returns {Promise<Array>} Liste des notifications
+ */
+export async function getNotifications(userId, options = {}) {
+  const { unreadOnly = false, limit = 50 } = options;
+
+  let query = supabase
+    .from("notifications")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (unreadOnly) {
+    query = query.eq("is_read", false);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("[NOTIFICATIONS] Error fetching notifications:", error);
+    throw error;
+  }
+
+  return data || [];
+}
+
+/**
+ * Marque une notification comme lue
+ * @param {string} notificationId - ID de la notification
+ * @param {string} userId - ID de l'utilisateur (vérification de sécurité)
+ * @returns {Promise<Object>} Notification mise à jour
+ */
+export async function markNotificationAsRead(notificationId, userId) {
+  const { data, error } = await supabase
+    .from("notifications")
+    .update({ is_read: true })
+    .eq("id", notificationId)
+    .eq("user_id", userId) // Sécurité: s'assurer que l'utilisateur possède la notification
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("[NOTIFICATIONS] Error marking notification as read:", error);
+    throw error;
+  }
+
   return data;
 }
 
 /**
  * Supprime une notification
  * @param {string} notificationId - ID de la notification
- * @param {string} userId - User ID (pour vérification de sécurité)
- * @returns {Promise<boolean>}
+ * @param {string} userId - ID de l'utilisateur (vérification de sécurité)
+ * @returns {Promise<boolean>} Succès
  */
 export async function deleteNotification(notificationId, userId) {
   const { error } = await supabase
@@ -70,66 +118,13 @@ export async function deleteNotification(notificationId, userId) {
     .eq("id", notificationId)
     .eq("user_id", userId);
 
-  if (error) throw error;
-  return true;
-}
-
-/**
- * Enregistre un device token (Player ID) dans la base de données pour référence.
- * 
- * ⚠️ IMPORTANT : Cette fonction est OPTIONNELLE pour iOS.
- * 
- * OneSignal SDK iOS fait automatiquement :
- * 1. Le registerDevice (via OneSignal.initialize)
- * 2. L'association avec external_user_id (via OneSignal.login(userId))
- * 
- * Cette fonction sert uniquement à :
- * - Garder une référence locale du token dans device_tokens (pour logs/débogage)
- * - Compatibilité avec Android si besoin (Android peut nécessiter un appel manuel)
- * 
- * @param {string} userId - User ID de votre backend (devient external_user_id dans OneSignal)
- * @param {string} playerId - OneSignal Player ID (identifier) ou APNs Device Token
- * @param {string} platform - "ios" ou "android"
- * @returns {Promise<boolean>}
- */
-export async function subscribeDeviceToken(userId, playerId, platform = "ios") {
-  if (!playerId) {
-    throw new Error("Missing player ID");
+  if (error) {
+    console.error("[NOTIFICATIONS] Error deleting notification:", error);
+    throw error;
   }
 
-  const actualToken = playerId.startsWith("player-")
-    ? playerId.replace("player-", "")
-    : playerId.startsWith("device-")
-    ? playerId.replace("device-", "")
-    : playerId;
-
-  // ✅ Enregistrer le token dans la DB pour référence locale (optionnel)
-  const { error } = await supabase
-    .from("device_tokens")
-    .upsert(
-      {
-        user_id: userId,
-        device_token: actualToken,
-        platform,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "device_token" }
-    );
-
-  if (error) throw error;
-  
-  // ⚠️ NOTE : On ne fait PAS d'appel à registerDevice() ici car :
-  // - iOS : OneSignal SDK fait automatiquement registerDevice + OneSignal.login(userId) associe external_user_id
-  // - Android : Si besoin, on peut appeler registerDevice manuellement, mais généralement le SDK le fait aussi
-  // 
-  // Si tu veux forcer un registerDevice pour Android, décommenter :
-  // if (platform === "android") {
-  //   await registerDevice({ userId, token: actualToken, platform });
-  // }
-  
   return true;
 }
-
 
 /**
  * Enregistre un device token pour les push notifications
@@ -147,6 +142,7 @@ export async function registerDeviceToken(userId, deviceToken, platform = "ios")
     .maybeSingle();
 
   if (findError && findError.code !== "PGRST116") {
+    // PGRST116 = not found, ce qui est OK
     console.error("[NOTIFICATIONS] Error checking existing device token:", findError);
     throw findError;
   }

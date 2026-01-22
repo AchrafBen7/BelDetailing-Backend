@@ -301,7 +301,6 @@ export async function acceptApplication(id, finalPrice, depositPercentage, user)
     .from("offers")
     .update({
       status: "closed", // ou "in_progress" selon ta logique
-      updated_at: new Date().toISOString(),
     })
     .eq("id", appRow.offer_id);
 

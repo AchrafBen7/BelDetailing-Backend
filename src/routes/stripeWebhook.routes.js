@@ -294,25 +294,37 @@ router.post(
               console.error("[WEBHOOK] Error updating mission payment:", updateError);
             }
 
-            // ✅ ENVOYER NOTIFICATION À LA COMPANY (paiement échoué)
+            // ✅ ENVOYER NOTIFICATIONS (paiement échoué) → company + detailer
             try {
+              const { sendNotificationWithDeepLink } = await import("../services/onesignal.service.js");
               const { data: agreement } = await supabase
                 .from("mission_agreements")
-                .select("company_id, title")
+                .select("company_id, detailer_id, title")
                 .eq("id", missionAgreementId)
                 .single();
 
-              if (agreement?.company_id) {
-                await sendNotificationToUser({
-                  userId: agreement.company_id,
-                  title: "Paiement échoué",
-                  message: `Le paiement pour "${agreement.title}" a échoué. Veuillez vérifier votre moyen de paiement.`,
-                  data: {
+              if (agreement) {
+                // Notification à la company
+                if (agreement.company_id) {
+                  await sendNotificationWithDeepLink({
+                    userId: agreement.company_id,
+                    title: "Paiement échoué",
+                    message: `Le paiement pour "${agreement.title || 'votre mission'}" a échoué. Veuillez vérifier votre moyen de paiement.`,
                     type: "mission_payment_failed",
-                    mission_agreement_id: missionAgreementId,
-                    payment_id: paymentId,
-                  },
-                });
+                    id: paymentId,
+                  });
+                }
+                
+                // Notification au detailer
+                if (agreement.detailer_id) {
+                  await sendNotificationWithDeepLink({
+                    userId: agreement.detailer_id,
+                    title: "Paiement échoué",
+                    message: `Le paiement pour "${agreement.title || 'votre mission'}" a échoué.`,
+                    type: "mission_payment_failed",
+                    id: paymentId,
+                  });
+                }
               }
             } catch (notifError) {
               console.error("[WEBHOOK] Notification send failed:", notifError);
