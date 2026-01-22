@@ -96,8 +96,17 @@ export async function createSepaSetupIntent(companyUserId) {
     const customerId = await getOrCreateStripeCustomer(companyUserId);
     console.log("✅ [SEPA] Step 1: Customer ID:", customerId);
 
-    // 2) Créer un Setup Intent pour SEPA Direct Debit
-    console.log("🔄 [SEPA] Step 2: Creating Stripe Setup Intent...");
+    // 2) Créer un Ephemeral Key pour iOS (comme pour les cartes)
+    console.log("🔄 [SEPA] Step 2: Creating Ephemeral Key...");
+    const ephemeralKey = await stripe.ephemeralKeys.create(
+      { customer: customerId },
+      { apiVersion: "2025-11-17.clover" }
+    );
+    console.log("✅ [SEPA] Step 2: Ephemeral Key created:", ephemeralKey.id);
+    console.log("📦 [SEPA] Ephemeral Key secret exists:", !!ephemeralKey.secret);
+
+    // 3) Créer un Setup Intent pour SEPA Direct Debit
+    console.log("🔄 [SEPA] Step 3: Creating Stripe Setup Intent...");
     const setupIntentPayload = {
       customer: customerId,
       payment_method_types: ["sepa_debit"],
@@ -111,7 +120,7 @@ export async function createSepaSetupIntent(companyUserId) {
     console.log("📤 [SEPA] Setup Intent payload:", JSON.stringify(setupIntentPayload, null, 2));
     
     const setupIntent = await stripe.setupIntents.create(setupIntentPayload);
-    console.log("✅ [SEPA] Step 2: Setup Intent created successfully");
+    console.log("✅ [SEPA] Step 3: Setup Intent created successfully");
     console.log("📦 [SEPA] Setup Intent ID:", setupIntent.id);
     console.log("📦 [SEPA] Setup Intent status:", setupIntent.status);
     console.log("📦 [SEPA] Setup Intent client_secret exists:", !!setupIntent.client_secret);
@@ -120,6 +129,7 @@ export async function createSepaSetupIntent(companyUserId) {
       setupIntentClientSecret: setupIntent.client_secret,
       customerId,
       setupIntentId: setupIntent.id,
+      ephemeralKeySecret: ephemeralKey.secret, // ✅ Ajouter l'ephemeral key
     };
     
     console.log("✅ [SEPA] createSepaSetupIntent completed successfully");
