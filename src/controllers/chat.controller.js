@@ -317,6 +317,14 @@ export async function getConversationMessages(req, res) {
 }
 
 export async function sendMessageController(req, res) {
+  console.log("🔄 [CHAT CONTROLLER] sendMessageController called");
+  console.log("📋 [CHAT CONTROLLER] Request:", {
+    conversationId: req.params.id,
+    userId: req.user.id,
+    userRole: req.user.role,
+    contentLength: req.body.content?.length || 0,
+  });
+  
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -324,9 +332,11 @@ export async function sendMessageController(req, res) {
     const { content } = req.body;
 
     if (!content || content.trim().length === 0) {
+      console.warn("⚠️ [CHAT CONTROLLER] Empty message content");
       return res.status(400).json({ error: "Message content is required" });
     }
 
+    console.log("🔄 [CHAT CONTROLLER] Fetching conversation...");
     const { data: conversation, error: convError } = await supabase
       .from("conversations")
       .select("provider_id, customer_id, booking_id")
@@ -334,13 +344,28 @@ export async function sendMessageController(req, res) {
       .single();
 
     if (convError || !conversation) {
+      console.error("❌ [CHAT CONTROLLER] Conversation not found:", convError);
       return res.status(404).json({ error: "Conversation not found" });
     }
 
+    console.log("📦 [CHAT CONTROLLER] Conversation:", {
+      provider_id: conversation.provider_id,
+      customer_id: conversation.customer_id,
+      booking_id: conversation.booking_id,
+    });
+
+    // Vérifier les permissions selon le rôle
     if (userRole === "provider" && conversation.provider_id !== userId) {
+      console.warn("⚠️ [CHAT CONTROLLER] Provider not authorized");
       return res.status(403).json({ error: "Forbidden" });
     }
     if (userRole === "customer" && conversation.customer_id !== userId) {
+      console.warn("⚠️ [CHAT CONTROLLER] Customer not authorized");
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    // Pour company : vérifier que c'est bien le customer_id (company = customer dans la conversation)
+    if (userRole === "company" && conversation.customer_id !== userId) {
+      console.warn("⚠️ [CHAT CONTROLLER] Company not authorized");
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -359,12 +384,20 @@ export async function sendMessageController(req, res) {
           "completed",
         ];
         if (!allowedStatuses.includes(booking.status)) {
+          console.warn("⚠️ [CHAT CONTROLLER] Booking status not allowed:", booking.status);
           return res.status(400).json({
             error: "Cannot send messages for this booking status",
           });
         }
       }
     }
+
+    console.log("🔄 [CHAT CONTROLLER] Sending message with:", {
+      conversation_id: id,
+      sender_id: userId,
+      sender_role: userRole,
+      contentLength: content.trim().length,
+    });
 
     const message = await sendMessage({
       conversation_id: id,
@@ -373,10 +406,21 @@ export async function sendMessageController(req, res) {
       content: content.trim(),
     });
 
+    console.log("✅ [CHAT CONTROLLER] Message sent successfully:", message.id);
     return res.status(201).json({ data: message });
   } catch (err) {
-    console.error("[CHAT] sendMessage error:", err);
-    return res.status(500).json({ error: "Could not send message" });
+    console.error("❌ [CHAT CONTROLLER] sendMessage error:", err);
+    console.error("❌ [CHAT CONTROLLER] Error details:", {
+      message: err.message,
+      code: err.code,
+      details: err.details,
+      hint: err.hint,
+      stack: err.stack,
+    });
+    return res.status(500).json({ 
+      error: "Could not send message",
+      details: err.message,
+    });
   }
 }
 

@@ -14,17 +14,42 @@ import {
  * Créer un Setup Intent pour configurer SEPA Direct Debit
  */
 export async function createSepaSetupIntentController(req, res) {
+  console.log("🔄 [SEPA CONTROLLER] createSepaSetupIntentController called");
+  console.log("📋 [SEPA CONTROLLER] User:", {
+    id: req.user.id,
+    role: req.user.role,
+    email: req.user.email,
+  });
+  
   try {
     if (req.user.role !== "company") {
+      console.warn("⚠️ [SEPA CONTROLLER] Unauthorized role:", req.user.role);
       return res.status(403).json({ error: "Only companies can set up SEPA Direct Debit" });
     }
 
+    console.log("🔄 [SEPA CONTROLLER] Calling createSepaSetupIntent...");
     const result = await createSepaSetupIntent(req.user.id);
+    console.log("✅ [SEPA CONTROLLER] Setup intent created successfully");
+    console.log("📦 [SEPA CONTROLLER] Response data:", {
+      hasClientSecret: !!result.setupIntentClientSecret,
+      customerId: result.customerId,
+      setupIntentId: result.setupIntentId,
+    });
 
     return res.json({ data: result });
   } catch (err) {
-    console.error("[SEPA] setup intent error:", err);
-    return res.status(500).json({ error: err.message || "Could not create SEPA setup intent" });
+    console.error("❌ [SEPA CONTROLLER] setup intent error:", err);
+    console.error("❌ [SEPA CONTROLLER] Error details:", {
+      message: err.message,
+      type: err.type,
+      code: err.code,
+      statusCode: err.statusCode,
+      stack: err.stack,
+    });
+    return res.status(500).json({ 
+      error: err.message || "Could not create SEPA setup intent",
+      code: err.code || "UNKNOWN_ERROR",
+    });
   }
 }
 

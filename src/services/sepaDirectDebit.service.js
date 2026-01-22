@@ -10,38 +10,75 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
  * 🟦 GET OR CREATE STRIPE CUSTOMER – Créer ou récupérer un Stripe Customer pour une company
  */
 async function getOrCreateStripeCustomer(companyUserId) {
-  // 1) Vérifier si la company a déjà un Stripe Customer ID
-  const { data: companyUser, error } = await supabase
-    .from("users")
-    .select("id, email, phone, stripe_customer_id")
-    .eq("id", companyUserId)
-    .single();
+  console.log("🔄 [SEPA] getOrCreateStripeCustomer called for:", companyUserId);
+  
+  try {
+    // 1) Vérifier si la company a déjà un Stripe Customer ID
+    console.log("🔄 [SEPA] Step 1: Checking existing Stripe customer in DB...");
+    const { data: companyUser, error } = await supabase
+      .from("users")
+      .select("id, email, phone, stripe_customer_id")
+      .eq("id", companyUserId)
+      .single();
 
-  if (error) throw error;
+    if (error) {
+      console.error("❌ [SEPA] Error fetching user from DB:", error);
+      throw error;
+    }
 
-  // 2) Si déjà un customer Stripe → retourner
-  if (companyUser.stripe_customer_id) {
-    return companyUser.stripe_customer_id;
+    console.log("📦 [SEPA] User data:", {
+      id: companyUser.id,
+      email: companyUser.email,
+      hasStripeCustomerId: !!companyUser.stripe_customer_id,
+    });
+
+    // 2) Si déjà un customer Stripe → retourner
+    if (companyUser.stripe_customer_id) {
+      console.log("✅ [SEPA] Existing Stripe customer found:", companyUser.stripe_customer_id);
+      return companyUser.stripe_customer_id;
+    }
+
+    // 3) Créer un nouveau Stripe Customer
+    console.log("🔄 [SEPA] Step 2: Creating new Stripe customer...");
+    const customerPayload = {
+      email: companyUser.email,
+      phone: companyUser.phone ?? undefined,
+      metadata: {
+        userId: companyUserId,
+        userRole: "company",
+        source: "beldetailing-app",
+      },
+    };
+    console.log("📤 [SEPA] Stripe customer payload:", JSON.stringify(customerPayload, null, 2));
+    
+    const customer = await stripe.customers.create(customerPayload);
+    console.log("✅ [SEPA] Step 2: Stripe customer created:", customer.id);
+
+    // 4) Sauvegarder dans la DB
+    console.log("🔄 [SEPA] Step 3: Saving Stripe customer ID to DB...");
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({ stripe_customer_id: customer.id })
+      .eq("id", companyUserId);
+
+    if (updateError) {
+      console.error("❌ [SEPA] Error saving Stripe customer ID to DB:", updateError);
+      throw updateError;
+    }
+
+    console.log("✅ [SEPA] Step 3: Stripe customer ID saved to DB");
+    console.log("✅ [SEPA] getOrCreateStripeCustomer completed:", customer.id);
+    return customer.id;
+  } catch (error) {
+    console.error("❌ [SEPA] getOrCreateStripeCustomer error:", error);
+    console.error("❌ [SEPA] Error details:", {
+      message: error.message,
+      type: error.type,
+      code: error.code,
+      statusCode: error.statusCode,
+    });
+    throw error;
   }
-
-  // 3) Créer un nouveau Stripe Customer
-  const customer = await stripe.customers.create({
-    email: companyUser.email,
-    phone: companyUser.phone ?? undefined,
-    metadata: {
-      userId: companyUserId,
-      userRole: "company",
-      source: "beldetailing-app",
-    },
-  });
-
-  // 4) Sauvegarder dans la DB
-  await supabase
-    .from("users")
-    .update({ stripe_customer_id: customer.id })
-    .eq("id", companyUserId);
-
-  return customer.id;
 }
 
 /**
@@ -51,26 +88,53 @@ async function getOrCreateStripeCustomer(companyUserId) {
  * @returns {Promise<Object>} { setupIntentClientSecret, customerId }
  */
 export async function createSepaSetupIntent(companyUserId) {
-  // 1) Créer ou récupérer le Stripe Customer
-  const customerId = await getOrCreateStripeCustomer(companyUserId);
+  console.log("🔄 [SEPA] createSepaSetupIntent called for companyUserId:", companyUserId);
+  
+  try {
+    // 1) Créer ou récupérer le Stripe Customer
+    console.log("🔄 [SEPA] Step 1: Getting or creating Stripe customer...");
+    const customerId = await getOrCreateStripeCustomer(companyUserId);
+    console.log("✅ [SEPA] Step 1: Customer ID:", customerId);
 
-  // 2) Créer un Setup Intent pour SEPA Direct Debit
-  const setupIntent = await stripe.setupIntents.create({
-    customer: customerId,
-    payment_method_types: ["sepa_debit"],
-    usage: "off_session", // Pour prélèvements automatiques
-    metadata: {
-      userId: companyUserId,
-      userRole: "company",
-      source: "beldetailing-app",
-    },
-  });
+    // 2) Créer un Setup Intent pour SEPA Direct Debit
+    console.log("🔄 [SEPA] Step 2: Creating Stripe Setup Intent...");
+    const setupIntentPayload = {
+      customer: customerId,
+      payment_method_types: ["sepa_debit"],
+      usage: "off_session", // Pour prélèvements automatiques
+      metadata: {
+        userId: companyUserId,
+        userRole: "company",
+        source: "beldetailing-app",
+      },
+    };
+    console.log("📤 [SEPA] Setup Intent payload:", JSON.stringify(setupIntentPayload, null, 2));
+    
+    const setupIntent = await stripe.setupIntents.create(setupIntentPayload);
+    console.log("✅ [SEPA] Step 2: Setup Intent created successfully");
+    console.log("📦 [SEPA] Setup Intent ID:", setupIntent.id);
+    console.log("📦 [SEPA] Setup Intent status:", setupIntent.status);
+    console.log("📦 [SEPA] Setup Intent client_secret exists:", !!setupIntent.client_secret);
 
-  return {
-    setupIntentClientSecret: setupIntent.client_secret,
-    customerId,
-    setupIntentId: setupIntent.id,
-  };
+    const result = {
+      setupIntentClientSecret: setupIntent.client_secret,
+      customerId,
+      setupIntentId: setupIntent.id,
+    };
+    
+    console.log("✅ [SEPA] createSepaSetupIntent completed successfully");
+    return result;
+  } catch (error) {
+    console.error("❌ [SEPA] createSepaSetupIntent error:", error);
+    console.error("❌ [SEPA] Error details:", {
+      message: error.message,
+      type: error.type,
+      code: error.code,
+      statusCode: error.statusCode,
+      raw: error.raw,
+    });
+    throw error;
+  }
 }
 
 /**

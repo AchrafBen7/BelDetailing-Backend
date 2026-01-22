@@ -4,6 +4,7 @@ import {
   withdrawApplication,
   acceptApplication,
   refuseApplication,
+  getMyApplications,
 } from "../services/application.service.js";
 import { createBookingFromApplication } from "../services/applicationBooking.service.js";
 import { createMissionAgreement } from "../services/missionAgreement.service.js";
@@ -109,20 +110,42 @@ export async function acceptApplicationController(req, res) {
     // paymentSchedule : Plan de paiement JSON (optionnel, défaut: one_shot)
     
     // 🔒 SÉCURITÉ SEPA : Vérifier que la company a un mandate SEPA actif
+    // Selon la documentation Stripe, un mandate SEPA "active" est requis pour effectuer des prélèvements
     const { getSepaMandate } = await import("../services/sepaDirectDebit.service.js");
-    const sepaMandate = await getSepaMandate(req.user.id);
+    
+    let sepaMandate;
+    try {
+      sepaMandate = await getSepaMandate(req.user.id);
+    } catch (sepaError) {
+      console.error("[APPLICATIONS] Error checking SEPA mandate:", sepaError);
+      return res.status(500).json({ 
+        error: "Error checking SEPA mandate. Please try again or contact support." 
+      });
+    }
     
     if (!sepaMandate) {
       return res.status(400).json({ 
-        error: "SEPA mandate required. Please set up SEPA Direct Debit before accepting applications." 
+        error: "SEPA mandate required. Please set up SEPA Direct Debit before accepting applications.",
+        code: "SEPA_MANDATE_MISSING"
       });
     }
     
+    // Vérifier que le mandate est actif (selon Stripe, seul un mandate "active" permet les prélèvements)
     if (sepaMandate.status !== "active") {
+      const statusMessages = {
+        "pending": "Votre mandat SEPA est en attente de confirmation. Veuillez compléter la configuration SEPA.",
+        "inactive": "Votre mandat SEPA est inactif. Veuillez configurer un nouveau mandat SEPA.",
+        "canceled": "Votre mandat SEPA a été annulé. Veuillez configurer un nouveau mandat SEPA.",
+      };
+      
       return res.status(400).json({ 
-        error: `SEPA mandate is not active. Current status: ${sepaMandate.status}. Please complete the SEPA setup.` 
+        error: statusMessages[sepaMandate.status] || `SEPA mandate is not active. Current status: ${sepaMandate.status}. Please complete the SEPA setup.`,
+        code: "SEPA_MANDATE_NOT_ACTIVE",
+        status: sepaMandate.status
       });
     }
+    
+    console.log("[APPLICATIONS] ✅ SEPA mandate validated:", sepaMandate.id, "status:", sepaMandate.status);
     
     // 1) Accepter la candidature (met à jour le statut, calcule les montants, rejette les autres)
     const acceptResult = await acceptApplication(id, finalPrice, depositPercentage, req.user);
