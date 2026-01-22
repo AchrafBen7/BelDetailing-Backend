@@ -295,3 +295,18 @@ export async function refuseApplicationController(req, res) {
     return res.status(status).json({ error: "Could not refuse application" });
   }
 }
+
+// 🔹 GET /api/v1/applications/me  (provider)
+export async function getMyApplicationsController(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can view their applications" });
+    }
+
+    const items = await getMyApplications(req.user.id);
+    return res.json({ data: items });
+  } catch (err) {
+    console.error("[APPLICATIONS] getMyApplications error:", err);
+    return res.status(500).json({ error: "Could not fetch applications" });
+  }
+}

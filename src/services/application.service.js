@@ -331,3 +331,50 @@ export async function acceptApplication(id, finalPrice, depositPercentage, user)
 export async function refuseApplication(id, user) {
   return setApplicationStatusAsCompany(id, "refused", user);
 }
+
+// 🟦 GET MY APPLICATIONS – GET /api/v1/applications/me (provider)
+export async function getMyApplications(userId) {
+  const { data, error } = await supabase
+    .from("applications")
+    .select(`
+      *,
+      offer:offers(
+        id,
+        title,
+        description,
+        city,
+        postal_code,
+        price_min,
+        price_max,
+        vehicle_count,
+        category,
+        type,
+        status,
+        company_name,
+        company_logo_url
+      )
+    `)
+    .eq("provider_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  return data.map(row => ({
+    ...mapApplicationRowToDto(row),
+    offer: row.offer ? {
+      id: row.offer.id,
+      title: row.offer.title,
+      description: row.offer.description,
+      city: row.offer.city,
+      postalCode: row.offer.postal_code,
+      priceMin: row.offer.price_min,
+      priceMax: row.offer.price_max,
+      vehicleCount: row.offer.vehicle_count,
+      category: row.offer.category,
+      type: row.offer.type,
+      status: row.offer.status,
+      companyName: row.offer.company_name,
+      companyLogoUrl: row.offer.company_logo_url,
+    } : null,
+  }));
+}
