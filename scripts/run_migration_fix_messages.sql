@@ -10,4 +10,4 @@
 -- La contrainte doit accepter 'provider', 'customer', et 'company'
 
 -- 1) Supprimer l'ancienne contrainte si elle existe
-frty
+

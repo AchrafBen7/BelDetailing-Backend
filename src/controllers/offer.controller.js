@@ -8,6 +8,7 @@ import {
   getMyOffers,
 } from "../services/offer.service.js";
 import { invalidateOfferCache } from "../middlewares/cache.middleware.js";
+import { getSepaMandate } from "../services/sepaDirectDebit.service.js";
 
 export async function listOffers(req, res) {
   try {
@@ -39,6 +40,22 @@ export async function createOfferController(req, res) {
     if (req.user.role !== "company") {
       return res.status(403).json({ error: "Only companies can create offers" });
     }
+
+    // 🔥 VÉRIFICATION MANDAT SEPA OBLIGATOIRE
+    // Une company doit avoir un mandat SEPA actif avant de pouvoir créer une offre
+    console.log("🔄 [OFFERS] Checking SEPA mandate for company:", req.user.id);
+    const sepaMandate = await getSepaMandate(req.user.id);
+    
+    if (!sepaMandate || sepaMandate.status !== "active") {
+      console.warn("⚠️ [OFFERS] No active SEPA mandate found for company:", req.user.id);
+      return res.status(400).json({ 
+        error: "SEPA_MANDATE_REQUIRED",
+        message: "Un mandat SEPA actif est requis pour créer une offre. Veuillez configurer votre mandat SEPA avant de continuer.",
+        requiresSepaSetup: true
+      });
+    }
+    
+    console.log("✅ [OFFERS] Active SEPA mandate found:", sepaMandate.id);
 
     const created = await createOffer(req.body, req.user);
     
