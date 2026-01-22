@@ -31,6 +31,11 @@ export async function createSepaSetupIntentController(req, res) {
 /**
  * 🔹 GET /api/v1/sepa/mandate
  * Récupérer le mandate SEPA actif de la company
+ * 
+ * Selon la documentation Stripe :
+ * - Un mandate SEPA est créé automatiquement lors de la confirmation d'un SetupIntent
+ * - Le statut peut être : "active", "inactive", ou "pending"
+ * - Seul un mandate "active" permet d'effectuer des prélèvements SEPA
  */
 export async function getSepaMandateController(req, res) {
   try {
@@ -41,13 +46,27 @@ export async function getSepaMandateController(req, res) {
     const mandate = await getSepaMandate(req.user.id);
 
     if (!mandate) {
-      return res.status(404).json({ error: "No SEPA mandate found" });
+      return res.status(404).json({ 
+        error: "No active SEPA mandate found. Please set up SEPA Direct Debit first.",
+        code: "SEPA_MANDATE_MISSING"
+      });
     }
 
-    return res.json({ data: mandate });
+    // Retourner le mandate avec des informations supplémentaires
+    return res.json({ 
+      data: {
+        ...mandate,
+        // Informations additionnelles pour l'UI
+        isActive: mandate.status === "active",
+        canUseForPayments: mandate.status === "active",
+      }
+    });
   } catch (err) {
     console.error("[SEPA] get mandate error:", err);
-    return res.status(500).json({ error: "Could not fetch SEPA mandate" });
+    return res.status(500).json({ 
+      error: "Could not fetch SEPA mandate",
+      code: "SEPA_MANDATE_FETCH_ERROR"
+    });
   }
 }
 

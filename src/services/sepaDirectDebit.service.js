@@ -76,55 +76,96 @@ export async function createSepaSetupIntent(companyUserId) {
 /**
  * 🟦 GET SEPA MANDATE – Récupérer le mandate SEPA actif d'une company
  * 
+ * Selon la documentation Stripe :
+ * - Les mandates SEPA sont créés automatiquement lors de la confirmation d'un SetupIntent
+ * - Le statut peut être : "active", "inactive", ou "pending"
+ * - Un mandate actif est requis pour effectuer des prélèvements SEPA
+ * 
  * @param {string} companyUserId - ID de la company
- * @returns {Promise<Object|null>} Mandate SEPA ou null
+ * @returns {Promise<Object|null>} Mandate SEPA actif ou null
  */
 export async function getSepaMandate(companyUserId) {
-  // 1) Récupérer le Stripe Customer ID
-  const { data: companyUser, error } = await supabase
-    .from("users")
-    .select("stripe_customer_id")
-    .eq("id", companyUserId)
-    .single();
+  try {
+    // 1) Récupérer le Stripe Customer ID
+    const { data: companyUser, error } = await supabase
+      .from("users")
+      .select("stripe_customer_id")
+      .eq("id", companyUserId)
+      .single();
 
-  if (error || !companyUser?.stripe_customer_id) {
+    if (error || !companyUser?.stripe_customer_id) {
+      console.log("[SEPA] No Stripe customer found for user:", companyUserId);
+      return null;
+    }
+
+    const customerId = companyUser.stripe_customer_id;
+
+    // 2) Récupérer TOUS les payment methods SEPA du customer
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: customerId,
+      type: "sepa_debit",
+      limit: 100, // Limite pour récupérer tous les payment methods
+    });
+
+    if (paymentMethods.data.length === 0) {
+      console.log("[SEPA] No SEPA payment methods found for customer:", customerId);
+      return null;
+    }
+
+    // 3) Parcourir TOUS les payment methods SEPA pour trouver un mandate actif
+    for (const sepaPaymentMethod of paymentMethods.data) {
+      const mandateId = sepaPaymentMethod.sepa_debit?.mandate;
+
+      if (!mandateId) {
+        console.log("[SEPA] Payment method", sepaPaymentMethod.id, "has no mandate");
+        continue; // Passer au suivant
+      }
+
+      try {
+        // 4) Récupérer le mandate depuis Stripe
+        const mandate = await stripe.mandates.retrieve(mandateId);
+
+        console.log("[SEPA] Retrieved mandate:", mandate.id, "status:", mandate.status);
+
+        // 5) Vérifier que le mandate est actif
+        // Selon Stripe, un mandate "active" est le seul qui permet les prélèvements
+        if (mandate.status === "active") {
+          return {
+            id: mandate.id,
+            status: mandate.status, // "active"
+            type: mandate.type, // "sepa_debit"
+            paymentMethodId: sepaPaymentMethod.id,
+            customerId: customerId,
+            // Informations additionnelles du mandate Stripe
+            acceptance: mandate.acceptance, // Détails de l'acceptation
+            customer_acceptance: mandate.customer_acceptance, // Informations d'acceptation client
+            details: {
+              bankCode: sepaPaymentMethod.sepa_debit?.bank_code,
+              branchCode: sepaPaymentMethod.sepa_debit?.branch_code,
+              last4: sepaPaymentMethod.sepa_debit?.last4,
+              fingerprint: sepaPaymentMethod.sepa_debit?.fingerprint,
+              country: sepaPaymentMethod.sepa_debit?.country,
+            },
+          };
+        } else {
+          console.log("[SEPA] Mandate", mandate.id, "is not active, status:", mandate.status);
+          // Continuer à chercher dans les autres payment methods
+        }
+      } catch (mandateError) {
+        console.error("[SEPA] Error retrieving mandate", mandateId, ":", mandateError.message);
+        // Continuer à chercher dans les autres payment methods
+        continue;
+      }
+    }
+
+    // 6) Aucun mandate actif trouvé
+    console.log("[SEPA] No active mandate found for customer:", customerId);
+    return null;
+  } catch (error) {
+    console.error("[SEPA] Error in getSepaMandate:", error);
+    // En cas d'erreur, retourner null plutôt que de faire planter l'application
     return null;
   }
-
-  // 2) Récupérer les payment methods SEPA du customer
-  const paymentMethods = await stripe.paymentMethods.list({
-    customer: companyUser.stripe_customer_id,
-    type: "sepa_debit",
-  });
-
-  if (paymentMethods.data.length === 0) {
-    return null;
-  }
-
-  // 3) Récupérer le mandate associé au premier payment method SEPA
-  const sepaPaymentMethod = paymentMethods.data[0];
-  const mandateId = sepaPaymentMethod.sepa_debit?.mandate;
-
-  if (!mandateId) {
-    return null;
-  }
-
-  // 4) Récupérer le mandate depuis Stripe
-  const mandate = await stripe.mandates.retrieve(mandateId);
-
-  return {
-    id: mandate.id,
-    status: mandate.status, // active, inactive, pending
-    type: mandate.type, // sepa_debit
-    paymentMethodId: sepaPaymentMethod.id,
-    customerId: companyUser.stripe_customer_id,
-    details: {
-      bankCode: sepaPaymentMethod.sepa_debit?.bank_code,
-      branchCode: sepaPaymentMethod.sepa_debit?.branch_code,
-      last4: sepaPaymentMethod.sepa_debit?.last4,
-      fingerprint: sepaPaymentMethod.sepa_debit?.fingerprint,
-    },
-  };
 }
 
 /**
@@ -199,6 +240,10 @@ export async function deleteSepaPaymentMethod(companyUserId, paymentMethodId) {
 /**
  * 🟦 CREATE PAYMENT INTENT WITH SEPA – Créer un Payment Intent avec SEPA Direct Debit
  * 
+ * Selon la documentation Stripe :
+ * - Un mandate SEPA actif est requis pour créer un Payment Intent avec SEPA
+ * - Le payment method doit avoir un mandate associé avec le statut "active"
+ * 
  * @param {Object} params
  * @param {string} params.companyUserId - ID de la company
  * @param {number} params.amount - Montant en euros
@@ -214,11 +259,22 @@ export async function createSepaPaymentIntent({
   paymentMethodId = null,
   metadata = {},
 }) {
-  // 1) Créer ou récupérer le Stripe Customer
+  // 1) ✅ VALIDATION SEPA : Vérifier qu'un mandate SEPA actif existe
+  const sepaMandate = await getSepaMandate(companyUserId);
+  
+  if (!sepaMandate) {
+    throw new Error("No active SEPA mandate found. Please set up SEPA Direct Debit first.");
+  }
+  
+  if (sepaMandate.status !== "active") {
+    throw new Error(`SEPA mandate is not active. Current status: ${sepaMandate.status}. Please complete the SEPA setup.`);
+  }
+
+  // 2) Créer ou récupérer le Stripe Customer
   const customerId = await getOrCreateStripeCustomer(companyUserId);
 
-  // 2) Si paymentMethodId non fourni, récupérer le payment method SEPA par défaut
-  let finalPaymentMethodId = paymentMethodId;
+  // 3) Si paymentMethodId non fourni, utiliser celui du mandate actif
+  let finalPaymentMethodId = paymentMethodId || sepaMandate.paymentMethodId;
 
   if (!finalPaymentMethodId) {
     const paymentMethods = await listSepaPaymentMethods(companyUserId);
@@ -228,7 +284,21 @@ export async function createSepaPaymentIntent({
     finalPaymentMethodId = paymentMethods[0].id;
   }
 
-  // 3) Créer le Payment Intent avec capture_method: "manual" (pour autorisation puis capture)
+  // 4) Vérifier que le payment method a bien un mandate actif
+  const paymentMethod = await stripe.paymentMethods.retrieve(finalPaymentMethodId);
+  const paymentMethodMandateId = paymentMethod.sepa_debit?.mandate;
+  
+  if (!paymentMethodMandateId) {
+    throw new Error("Payment method does not have a SEPA mandate. Please set up a new SEPA Direct Debit.");
+  }
+  
+  // Vérifier que le mandate du payment method est actif
+  const paymentMethodMandate = await stripe.mandates.retrieve(paymentMethodMandateId);
+  if (paymentMethodMandate.status !== "active") {
+    throw new Error(`Payment method's SEPA mandate is not active. Current status: ${paymentMethodMandate.status}. Please set up a new SEPA Direct Debit.`);
+  }
+
+  // 5) Créer le Payment Intent avec capture_method: "manual" (pour autorisation puis capture)
   const paymentIntent = await stripe.paymentIntents.create({
     amount: Math.round(amount * 100), // Convertir en centimes
     currency,
@@ -242,6 +312,7 @@ export async function createSepaPaymentIntent({
       userId: companyUserId,
       userRole: "company",
       source: "beldetailing-app",
+      mandateId: sepaMandate.id, // Ajouter l'ID du mandate pour traçabilité
       ...metadata,
     },
   });
