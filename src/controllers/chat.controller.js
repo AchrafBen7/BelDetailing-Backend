@@ -12,9 +12,10 @@ export async function listConversations(req, res) {
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    if (userRole !== "provider" && userRole !== "customer") {
+    // ✅ Accepter provider, customer, et company
+    if (userRole !== "provider" && userRole !== "customer" && userRole !== "company") {
       return res.status(403).json({
-        error: "Only providers and customers can access conversations",
+        error: "Only providers, customers, and companies can access conversations",
       });
     }
 
@@ -52,7 +53,8 @@ export async function getConversation(req, res) {
     if (userRole === "provider" && conversation.provider_id !== userId) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (userRole === "customer" && conversation.customer_id !== userId) {
+    // ✅ Company utilise customer_id dans la conversation (company = customer dans le contexte chat)
+    if ((userRole === "customer" || userRole === "company") && conversation.customer_id !== userId) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -300,7 +302,8 @@ export async function getConversationMessages(req, res) {
     if (userRole === "provider" && conversation.provider_id !== userId) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (userRole === "customer" && conversation.customer_id !== userId) {
+    // ✅ Company utilise customer_id dans la conversation (company = customer dans le contexte chat)
+    if ((userRole === "customer" || userRole === "company") && conversation.customer_id !== userId) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -359,13 +362,9 @@ export async function sendMessageController(req, res) {
       console.warn("⚠️ [CHAT CONTROLLER] Provider not authorized");
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (userRole === "customer" && conversation.customer_id !== userId) {
-      console.warn("⚠️ [CHAT CONTROLLER] Customer not authorized");
-      return res.status(403).json({ error: "Forbidden" });
-    }
-    // Pour company : vérifier que c'est bien le customer_id (company = customer dans la conversation)
-    if (userRole === "company" && conversation.customer_id !== userId) {
-      console.warn("⚠️ [CHAT CONTROLLER] Company not authorized");
+    // ✅ Company utilise customer_id dans la conversation (company = customer dans le contexte chat)
+    if ((userRole === "customer" || userRole === "company") && conversation.customer_id !== userId) {
+      console.warn("⚠️ [CHAT CONTROLLER] Customer/Company not authorized");
       return res.status(403).json({ error: "Forbidden" });
     }
 

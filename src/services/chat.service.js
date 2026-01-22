@@ -161,7 +161,8 @@ export async function getConversations(userId, userRole) {
 
   if (userRole === "provider") {
     query = query.eq("provider_id", userId);
-  } else if (userRole === "customer") {
+  } else if (userRole === "customer" || userRole === "company") {
+    // Company utilise customer_id dans la conversation (company = customer dans le contexte chat)
     query = query.eq("customer_id", userId);
   } else {
     return [];
