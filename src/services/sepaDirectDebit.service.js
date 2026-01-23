@@ -450,11 +450,26 @@ export async function createSepaPaymentIntent({
     },
   };
   
-  // ⚠️ IMPORTANT : application_fee_amount nécessite Stripe Connect
-  // Pour SEPA Direct Debit simple, on ne peut pas utiliser application_fee_amount directement
-  // La commission sera gérée via un Transfer vers le compte connecté du provider après capture
-  // Si on utilise Stripe Connect, on peut ajouter application_fee_amount ici
-  // Pour l'instant, on stocke le montant de la commission dans les metadata pour référence
+  // 6) Si applicationFeeAmount est fourni ET qu'un Connected Account est dans les metadata
+  // → Utiliser Stripe Connect avec on_behalf_of pour prélever la commission directement
+  if (applicationFeeAmount && applicationFeeAmount > 0 && metadata.stripeConnectedAccountId) {
+    // ✅ Utiliser Stripe Connect : créer le Payment Intent "on behalf of" le Connected Account
+    // Cela permet d'utiliser application_fee_amount pour prélever la commission NIOS directement
+    paymentIntentPayload.on_behalf_of = metadata.stripeConnectedAccountId;
+    paymentIntentPayload.application_fee_amount = applicationFeeAmount;
+    paymentIntentPayload.transfer_data = {
+      destination: metadata.stripeConnectedAccountId,
+    };
+    
+    console.log(`✅ [SEPA] Using Stripe Connect for mission payment: Connected Account ${metadata.stripeConnectedAccountId}, Application Fee: ${applicationFeeAmount} cents`);
+  } else if (applicationFeeAmount && applicationFeeAmount > 0) {
+    // ⚠️ Si applicationFeeAmount est fourni mais pas de Connected Account
+    // → La commission sera gérée via un Transfer après capture (fallback)
+    console.warn(`⚠️ [SEPA] applicationFeeAmount provided (${applicationFeeAmount} cents) but no Connected Account. Commission will be handled via Transfer after capture.`);
+    // Stocker le montant de la commission dans les metadata pour référence
+    paymentIntentPayload.metadata.commissionAmount = applicationFeeAmount.toString();
+    paymentIntentPayload.metadata.commissionHandling = "transfer_after_capture";
+  }
   
   const paymentIntent = await stripe.paymentIntents.create(paymentIntentPayload);
 

@@ -142,22 +142,81 @@ export async function confirmMissionAgreementByCompany(id, userId) {
     throw err;
   }
 
-  // 3) Validation : dates, prix, acompte doivent être définis
+  // 3) VALIDATION COMPLÈTE : Toutes les règles doivent être respectées avant confirmation
+  const validationErrors = [];
+
+  // 3.1) Dates obligatoires
   if (!existing.start_date || !existing.end_date) {
-    const err = new Error("Start date and end date are required to confirm the agreement");
-    err.statusCode = 400;
-    throw err;
+    validationErrors.push("Les dates de début et de fin sont requises");
+  } else {
+    // Vérifier que la date de fin est après la date de début
+    const startDate = new Date(existing.start_date);
+    const endDate = new Date(existing.end_date);
+    if (endDate <= startDate) {
+      validationErrors.push("La date de fin doit être postérieure à la date de début");
+    }
   }
 
+  // 3.2) Prix total obligatoire
   if (!existing.final_price || existing.final_price <= 0) {
-    const err = new Error("Final price must be greater than 0");
-    err.statusCode = 400;
-    throw err;
+    validationErrors.push("Le prix total doit être supérieur à 0");
   }
 
-  if (!existing.deposit_percentage || existing.deposit_percentage < 0 || existing.deposit_percentage > 100) {
-    const err = new Error("Deposit percentage must be between 0 and 100");
+  // 3.3) Acompte obligatoire et valide
+  if (existing.deposit_percentage === null || existing.deposit_percentage === undefined) {
+    validationErrors.push("Le pourcentage d'acompte est requis");
+  } else if (existing.deposit_percentage < 0 || existing.deposit_percentage > 100) {
+    validationErrors.push("Le pourcentage d'acompte doit être entre 0 et 100");
+  }
+
+  // 3.4) Vérifier que deposit_amount et remaining_amount sont calculés
+  if (!existing.deposit_amount || existing.deposit_amount < 0) {
+    validationErrors.push("Le montant de l'acompte doit être calculé et supérieur ou égal à 0");
+  }
+  if (!existing.remaining_amount || existing.remaining_amount < 0) {
+    validationErrors.push("Le montant restant doit être calculé et supérieur ou égal à 0");
+  }
+
+  // 3.5) Payment schedule obligatoire
+  if (!existing.payment_schedule || typeof existing.payment_schedule !== 'object') {
+    validationErrors.push("Le plan de paiement est requis");
+  }
+
+  // 3.6) Informations générales obligatoires
+  if (!existing.title || existing.title.trim() === "") {
+    validationErrors.push("Le titre de la mission est requis");
+  }
+  if (!existing.description || existing.description.trim() === "") {
+    validationErrors.push("La description de la mission est requise");
+  }
+  if (!existing.location_city || existing.location_city.trim() === "") {
+    validationErrors.push("La ville de la mission est requise");
+  }
+  if (!existing.location_postal_code || existing.location_postal_code.trim() === "") {
+    validationErrors.push("Le code postal de la mission est requis");
+  }
+  if (!existing.vehicle_count || existing.vehicle_count <= 0) {
+    validationErrors.push("Le nombre de véhicules doit être supérieur à 0");
+  }
+
+  // 3.7) Vérifier que le detailer a un Stripe Connect account (pour les payouts)
+  const { data: providerProfile, error: providerError } = await supabase
+    .from("provider_profiles")
+    .select("stripe_account_id")
+    .eq("user_id", existing.detailer_id)
+    .maybeSingle();
+
+  if (providerError) {
+    console.warn("[MISSION AGREEMENT] Error checking provider Stripe account:", providerError);
+  } else if (!providerProfile?.stripe_account_id) {
+    validationErrors.push("Le detailer doit avoir un compte Stripe Connect configuré pour recevoir les paiements");
+  }
+
+  // 3.8) Si des erreurs de validation, les retourner toutes
+  if (validationErrors.length > 0) {
+    const err = new Error(`Validation failed: ${validationErrors.join("; ")}`);
     err.statusCode = 400;
+    err.validationErrors = validationErrors;
     throw err;
   }
 
