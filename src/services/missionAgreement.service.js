@@ -179,8 +179,13 @@ export async function getMissionAgreementsForUser(userId, role, status = null) {
 
   if (role === "company") {
     query = query.eq("company_id", userId);
+    // Les companies voient tous leurs Mission Agreements (y compris draft)
   } else if (role === "provider") {
     query = query.eq("detailer_id", userId);
+    // 🔒 SÉCURITÉ : Les detailers ne voient QUE les Mission Agreements confirmés par la company
+    // (statut >= waiting_for_detailer_confirmation)
+    // Les Mission Agreements en "draft" ne sont pas visibles pour les detailers
+    query = query.neq("status", "draft");
   } else {
     throw new Error("Invalid role. Must be 'company' or 'provider'");
   }

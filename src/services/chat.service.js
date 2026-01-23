@@ -31,14 +31,13 @@ export async function createOrGetConversation({
     // Sinon, chercher les conversations sans booking_id (pour applications/missions)
     query = query.is("booking_id", null);
     
-    // Si application_id est fourni, chercher par application_id (si la colonne existe)
+    // PRIORITÉ 1 : Si application_id est fourni, chercher d'abord par application_id
+    // C'est le cas le plus spécifique (conversation liée à une candidature)
     if (application_id) {
       query = query.eq("application_id", application_id);
-    }
-    
-    // Si offer_id est fourni (et pas d'application_id), chercher aussi par offer_id
-    // Cela permet de trouver une conversation existante même si le detailer n'a pas encore postulé
-    if (offer_id && !application_id) {
+    } else if (offer_id) {
+      // PRIORITÉ 2 : Si offer_id est fourni (sans application_id), chercher par offer_id
+      // Cela permet de trouver une conversation existante pour cette offre
       query = query.eq("offer_id", offer_id);
     }
   }
@@ -59,19 +58,15 @@ export async function createOrGetConversation({
     const { data: allResults, error: queryError } = await query;
     
     if (queryError) {
-      // Si erreur de colonne inexistante (42703), refaire la requête sans application_id
-      if (queryError.code === "42703" && application_id) {
-        console.warn("[CHAT] application_id column does not exist, searching without it");
+      // Si erreur de colonne inexistante (42703), refaire la requête sans application_id/offer_id
+      if (queryError.code === "42703") {
+        console.warn("[CHAT] Column does not exist, searching without application_id/offer_id");
         const fallbackQuery = supabase
           .from("conversations")
           .select("*")
           .eq("provider_id", provider_id)
           .eq("customer_id", customer_id)
           .is("booking_id", null);
-        
-        if (offer_id) {
-          fallbackQuery.eq("offer_id", offer_id);
-        }
         
         const { data: fallbackResults, error: fallbackError } = await fallbackQuery;
         if (fallbackError) {
@@ -92,6 +87,50 @@ export async function createOrGetConversation({
       // Si plusieurs conversations existent, log un avertissement
       if (allResults.length > 1) {
         console.warn(`[CHAT] ⚠️ Multiple conversations found (${allResults.length}), using first one: ${existing.id}`);
+      }
+    } else {
+      // Si aucune conversation trouvée avec les critères stricts, essayer une recherche plus large
+      // (par exemple, si on cherche avec application_id mais qu'une conversation existe avec offer_id seulement)
+      if (application_id || offer_id) {
+        console.log(`[CHAT] No conversation found with strict criteria, trying broader search...`);
+        const broaderQuery = supabase
+          .from("conversations")
+          .select("*")
+          .eq("provider_id", provider_id)
+          .eq("customer_id", customer_id)
+          .is("booking_id", null);
+        
+        // Si on cherche avec application_id mais qu'une conversation existe avec offer_id seulement
+        if (application_id && offer_id) {
+          broaderQuery.eq("offer_id", offer_id);
+        } else if (offer_id) {
+          broaderQuery.eq("offer_id", offer_id);
+        }
+        
+        const { data: broaderResults, error: broaderError } = await broaderQuery;
+        
+        if (!broaderError && broaderResults && broaderResults.length > 0) {
+          existing = broaderResults[0];
+          console.log(`[CHAT] Found existing conversation with broader search: ${existing.id}`);
+          
+          // Si la conversation existe mais n'a pas d'application_id et qu'on en a un maintenant,
+          // mettre à jour la conversation pour lier l'application_id
+          if (application_id && !existing.application_id) {
+            console.log(`[CHAT] Updating conversation ${existing.id} with application_id: ${application_id}`);
+            const { data: updated, error: updateError } = await supabase
+              .from("conversations")
+              .update({ application_id })
+              .eq("id", existing.id)
+              .select("*");
+            
+            if (!updateError && updated && updated.length > 0) {
+              existing = updated[0];
+              console.log(`[CHAT] Conversation updated successfully with application_id`);
+            } else {
+              console.warn(`[CHAT] Failed to update conversation with application_id:`, updateError);
+            }
+          }
+        }
       }
     }
   } catch (err) {

@@ -58,6 +58,30 @@ export async function getConversation(req, res) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
+    // 🔒 SÉCURITÉ : Si c'est une conversation liée à une offre (pas de booking_id),
+    // vérifier que le detailer a bien postulé à l'offre
+    if (userRole === "provider" && !conversation.booking_id && conversation.offer_id) {
+      // Vérifier que le detailer a bien postulé à cette offre
+      const { data: application, error: appError } = await supabase
+        .from("applications")
+        .select("id, status")
+        .eq("offer_id", conversation.offer_id)
+        .eq("provider_id", userId)
+        .in("status", ["submitted", "underReview", "accepted", "refused"]) // Tous les statuts sauf withdrawn
+        .maybeSingle();
+
+      if (appError) {
+        console.error("[CHAT] Error checking application:", appError);
+        return res.status(500).json({ error: "Could not verify application" });
+      }
+
+      if (!application) {
+        return res.status(403).json({
+          error: "You must apply to this offer before you can access this conversation",
+        });
+      }
+    }
+
     return res.json({ data: conversation });
   } catch (err) {
     console.error("[CHAT] getConversation error:", err);
@@ -168,14 +192,41 @@ export async function createOrGetConversationController(req, res) {
           });
         }
       } else if (userRole === "provider") {
-        // Si application_id est fourni, vérifier que le provider est celui de l'application
-        if (application && application.provider_id !== userId) {
-          return res.status(403).json({
-            error: "You are not the provider of this application",
-          });
+        // 🔒 SÉCURITÉ : Un detailer ne peut accéder au chat que s'il a postulé à l'offre
+        if (!application_id) {
+          // Si pas d'application_id, vérifier que le detailer a bien postulé à cette offre
+          const { data: existingApplication, error: appCheckError } = await supabase
+            .from("applications")
+            .select("id, status")
+            .eq("offer_id", offer_id)
+            .eq("provider_id", userId)
+            .in("status", ["submitted", "underReview", "accepted", "refused"]) // Tous les statuts sauf withdrawn
+            .maybeSingle();
+
+          if (appCheckError) {
+            console.error("[CHAT] Error checking application:", appCheckError);
+            return res.status(500).json({ error: "Could not verify application" });
+          }
+
+          if (!existingApplication) {
+            return res.status(403).json({
+              error: "You must apply to this offer before you can start a conversation",
+            });
+          }
+
+          // Utiliser l'application_id trouvée pour créer/retrouver la conversation
+          application_id = existingApplication.id;
+        } else {
+          // Si application_id est fourni, vérifier que le provider est celui de l'application
+          if (application && application.provider_id !== userId) {
+            return res.status(403).json({
+              error: "You are not the provider of this application",
+            });
+          }
         }
 
         // Créer la conversation: provider = detailer (userId), customer = company
+        // Toujours utiliser application_id si disponible pour lier la conversation à la candidature
         const conversation = await createOrGetConversation({
           provider_id: userId,
           customer_id: offer.created_by,
@@ -315,6 +366,39 @@ export async function getConversationMessages(req, res) {
     // ✅ Company utilise customer_id dans la conversation (company = customer dans le contexte chat)
     if ((userRole === "customer" || userRole === "company") && conversation.customer_id !== userId) {
       return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // 🔒 SÉCURITÉ : Si c'est une conversation liée à une offre (pas de booking_id),
+    // vérifier que le detailer a bien postulé à l'offre
+    if (userRole === "provider" && !conversation.booking_id) {
+      // Récupérer offer_id depuis la conversation
+      const { data: convWithOffer, error: convError } = await supabase
+        .from("conversations")
+        .select("offer_id")
+        .eq("id", id)
+        .single();
+
+      if (!convError && convWithOffer?.offer_id) {
+        // Vérifier que le detailer a bien postulé à cette offre
+        const { data: application, error: appError } = await supabase
+          .from("applications")
+          .select("id, status")
+          .eq("offer_id", convWithOffer.offer_id)
+          .eq("provider_id", userId)
+          .in("status", ["submitted", "underReview", "accepted", "refused"]) // Tous les statuts sauf withdrawn
+          .maybeSingle();
+
+        if (appError) {
+          console.error("[CHAT] Error checking application:", appError);
+          return res.status(500).json({ error: "Could not verify application" });
+        }
+
+        if (!application) {
+          return res.status(403).json({
+            error: "You must apply to this offer before you can access this conversation",
+          });
+        }
+      }
     }
 
     const messages = await getMessages(id, safeLimit);

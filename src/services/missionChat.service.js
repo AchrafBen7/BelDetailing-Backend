@@ -19,26 +19,75 @@ export async function createMissionChat(missionAgreementId) {
       throw new Error("Mission Agreement not found");
     }
 
-    // 2) Vérifier si une conversation existe déjà pour ce Mission Agreement
-    // On cherche par provider_id + customer_id (detailer + company)
-    const { data: existingChat, error: checkError } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("provider_id", agreement.detailerId)
-      .eq("customer_id", agreement.companyId)
-      .is("booking_id", null) // Pas de booking_id pour les missions
-      .maybeSingle();
+    // 2) Récupérer l'application_id depuis le Mission Agreement pour lier la conversation
+    const { data: agreementRow, error: agreementError } = await supabase
+      .from("mission_agreements")
+      .select("application_id, offer_id")
+      .eq("id", missionAgreementId)
+      .single();
 
-    if (checkError) {
-      console.error("[MISSION CHAT] Error checking existing conversation:", checkError);
+    if (agreementError || !agreementRow) {
+      console.error("[MISSION CHAT] Error fetching agreement:", agreementError);
+      throw new Error("Mission Agreement not found");
     }
 
-    if (existingChat) {
-      console.log(`ℹ️ [MISSION CHAT] Conversation already exists for agreement ${missionAgreementId}`);
+    // 3) Vérifier si une conversation existe déjà pour ce Mission Agreement
+    // On cherche par provider_id + customer_id + application_id (ou offer_id si pas d'application_id)
+    // ⚠️ IMPORTANT : Ne JAMAIS utiliser .single() ou .maybeSingle() ici
+    // Toujours récupérer un tableau et prendre le premier élément
+    let query = supabase
+      .from("conversations")
+      .select("*")
+      .eq("provider_id", agreement.detailerId)
+      .eq("customer_id", agreement.companyId)
+      .is("booking_id", null); // Pas de booking_id pour les missions
+
+    // Si application_id existe, chercher par application_id (le plus spécifique)
+    if (agreementRow.application_id) {
+      query = query.eq("application_id", agreementRow.application_id);
+    } else if (agreementRow.offer_id) {
+      // Sinon, chercher par offer_id
+      query = query.eq("offer_id", agreementRow.offer_id);
+    }
+
+    // Récupérer TOUTES les conversations correspondantes (pas de .limit(1))
+    const { data: allChats, error: checkError } = await query;
+
+    if (checkError) {
+      // Si erreur de colonne inexistante (42703), refaire la requête sans application_id/offer_id
+      if (checkError.code === "42703") {
+        console.warn("[MISSION CHAT] application_id/offer_id column does not exist, searching without it");
+        const fallbackQuery = supabase
+          .from("conversations")
+          .select("*")
+          .eq("provider_id", agreement.detailerId)
+          .eq("customer_id", agreement.companyId)
+          .is("booking_id", null);
+        
+        const { data: fallbackChats, error: fallbackError } = await fallbackQuery;
+        if (fallbackError) {
+          console.error("[MISSION CHAT] Error checking existing conversation (fallback):", fallbackError);
+        } else if (fallbackChats && fallbackChats.length > 0) {
+          const existingChat = fallbackChats[0];
+          console.log(`ℹ️ [MISSION CHAT] Conversation already exists for agreement ${missionAgreementId} (fallback): ${existingChat.id}`);
+          return existingChat;
+        }
+      } else {
+        console.error("[MISSION CHAT] Error checking existing conversation:", checkError);
+      }
+    } else if (allChats && allChats.length > 0) {
+      const existingChat = allChats[0];
+      console.log(`ℹ️ [MISSION CHAT] Conversation already exists for agreement ${missionAgreementId}: ${existingChat.id} (${allChats.length} total)`);
+      
+      // Si plusieurs conversations existent, log un avertissement
+      if (allChats.length > 1) {
+        console.warn(`⚠️ [MISSION CHAT] Multiple conversations found (${allChats.length}), using first one: ${existingChat.id}`);
+      }
+      
       return existingChat; // Conversation déjà créée
     }
 
-    // 3) Créer la conversation
+    // 4) Créer la conversation
     // Note: Le système de chat actuel utilise provider_id/customer_id pour les bookings
     // Pour les missions, on adapte : detailer = provider, company = customer
     // booking_id reste null car c'est une mission, pas un booking
@@ -46,20 +95,14 @@ export async function createMissionChat(missionAgreementId) {
       provider_id: agreement.detailerId, // Le detailer est le "provider"
       customer_id: agreement.companyId, // La company est le "customer" dans ce contexte
       booking_id: null, // Pas de booking pour les missions
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      last_message_at: new Date().toISOString(),
     };
 
-    // Ajouter mission_agreement_id si la colonne existe dans la table
-    // (nécessitera une migration SQL si elle n'existe pas encore)
-    // Pour l'instant, on essaie de l'ajouter, si ça échoue on continue sans
-    try {
-      // Test si la colonne existe en essayant de l'insérer
-      insertPayload.mission_agreement_id = missionAgreementId;
-    } catch (e) {
-      // Si la colonne n'existe pas, on continue sans
-      console.warn("[MISSION CHAT] mission_agreement_id column may not exist, continuing without it");
+    // Ajouter application_id et offer_id si disponibles (pour lier la conversation à l'application/offre)
+    if (agreementRow.application_id) {
+      insertPayload.application_id = agreementRow.application_id;
+    }
+    if (agreementRow.offer_id) {
+      insertPayload.offer_id = agreementRow.offer_id;
     }
 
     // ⚠️ CRUCIAL : Ne PAS utiliser .single() ici car cela peut causer PGRST116
@@ -68,6 +111,42 @@ export async function createMissionChat(missionAgreementId) {
       .from("conversations")
       .insert(insertPayload)
       .select("*");
+
+    // Si l'erreur est due à une colonne inexistante, réessayer sans application_id/offer_id
+    if (createError && createError.code === "42703") {
+      console.warn("[MISSION CHAT] Column does not exist, retrying without application_id/offer_id");
+      const fallbackPayload = {
+        provider_id: agreement.detailerId,
+        customer_id: agreement.companyId,
+        booking_id: null,
+      };
+      
+      const { data: fallbackArray, error: fallbackError } = await supabase
+        .from("conversations")
+        .insert(fallbackPayload)
+        .select("*");
+      
+      if (fallbackError) {
+        console.error("[MISSION CHAT] Error creating conversation (fallback):", fallbackError);
+        throw fallbackError;
+      }
+      
+      if (!fallbackArray || fallbackArray.length === 0) {
+        throw new Error("Failed to create conversation (fallback, no data returned)");
+      }
+      
+      const conversation = fallbackArray[0];
+      console.log(`✅ [MISSION CHAT] Conversation created (fallback): ${conversation.id} for agreement ${missionAgreementId}`);
+      
+      // Créer le message de bienvenue
+      try {
+        await createWelcomeMessage(conversation.id, agreement);
+      } catch (welcomeError) {
+        console.error("[MISSION CHAT] Error creating welcome message:", welcomeError);
+      }
+      
+      return conversation;
+    }
 
     if (createError) {
       console.error("[MISSION CHAT] Error creating conversation:", createError);
@@ -159,22 +238,69 @@ export async function getMissionChat(missionAgreementId) {
     return null;
   }
 
-  // Chercher la conversation par provider_id + customer_id
-  // (detailer + company) avec booking_id null
-  const { data, error } = await supabase
+  // Récupérer l'application_id depuis le Mission Agreement pour lier la conversation
+  const { data: agreementRow, error: agreementError } = await supabase
+    .from("mission_agreements")
+    .select("application_id, offer_id")
+    .eq("id", missionAgreementId)
+    .single();
+
+  if (agreementError || !agreementRow) {
+    console.error("[MISSION CHAT] Error fetching agreement:", agreementError);
+    return null;
+  }
+
+  // Chercher la conversation par provider_id + customer_id + application_id (ou offer_id)
+  // ⚠️ IMPORTANT : Ne JAMAIS utiliser .single() ou .maybeSingle() ici
+  let query = supabase
     .from("conversations")
     .select("*")
     .eq("provider_id", agreement.detailerId)
     .eq("customer_id", agreement.companyId)
-    .is("booking_id", null)
-    .maybeSingle();
+    .is("booking_id", null);
 
-  if (error) {
-    console.error("[MISSION CHAT] Error fetching conversation:", error);
-    throw error;
+  // Si application_id existe, chercher par application_id (le plus spécifique)
+  if (agreementRow.application_id) {
+    query = query.eq("application_id", agreementRow.application_id);
+  } else if (agreementRow.offer_id) {
+    // Sinon, chercher par offer_id
+    query = query.eq("offer_id", agreementRow.offer_id);
   }
 
-  return data;
+  // Récupérer TOUTES les conversations correspondantes (pas de .limit(1))
+  const { data: allChats, error } = await query;
+
+  if (error) {
+    // Si erreur de colonne inexistante (42703), refaire la requête sans application_id/offer_id
+    if (error.code === "42703") {
+      console.warn("[MISSION CHAT] application_id/offer_id column does not exist, searching without it");
+      const fallbackQuery = supabase
+        .from("conversations")
+        .select("*")
+        .eq("provider_id", agreement.detailerId)
+        .eq("customer_id", agreement.companyId)
+        .is("booking_id", null);
+      
+      const { data: fallbackChats, error: fallbackError } = await fallbackQuery;
+      if (fallbackError) {
+        console.error("[MISSION CHAT] Error fetching conversation (fallback):", fallbackError);
+        return null;
+      }
+      
+      if (fallbackChats && fallbackChats.length > 0) {
+        return fallbackChats[0];
+      }
+    } else {
+      console.error("[MISSION CHAT] Error fetching conversation:", error);
+      return null;
+    }
+  }
+
+  if (allChats && allChats.length > 0) {
+    return allChats[0];
+  }
+
+  return null;
 }
 
 /**
