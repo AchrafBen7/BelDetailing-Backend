@@ -6,7 +6,7 @@ import { missionAgreementsTotal } from "../observability/metrics.js";
 /**
  * DB → DTO (iOS Mission Agreement)
  */
-function mapMissionAgreementRowToDto(row) {
+export function mapMissionAgreementRowToDto(row) {
   if (!row) return null;
 
   return {
@@ -202,7 +202,15 @@ export async function getMissionAgreementsForUser(userId, role, status = null) {
  * 🟦 UPDATE STATUS – Mettre à jour le statut d'un Mission Agreement
  */
 export async function updateMissionAgreementStatus(id, newStatus) {
-  const validStatuses = ["draft", "active", "completed", "cancelled", "suspended"];
+  const validStatuses = [
+    "draft", 
+    "waiting_for_detailer_confirmation", 
+    "agreement_fully_confirmed",
+    "active", 
+    "completed", 
+    "cancelled", 
+    "suspended"
+  ];
   if (!validStatuses.includes(newStatus)) {
     throw new Error(`Invalid status. Must be one of: ${validStatuses.join(", ")}`);
   }

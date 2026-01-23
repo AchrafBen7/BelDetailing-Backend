@@ -7,6 +7,15 @@ import {
   updateMissionAgreementDates,
   updateMissionAgreementPdfUrl,
 } from "../services/missionAgreement.service.js";
+import {
+  updateMissionAgreement,
+  confirmMissionAgreementByCompany,
+  acceptMissionAgreementByDetailer,
+} from "../services/missionAgreementUpdate.service.js";
+import {
+  createIntelligentPaymentSchedule,
+  getPaymentScheduleSummary,
+} from "../services/missionPaymentScheduleIntelligent.service.js";
 
 /**
  * 🔹 GET /api/v1/mission-agreements/:id
@@ -211,5 +220,187 @@ export async function updateMissionAgreementPdfController(req, res) {
   } catch (err) {
     console.error("[MISSION AGREEMENT] update pdf error:", err);
     return res.status(500).json({ error: "Could not update mission agreement PDF URL" });
+  }
+}
+
+/**
+ * 🔹 PATCH /api/v1/mission-agreements/:id
+ * Mettre à jour un Mission Agreement (company édition)
+ */
+export async function updateMissionAgreementController(req, res) {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    if (req.user.role !== "company") {
+      return res.status(403).json({ error: "Only companies can update mission agreements" });
+    }
+
+    const updated = await updateMissionAgreement(id, updates, req.user.id);
+
+    return res.json({ data: updated });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] update error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not update mission agreement" });
+  }
+}
+
+/**
+ * 🔹 POST /api/v1/mission-agreements/:id/confirm
+ * Confirmer le Mission Agreement côté company
+ */
+export async function confirmMissionAgreementController(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (req.user.role !== "company") {
+      return res.status(403).json({ error: "Only companies can confirm mission agreements" });
+    }
+
+    const confirmed = await confirmMissionAgreementByCompany(id, req.user.id);
+
+    return res.json({ data: confirmed });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] confirm error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not confirm mission agreement" });
+  }
+}
+
+/**
+ * 🔹 POST /api/v1/mission-agreements/:id/accept
+ * Accepter le Mission Agreement côté detailer
+ */
+export async function acceptMissionAgreementController(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can accept mission agreements" });
+    }
+
+    const accepted = await acceptMissionAgreementByDetailer(id, req.user.id);
+
+    return res.json({ data: accepted });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] accept error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not accept mission agreement" });
+  }
+}
+
+/**
+ * 🔹 POST /api/v1/mission-agreements/:id/create-payments
+ * Créer le plan de paiement intelligent pour un Mission Agreement
+ * Nécessite : statut agreement_fully_confirmed + SEPA mandate actif
+ */
+export async function createMissionPaymentsController(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (req.user.role !== "company") {
+      return res.status(403).json({ error: "Only companies can create payment schedules" });
+    }
+
+    // Vérifier que l'agreement existe et appartient à cette company
+    const agreement = await getMissionAgreementById(id);
+    if (!agreement) {
+      return res.status(404).json({ error: "Mission Agreement not found" });
+    }
+
+    if (agreement.companyId !== req.user.id) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Vérifier que le statut est agreement_fully_confirmed
+    if (agreement.status !== "agreement_fully_confirmed") {
+      return res.status(400).json({
+        error: `Cannot create payments. Agreement status must be 'agreement_fully_confirmed'. Current status: ${agreement.status}`,
+      });
+    }
+
+    // Vérifier que les dates sont définies
+    if (!agreement.startDate || !agreement.endDate) {
+      return res.status(400).json({
+        error: "Cannot create payments. Start date and end date must be defined.",
+      });
+    }
+
+    // Vérifier le SEPA mandate
+    const { getSepaMandate } = await import("../services/sepaDirectDebit.service.js");
+    const sepaMandate = await getSepaMandate(req.user.id);
+
+    if (!sepaMandate || sepaMandate.status !== "active") {
+      return res.status(400).json({
+        error: "SEPA_MANDATE_REQUIRED",
+        message: "Un mandat SEPA actif est requis pour créer les paiements. Veuillez configurer votre mandat SEPA.",
+        requiresSepaSetup: true,
+      });
+    }
+
+    // Vérifier si des paiements existent déjà
+    const { getMissionPaymentsForAgreement } = await import("../services/missionPayment.service.js");
+    const existingPayments = await getMissionPaymentsForAgreement(id);
+    
+    if (existingPayments.length > 0) {
+      return res.status(400).json({
+        error: "Payments already exist for this agreement",
+        payments: existingPayments,
+      });
+    }
+
+    // Créer le plan de paiement intelligent
+    const paymentSchedule = await createIntelligentPaymentSchedule(id, true); // authorizeAll = true
+
+    // Mettre à jour le statut à "active" (premier paiement autorisé)
+    await updateMissionAgreementStatus(id, "active");
+
+    return res.json({
+      data: {
+        agreementId: id,
+        schedule: paymentSchedule,
+        message: "Payment schedule created successfully",
+      },
+    });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] create payments error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not create payment schedule" });
+  }
+}
+
+/**
+ * 🔹 GET /api/v1/mission-agreements/:id/payment-schedule
+ * Récupérer le récapitulatif du plan de paiement
+ */
+export async function getPaymentScheduleController(req, res) {
+  try {
+    const { id } = req.params;
+
+    // Vérifier que l'agreement existe
+    const agreement = await getMissionAgreementById(id);
+    if (!agreement) {
+      return res.status(404).json({ error: "Mission Agreement not found" });
+    }
+
+    // Vérifier les permissions
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    if (userRole === "company" && agreement.companyId !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (userRole === "provider" && agreement.detailerId !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const summary = await getPaymentScheduleSummary(id);
+
+    return res.json({ data: summary });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] get payment schedule error:", err);
+    return res.status(500).json({ error: err.message || "Could not fetch payment schedule" });
   }
 }

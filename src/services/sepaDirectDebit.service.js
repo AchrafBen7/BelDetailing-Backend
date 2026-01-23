@@ -389,6 +389,7 @@ export async function createSepaPaymentIntent({
   amount,
   currency = "eur",
   paymentMethodId = null,
+  applicationFeeAmount = null, // Commission NIOS en centimes (optionnel)
   metadata = {},
 }) {
   // 1) ✅ VALIDATION SEPA : Vérifier qu'un mandate SEPA actif existe
@@ -431,7 +432,7 @@ export async function createSepaPaymentIntent({
   }
 
   // 5) Créer le Payment Intent avec capture_method: "manual" (pour autorisation puis capture)
-  const paymentIntent = await stripe.paymentIntents.create({
+  const paymentIntentPayload = {
     amount: Math.round(amount * 100), // Convertir en centimes
     currency,
     customer: customerId,
@@ -447,7 +448,15 @@ export async function createSepaPaymentIntent({
       mandateId: sepaMandate.id, // Ajouter l'ID du mandate pour traçabilité
       ...metadata,
     },
-  });
+  };
+  
+  // ⚠️ IMPORTANT : application_fee_amount nécessite Stripe Connect
+  // Pour SEPA Direct Debit simple, on ne peut pas utiliser application_fee_amount directement
+  // La commission sera gérée via un Transfer vers le compte connecté du provider après capture
+  // Si on utilise Stripe Connect, on peut ajouter application_fee_amount ici
+  // Pour l'instant, on stocke le montant de la commission dans les metadata pour référence
+  
+  const paymentIntent = await stripe.paymentIntents.create(paymentIntentPayload);
 
   return {
     id: paymentIntent.id,

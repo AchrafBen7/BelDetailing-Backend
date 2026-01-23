@@ -57,18 +57,24 @@ export async function createPaymentIntentForMission({
   // Note: Les mandates SEPA Stripe n'expirent pas automatiquement, mais on peut vérifier la date de création
   // Pour l'instant, on se contente de vérifier le statut "active"
 
-  // 3) Créer le Payment Intent SEPA
+  // 3) Calculer la commission NIOS (7% pour les missions)
+  const { MISSION_COMMISSION_RATE } = await import("../config/commission.js");
+  const commissionAmount = Math.round(amount * MISSION_COMMISSION_RATE * 100) / 100; // 7% en centimes
+  
+  // 4) Créer le Payment Intent SEPA avec application_fee_amount
   const paymentIntent = await createSepaPaymentIntent({
     companyUserId: agreement.companyId,
     amount,
     currency: "eur",
     paymentMethodId: null, // Utilise le payment method par défaut
+    applicationFeeAmount: Math.round(commissionAmount * 100), // En centimes pour Stripe
     metadata: {
       missionAgreementId,
       paymentId,
       paymentType: type,
       userId: agreement.companyId, // Pour les transactions
       type: "mission", // Pour identifier les paiements de missions
+      commissionAmount: commissionAmount.toString(), // Pour le tracking
     },
   });
 

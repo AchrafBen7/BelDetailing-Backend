@@ -8,6 +8,11 @@ import {
   updateMissionAgreementStripeController,
   updateMissionAgreementDatesController,
   updateMissionAgreementPdfController,
+  updateMissionAgreementController,
+  confirmMissionAgreementController,
+  acceptMissionAgreementController,
+  createMissionPaymentsController,
+  getPaymentScheduleController,
 } from "../controllers/missionAgreement.controller.js";
 import {
   downloadMissionAgreementPdfController,
@@ -43,5 +48,20 @@ router.patch("/:id/dates", updateMissionAgreementDatesController);
 
 // PATCH /api/v1/mission-agreements/:id/pdf
 router.patch("/:id/pdf", updateMissionAgreementPdfController);
+
+// PATCH /api/v1/mission-agreements/:id (company édition)
+router.patch("/:id", updateMissionAgreementController);
+
+// POST /api/v1/mission-agreements/:id/confirm (company confirmation)
+router.post("/:id/confirm", confirmMissionAgreementController);
+
+// POST /api/v1/mission-agreements/:id/accept (detailer acceptance)
+router.post("/:id/accept", acceptMissionAgreementController);
+
+// POST /api/v1/mission-agreements/:id/create-payments (company - créer le plan de paiement)
+router.post("/:id/create-payments", createMissionPaymentsController);
+
+// GET /api/v1/mission-agreements/:id/payment-schedule (récapitulatif du plan de paiement)
+router.get("/:id/payment-schedule", getPaymentScheduleController);
 
 export default router;
