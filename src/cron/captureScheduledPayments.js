@@ -67,7 +67,37 @@ export async function captureScheduledPayments(date = null) {
         continue;
       }
 
-      console.log(`🔄 [CRON] Capturing payment ${payment.id} (${payment.type}, ${payment.amount}€)`);
+      console.log(`🔄 [CRON] Capturing payment ${payment.id} (${payment.type}, ${payment.amount}€, payment_intent: ${payment.stripe_payment_intent_id})`);
+
+      // Vérifier le statut du Payment Intent AVANT de capturer (pour éviter les erreurs)
+      if (payment.stripe_payment_intent_id) {
+        try {
+          const { default: stripe } = await import("stripe");
+          const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY, {
+            apiVersion: "2025-11-17.clover",
+          });
+          
+          const paymentIntent = await stripeInstance.paymentIntents.retrieve(payment.stripe_payment_intent_id);
+          
+          if (paymentIntent.status !== "requires_capture") {
+            console.warn(`⚠️ [CRON] Skipping payment ${payment.id} - Payment Intent ${payment.stripe_payment_intent_id} status is "${paymentIntent.status}" (expected "requires_capture")`);
+            results.skipped++;
+            results.payments.push({
+              id: payment.id,
+              status: "skipped",
+              reason: `Payment Intent status is "${paymentIntent.status}" instead of "requires_capture"`,
+              amount: payment.amount,
+              type: payment.type,
+            });
+            continue;
+          }
+          
+          console.log(`✅ [CRON] Payment Intent ${payment.stripe_payment_intent_id} is ready for capture (status: ${paymentIntent.status}, amount_capturable: ${paymentIntent.amount_capturable})`);
+        } catch (stripeError) {
+          console.error(`❌ [CRON] Error checking Payment Intent ${payment.stripe_payment_intent_id}:`, stripeError.message);
+          // Continuer quand même, la fonction captureMissionPayment gérera l'erreur
+        }
+      }
 
       // Capturer le paiement
       const captured = await captureMissionPayment(payment.id);

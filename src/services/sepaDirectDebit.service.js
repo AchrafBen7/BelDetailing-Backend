@@ -489,14 +489,36 @@ export async function createSepaPaymentIntent({
  * @returns {Promise<Object>} Payment Intent capturé
  */
 export async function captureSepaPayment(paymentIntentId) {
-  const paymentIntent = await stripe.paymentIntents.capture(paymentIntentId);
+  // 1) Vérifier le statut du Payment Intent AVANT de capturer
+  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  
+  // 2) Vérifier que le Payment Intent est dans un état capturable
+  if (paymentIntent.status !== "requires_capture") {
+    const errorMessage = `Payment Intent ${paymentIntentId} cannot be captured. Current status: ${paymentIntent.status}. Only PaymentIntents with status "requires_capture" can be captured.`;
+    console.error(`❌ [SEPA CAPTURE] ${errorMessage}`);
+    throw new Error(errorMessage);
+  }
+  
+  // 3) Vérifier que amount_capturable > 0
+  if (paymentIntent.amount_capturable === 0) {
+    const errorMessage = `Payment Intent ${paymentIntentId} has no capturable amount (amount_capturable: 0). It may have already been captured.`;
+    console.error(`❌ [SEPA CAPTURE] ${errorMessage}`);
+    throw new Error(errorMessage);
+  }
+  
+  console.log(`✅ [SEPA CAPTURE] Payment Intent ${paymentIntentId} is ready for capture (status: ${paymentIntent.status}, amount_capturable: ${paymentIntent.amount_capturable})`);
+  
+  // 4) Capturer le Payment Intent
+  const captured = await stripe.paymentIntents.capture(paymentIntentId);
+
+  console.log(`✅ [SEPA CAPTURE] Payment Intent ${paymentIntentId} captured successfully (status: ${captured.status})`);
 
   return {
-    id: paymentIntent.id,
-    status: paymentIntent.status,
-    amount: paymentIntent.amount / 100,
-    currency: paymentIntent.currency,
-    captured: paymentIntent.amount_capturable === 0,
+    id: captured.id,
+    status: captured.status,
+    amount: captured.amount / 100,
+    currency: captured.currency,
+    captured: captured.amount_capturable === 0,
   };
 }
 
