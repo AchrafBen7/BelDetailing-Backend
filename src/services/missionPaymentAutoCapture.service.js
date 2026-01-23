@@ -49,14 +49,44 @@ export async function autoCaptureMissionPayments() {
   // 2) Capturer chaque paiement
   for (const payment of scheduledPayments) {
     try {
-      console.log(`🔄 [AUTO CAPTURE] Capturing payment ${payment.id} (scheduled: ${payment.scheduled_date})`);
+      console.log(`🔄 [AUTO CAPTURE] Processing payment ${payment.id} (type: ${payment.type}, amount: ${payment.amount}€, scheduled: ${payment.scheduled_date})`);
+
+      // Vérifier le statut du Payment Intent AVANT de capturer (pour éviter les erreurs)
+      if (payment.stripe_payment_intent_id) {
+        try {
+          const paymentIntent = await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id);
+          
+          if (paymentIntent.status !== "requires_capture") {
+            console.warn(`⚠️ [AUTO CAPTURE] Skipping payment ${payment.id} - Payment Intent ${payment.stripe_payment_intent_id} status is "${paymentIntent.status}" (expected "requires_capture")`);
+            results.errors.push({
+              paymentId: payment.id,
+              error: `Payment Intent status is "${paymentIntent.status}" instead of "requires_capture"`,
+            });
+            continue;
+          }
+          
+          if (paymentIntent.amount_capturable === 0) {
+            console.warn(`⚠️ [AUTO CAPTURE] Skipping payment ${payment.id} - Payment Intent ${payment.stripe_payment_intent_id} has no capturable amount (already captured?)`);
+            results.errors.push({
+              paymentId: payment.id,
+              error: "Payment Intent has no capturable amount (may already be captured)",
+            });
+            continue;
+          }
+          
+          console.log(`✅ [AUTO CAPTURE] Payment Intent ${payment.stripe_payment_intent_id} is ready for capture (status: ${paymentIntent.status}, amount_capturable: ${paymentIntent.amount_capturable})`);
+        } catch (stripeError) {
+          console.error(`❌ [AUTO CAPTURE] Error checking Payment Intent ${payment.stripe_payment_intent_id}:`, stripeError.message);
+          // Continuer quand même, la fonction captureMissionPayment gérera l'erreur
+        }
+      }
       
       await captureMissionPayment(payment.id);
       
       results.captured++;
       console.log(`✅ [AUTO CAPTURE] Payment ${payment.id} captured successfully`);
     } catch (err) {
-      console.error(`❌ [AUTO CAPTURE] Failed to capture payment ${payment.id}:`, err);
+      console.error(`❌ [AUTO CAPTURE] Failed to capture payment ${payment.id}:`, err.message);
       results.errors.push({
         paymentId: payment.id,
         error: err.message,
