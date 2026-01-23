@@ -122,11 +122,12 @@ export async function createOrGetConversation({
     insertPayload.offer_id = offer_id;
   }
 
-  const { data: created, error: createError } = await supabase
+  // ⚠️ CRUCIAL : Ne PAS utiliser .single() ici car cela peut causer PGRST116
+  // Récupérer un tableau et prendre le premier élément
+  const { data: createdArray, error: createError } = await supabase
     .from("conversations")
     .insert(insertPayload)
-    .select("*")
-    .single();
+    .select("*");
 
   // Si l'erreur est due à une colonne inexistante, réessayer sans ces colonnes
   if (createError && createError.code === "42703") {
@@ -137,14 +138,17 @@ export async function createOrGetConversation({
       booking_id: booking_id || null,
     };
     
-    const { data: fallbackCreated, error: fallbackError } = await supabase
+    const { data: fallbackCreatedArray, error: fallbackError } = await supabase
       .from("conversations")
       .insert(fallbackPayload)
-      .select("*")
-      .single();
+      .select("*");
     
     if (fallbackError) throw fallbackError;
-    return fallbackCreated;
+    if (!fallbackCreatedArray || fallbackCreatedArray.length === 0) {
+      throw new Error("Failed to create conversation (fallback)");
+    }
+    console.log(`[CHAT] Conversation created successfully (fallback): ${fallbackCreatedArray[0].id}`);
+    return fallbackCreatedArray[0];
   }
 
   if (createError) {
@@ -157,8 +161,12 @@ export async function createOrGetConversation({
     throw createError;
   }
   
-  console.log(`[CHAT] Conversation created successfully: ${created.id}`);
-  return created;
+  if (!createdArray || createdArray.length === 0) {
+    throw new Error("Failed to create conversation (no data returned)");
+  }
+  
+  console.log(`[CHAT] Conversation created successfully: ${createdArray[0].id}`);
+  return createdArray[0];
 }
 
 export async function sendMessage({

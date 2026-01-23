@@ -62,16 +62,23 @@ export async function createMissionChat(missionAgreementId) {
       console.warn("[MISSION CHAT] mission_agreement_id column may not exist, continuing without it");
     }
 
-    const { data: conversation, error: createError } = await supabase
+    // ⚠️ CRUCIAL : Ne PAS utiliser .single() ici car cela peut causer PGRST116
+    // Récupérer un tableau et prendre le premier élément
+    const { data: conversationArray, error: createError } = await supabase
       .from("conversations")
       .insert(insertPayload)
-      .select("*")
-      .single();
+      .select("*");
 
     if (createError) {
       console.error("[MISSION CHAT] Error creating conversation:", createError);
       throw createError;
     }
+    
+    if (!conversationArray || conversationArray.length === 0) {
+      throw new Error("Failed to create conversation (no data returned)");
+    }
+    
+    const conversation = conversationArray[0];
 
     console.log(`✅ [MISSION CHAT] Conversation created: ${conversation.id} for agreement ${missionAgreementId}`);
 
@@ -100,7 +107,9 @@ export async function createMissionChat(missionAgreementId) {
 async function createWelcomeMessage(conversationId, agreement) {
   const welcomeText = `Bonjour ! Votre candidature pour la mission "${agreement.title || "Mission"}" a été acceptée. Vous pouvez maintenant communiquer directement via cette conversation pour coordonner les détails de la mission.`;
 
-  const { data: message, error } = await supabase
+  // ⚠️ CRUCIAL : Ne PAS utiliser .single() ici car cela peut causer PGRST116
+  // Récupérer un tableau et prendre le premier élément
+  const { data: messageArray, error } = await supabase
     .from("messages")
     .insert({
       conversation_id: conversationId,
@@ -110,13 +119,18 @@ async function createWelcomeMessage(conversationId, agreement) {
       is_read: false,
       created_at: new Date().toISOString(),
     })
-    .select("*")
-    .single();
+    .select("*");
 
   if (error) {
     console.error("[MISSION CHAT] Error creating welcome message:", error);
     throw error;
   }
+  
+  if (!messageArray || messageArray.length === 0) {
+    throw new Error("Failed to create welcome message (no data returned)");
+  }
+  
+  const message = messageArray[0];
 
   // Mettre à jour la date de mise à jour de la conversation
   await supabase
