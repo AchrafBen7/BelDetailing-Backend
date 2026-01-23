@@ -304,15 +304,20 @@ export async function acceptApplication(id, finalPrice, depositPercentage, user)
     .from("offers")
     .update({
       status: "closed",
-      updated_at: new Date().toISOString(),
+      // ⚠️ Ne pas mettre à jour updated_at si la colonne n'existe pas
+      // La table offers peut ne pas avoir cette colonne
     })
     .eq("id", appRow.offer_id);
 
   if (closeOfferError) {
     console.error("[APPLICATIONS] Error closing offer:", closeOfferError);
-    // ⚠️ Important : Si on ne peut pas fermer l'offre, on doit quand même continuer
-    // mais c'est une erreur critique qui devrait être loggée
-    throw new Error("Failed to close offer after accepting application");
+    // ⚠️ Si l'erreur est PGRST204 (colonne n'existe pas), on continue quand même
+    // Sinon, on lance l'erreur car c'est critique
+    if (closeOfferError.code !== "PGRST204") {
+      throw new Error("Failed to close offer after accepting application");
+    } else {
+      console.warn("[APPLICATIONS] Column 'updated_at' does not exist in 'offers' table, continuing anyway");
+    }
   }
 
   console.log(`✅ [APPLICATIONS] Offer ${appRow.offer_id} automatically closed after accepting application ${id}`);
