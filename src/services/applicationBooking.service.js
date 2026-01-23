@@ -51,9 +51,9 @@ export async function createBookingFromApplication({
   }
 
   // 3) Créer le booking (sans payment intent pour l'instant)
-  // ⚠️ IMPORTANT : Pour les missions, la date n'est pas connue au moment de l'acceptation
-  // Elle sera définie plus tard dans le Mission Agreement
-  // La colonne date est maintenant nullable (migration: make_booking_date_nullable.sql)
+  // ⚠️ IMPORTANT : Pour les missions, la date et les heures ne sont pas connues au moment de l'acceptation
+  // Elles seront définies plus tard dans le Mission Agreement
+  // Les colonnes date, start_time et end_time sont maintenant nullable (migrations: make_booking_date_nullable.sql, make_booking_time_nullable.sql)
   const bookingData = {
     provider_id: detailerId,
     customer_id: companyId, // La company est le "customer" du booking
@@ -63,8 +63,8 @@ export async function createBookingFromApplication({
     price: finalPrice,
     currency: "eur",
     date: null, // NULL pour les missions - la date sera définie dans le Mission Agreement
-    start_time: null,
-    end_time: null,
+    start_time: null, // NULL pour les missions - l'heure sera définie dans le Mission Agreement
+    end_time: null, // NULL pour les missions - l'heure sera définie dans le Mission Agreement
     address: companyProfile?.city 
       ? `${companyProfile.city}, ${companyProfile.postal_code || ""}`.trim()
       : offerData.city || "",
