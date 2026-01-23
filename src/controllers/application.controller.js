@@ -6,7 +6,9 @@ import {
   refuseApplication,
   getMyApplications,
 } from "../services/application.service.js";
-import { createBookingFromApplication } from "../services/applicationBooking.service.js";
+// ⚠️ REMOVED: createBookingFromApplication - Les missions (offers) ne créent PAS de booking
+// Les bookings sont pour les services ponctuels avec start_time/end_time précis
+// Les missions sont gérées via Mission Agreement uniquement
 import { createMissionAgreement } from "../services/missionAgreement.service.js";
 import { sendNotificationToUser } from "../services/onesignal.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
@@ -150,24 +152,11 @@ export async function acceptApplicationController(req, res) {
     // 1) Accepter la candidature (met à jour le statut, calcule les montants, rejette les autres)
     const acceptResult = await acceptApplication(id, finalPrice, depositPercentage, req.user);
     
-    // 2) Créer un booking réel avec payment intent (même logique que bookingCreate)
-    // La company doit payer avant que l'application soit acceptée
-    const bookingResult = await createBookingFromApplication({
-      applicationId: id,
-      companyId: acceptResult.companyId,
-      detailerId: acceptResult.detailerId,
-      finalPrice: acceptResult.finalPrice,
-      offerId: acceptResult.offerId,
-      offerData: {
-        title: acceptResult.offerTitle,
-        description: acceptResult.offerDescription,
-        city: acceptResult.city,
-        postalCode: acceptResult.postalCode,
-        vehicleCount: acceptResult.vehicleCount,
-      },
-    });
-    
-    // 3) Créer le Mission Agreement (seulement après que le booking soit créé)
+    // 2) Créer le Mission Agreement (PAS de booking pour les missions/offers)
+    // ⚠️ IMPORTANT : Les missions (offers) ne créent PAS de booking car :
+    // - Les bookings sont pour les services ponctuels avec start_time/end_time précis
+    // - Les missions sont gérées via Mission Agreement avec startDate/endDate
+    // - Les paiements pour les missions sont gérés via Mission Payments, pas via bookings
     const missionAgreement = await createMissionAgreement({
       applicationId: id,
       offerId: acceptResult.offerId,
@@ -218,27 +207,15 @@ export async function acceptApplicationController(req, res) {
       // ⚠️ Ne pas bloquer l'acceptation si la notification échoue
     }
     
-    // ✅ CRÉER LES PAIEMENTS INITIAUX AUTOMATIQUEMENT
-    try {
-      const { createInitialMissionPayments } = await import("../services/missionPaymentSchedule.service.js");
-      await createInitialMissionPayments(missionAgreement.id, true); // authorizeAll = true
-      console.log(`✅ [APPLICATIONS] Initial payments created for agreement ${missionAgreement.id}`);
-    } catch (paymentError) {
-      console.error("[APPLICATIONS] Failed to create initial payments:", paymentError);
-      // Ne pas faire échouer l'acceptation si la création des paiements échoue
-      // Les paiements pourront être créés manuellement plus tard
-    }
-
-    // ✅ GÉNÉRER LE PDF DU MISSION AGREEMENT AUTOMATIQUEMENT
-    try {
-      const { generateAndSaveMissionAgreementPdf } = await import("../services/missionAgreementPdf.service.js");
-      await generateAndSaveMissionAgreementPdf(missionAgreement.id);
-      console.log(`✅ [APPLICATIONS] PDF generated for agreement ${missionAgreement.id}`);
-    } catch (pdfError) {
-      console.error("[APPLICATIONS] Failed to generate PDF:", pdfError);
-      // Ne pas faire échouer l'acceptation si la génération du PDF échoue
-      // Le PDF pourra être généré manuellement plus tard
-    }
+    // ⚠️ IMPORTANT : Ne PAS créer les paiements ici
+    // Les paiements seront créés seulement après :
+    // 1. Company confirme le contrat (draft → waiting_for_detailer_confirmation)
+    // 2. Detailer accepte le contrat (waiting_for_detailer_confirmation → agreement_fully_confirmed)
+    // 3. Company paie (agreement_fully_confirmed → active + paiements créés)
+    
+    // ⚠️ IMPORTANT : Ne PAS générer le PDF ici
+    // Le PDF sera généré automatiquement lors de la confirmation par la company
+    // Cela permet d'avoir les dates et prix finaux dans le PDF
 
     // ✅ CRÉER LA CONVERSATION DE CHAT AUTOMATIQUEMENT
     try {
@@ -256,8 +233,7 @@ export async function acceptApplicationController(req, res) {
     return res.json({ 
       data: {
         ...acceptResult,
-        booking: bookingResult.booking,
-        paymentIntent: bookingResult.paymentIntent, // clientSecret pour que la company paie
+        // ⚠️ Pas de booking pour les missions - gérées via Mission Agreement uniquement
         missionAgreement,
       }
     });

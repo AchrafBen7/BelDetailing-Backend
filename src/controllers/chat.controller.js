@@ -70,6 +70,16 @@ export async function createOrGetConversationController(req, res) {
     const userId = req.user.id;
     const userRole = req.user.role;
     const { provider_id, customer_id, booking_id, application_id, offer_id } = req.body;
+    
+    console.log(`[CHAT CONTROLLER] createOrGetConversationController called:`, {
+      userId,
+      userRole,
+      provider_id,
+      customer_id,
+      booking_id,
+      application_id,
+      offer_id,
+    });
 
     // 🆕 Cas 1: Conversation pour une candidature (company ↔ detailer)
     // OU conversation pour une offre (detailer n'a pas encore postulé)
@@ -414,8 +424,19 @@ export async function sendMessageController(req, res) {
       code: err.code,
       details: err.details,
       hint: err.hint,
+      validationErrors: err.validationErrors,
       stack: err.stack,
     });
+    
+    // Si c'est une erreur de validation, retourner 400 avec les détails
+    if (err.validationErrors && err.validationErrors.length > 0) {
+      return res.status(400).json({ 
+        error: "Message non autorisé",
+        details: err.validationErrors,
+        message: err.message,
+      });
+    }
+    
     return res.status(500).json({ 
       error: "Could not send message",
       details: err.message,
