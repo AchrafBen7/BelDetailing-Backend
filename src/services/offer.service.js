@@ -31,12 +31,20 @@ function mapOfferRowToDto(row) {
 }
 
 // 🟦 LIST – GET /api/v1/offers?status=&type=
+// Par défaut, ne retourne QUE les offres "open" (pour les detailers)
+// Les offres "closed" ne sont pas visibles dans OffersView
 export async function getOffers({ status, type }) {
   let query = supabase.from("offers_with_counts").select("*");
 
+  // 🔒 SÉCURITÉ : Par défaut, ne montrer que les offres "open"
+  // Si status est explicitement fourni, utiliser celui-ci
   if (status) {
     query = query.eq("status", status);
+  } else {
+    // Par défaut, seulement les offres ouvertes (pour les detailers)
+    query = query.eq("status", "open");
   }
+  
   if (type) {
     query = query.eq("type", type);
   }
@@ -308,7 +316,7 @@ export async function deleteOffer(id, user) {
     throw err;
   }
 
-  // 2) LOGIQUE MÉTIER : ne pas supprimer une offre qui a déjà un contrat accepté
+  // 2) LOGIQUE MÉTIER : Vérifier s'il y a des candidatures acceptées
   const { data: acceptedApps, error: appsError } = await supabase
     .from("applications")
     .select("id")
@@ -317,6 +325,7 @@ export async function deleteOffer(id, user) {
 
   if (appsError) throw appsError;
 
+  // 🚫 RÈGLE : Ne pas supprimer une offre qui a une candidature acceptée
   if (acceptedApps && acceptedApps.length > 0) {
     const err = new Error(
       "Cannot delete offer that has an accepted application. Close it instead."
@@ -325,7 +334,39 @@ export async function deleteOffer(id, user) {
     throw err;
   }
 
-  // 3) Suppression
+  // 3) 🔄 REFUSER AUTOMATIQUEMENT toutes les candidatures en attente
+  // Si l'offre a des candidatures (submitted, underReview), les refuser automatiquement
+  const { data: pendingApps, error: pendingError } = await supabase
+    .from("applications")
+    .select("id")
+    .eq("offer_id", id)
+    .in("status", ["submitted", "underReview"]);
+
+  if (pendingError) {
+    console.warn("[OFFERS] Error checking pending applications:", pendingError);
+  }
+
+  if (pendingApps && pendingApps.length > 0) {
+    console.log(`🔄 [OFFERS] Refusing ${pendingApps.length} pending application(s) for offer ${id}`);
+    
+    const { error: refuseError } = await supabase
+      .from("applications")
+      .update({
+        status: "refused",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("offer_id", id)
+      .in("status", ["submitted", "underReview"]);
+
+    if (refuseError) {
+      console.warn("[OFFERS] Error refusing pending applications:", refuseError);
+      // Ne pas faire échouer la suppression si cette étape échoue
+    } else {
+      console.log(`✅ [OFFERS] ${pendingApps.length} application(s) automatically refused`);
+    }
+  }
+
+  // 4) Suppression de l'offre
   const { error } = await supabase
     .from("offers")
     .delete()
@@ -336,7 +377,75 @@ export async function deleteOffer(id, user) {
   return true;
 }
 
+// 🟦 REOPEN – POST /api/v1/offers/:id/reopen (ROLE: company)
+// Rouvre une offre fermée (change le statut de "closed" à "open")
+// Permet à la company de remettre une offre en ligne manuellement
+export async function reopenOffer(id, user) {
+  // 1) Vérifier que l'offre existe et appartient à cette company
+  const { data: existing, error: fetchError } = await supabase
+    .from("offers")
+    .select("id, created_by, status")
+    .eq("id", id)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  if (!existing) {
+    const err = new Error("Offer not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (existing.created_by !== user.id) {
+    const err = new Error("Forbidden");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  // 2) Vérifier que l'offre est bien fermée
+  if (existing.status !== "closed") {
+    const err = new Error(`Offer is not closed. Current status: ${existing.status}`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 3) Vérifier qu'il n'y a pas de candidature acceptée
+  // Si une candidature est acceptée, l'offre ne peut pas être rouverte
+  const { data: acceptedApps, error: appsError } = await supabase
+    .from("applications")
+    .select("id")
+    .eq("offer_id", id)
+    .eq("status", "accepted");
+
+  if (appsError) throw appsError;
+
+  if (acceptedApps && acceptedApps.length > 0) {
+    const err = new Error(
+      "Cannot reopen offer that has an accepted application. The offer must remain closed."
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 4) Rouvrir l'offre
+  const { data, error } = await supabase
+    .from("offers")
+    .update({ 
+      status: "open",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+
+  return mapOfferRowToDto(data);
+}
+
 // 🟦 GET MY OFFERS – GET /api/v1/offers/my (ROLE: company)
+// Retourne TOUTES les offres de la company (y compris "closed")
+// Utilisé dans le dashboard company "Mes offres"
 export async function getMyOffers(userId) {
   const { data, error } = await supabase
     .from("offers")

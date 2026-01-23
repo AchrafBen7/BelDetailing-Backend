@@ -296,18 +296,26 @@ export async function acceptApplication(id, finalPrice, depositPercentage, user)
     // Ne pas faire échouer l'acceptation si cette étape échoue
   }
 
-  // 6) Fermer l'offre (ou la mettre en "in_progress")
+  // 6) 🔒 FERMER AUTOMATIQUEMENT L'OFFRE (règle métier)
+  // Quand une candidature est acceptée, l'offre devient "closed"
+  // Elle n'apparaît plus dans OffersView pour les detailers
+  // Elle reste visible dans "Mes offres" du dashboard company
   const { error: closeOfferError } = await supabase
     .from("offers")
     .update({
-      status: "closed", // ou "in_progress" selon ta logique
+      status: "closed",
+      updated_at: new Date().toISOString(),
     })
     .eq("id", appRow.offer_id);
 
   if (closeOfferError) {
-    console.warn("[APPLICATIONS] Error closing offer:", closeOfferError);
-    // Ne pas faire échouer l'acceptation si cette étape échoue
+    console.error("[APPLICATIONS] Error closing offer:", closeOfferError);
+    // ⚠️ Important : Si on ne peut pas fermer l'offre, on doit quand même continuer
+    // mais c'est une erreur critique qui devrait être loggée
+    throw new Error("Failed to close offer after accepting application");
   }
+
+  console.log(`✅ [APPLICATIONS] Offer ${appRow.offer_id} automatically closed after accepting application ${id}`);
 
   // 7) Retourner les données pour créer le Mission Agreement (sera fait dans le controller)
   return {

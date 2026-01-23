@@ -4,6 +4,7 @@ import {
   createOffer,
   updateOffer,
   closeOffer,
+  reopenOffer,
   deleteOffer,
   getMyOffers,
 } from "../services/offer.service.js";
@@ -111,6 +112,26 @@ export async function closeOfferController(req, res) {
     console.error("[OFFERS] close error:", err);
     const status = err.statusCode || 500;
     return res.status(status).json({ error: "Could not close offer" });
+  }
+}
+
+export async function reopenOfferController(req, res) {
+  try {
+    if (req.user.role !== "company") {
+      return res.status(403).json({ error: "Only companies can reopen offers" });
+    }
+
+    const { id } = req.params;
+    const updated = await reopenOffer(id, req.user);
+    
+    // Invalider le cache de l'offre rouverte
+    await invalidateOfferCache(id);
+    
+    return res.json({ data: updated });
+  } catch (err) {
+    console.error("[OFFERS] reopen error:", err);
+    const status = err.statusCode || 500;
+    return res.status(status).json({ error: err.message || "Could not reopen offer" });
   }
 }
 

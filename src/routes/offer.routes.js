@@ -8,6 +8,7 @@ import {
   createOfferController,
   updateOfferController,
   closeOfferController,
+  reopenOfferController,
   deleteOfferController,
   listMyOffersController,
 } from "../controllers/offer.controller.js";
@@ -54,6 +55,7 @@ router.get(
 );
 router.patch("/:id", requireAuth, updateOfferController);
 router.post("/:id/close", requireAuth, closeOfferController);
+router.post("/:id/reopen", requireAuth, reopenOfferController);
 router.delete("/:id", requireAuth, deleteOfferController);
 
 // FAVORITES - IMPORTANT: Ces routes doivent être définies AVANT les routes paramétrées "/:offerId/applications"
