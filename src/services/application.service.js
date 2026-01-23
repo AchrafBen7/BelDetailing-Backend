@@ -1,7 +1,7 @@
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
 // DB → DTO (iOS Application)
-function mapApplicationRowToDto(row) {
+export function mapApplicationRowToDto(row) {
   if (!row) return null;
 
   return {

@@ -93,7 +93,8 @@ export async function createOrGetConversationController(req, res) {
   try {
     const userId = req.user.id;
     const userRole = req.user.role;
-    const { provider_id, customer_id, booking_id, application_id, offer_id } = req.body;
+    // ⚠️ Utiliser let pour application_id car on peut le modifier si on trouve une application existante
+    let { provider_id, customer_id, booking_id, application_id, offer_id } = req.body;
     
     console.log(`[CHAT CONTROLLER] createOrGetConversationController called:`, {
       userId,
@@ -195,27 +196,32 @@ export async function createOrGetConversationController(req, res) {
         // 🔒 SÉCURITÉ : Un detailer ne peut accéder au chat que s'il a postulé à l'offre
         if (!application_id) {
           // Si pas d'application_id, vérifier que le detailer a bien postulé à cette offre
-          const { data: existingApplication, error: appCheckError } = await supabase
+          // ⚠️ IMPORTANT : Ne JAMAIS utiliser .maybeSingle() ici car cela peut causer PGRST116
+          // Récupérer toutes les applications et prendre la première
+          const { data: existingApplications, error: appCheckError } = await supabase
             .from("applications")
             .select("id, status")
             .eq("offer_id", offer_id)
             .eq("provider_id", userId)
             .in("status", ["submitted", "underReview", "accepted", "refused"]) // Tous les statuts sauf withdrawn
-            .maybeSingle();
+            .order("created_at", { ascending: false }); // Prendre la plus récente
 
           if (appCheckError) {
             console.error("[CHAT] Error checking application:", appCheckError);
             return res.status(500).json({ error: "Could not verify application" });
           }
 
-          if (!existingApplication) {
+          if (!existingApplications || existingApplications.length === 0) {
             return res.status(403).json({
               error: "You must apply to this offer before you can start a conversation",
             });
           }
 
           // Utiliser l'application_id trouvée pour créer/retrouver la conversation
-          application_id = existingApplication.id;
+          // Prendre la première (la plus récente)
+          application_id = existingApplications[0].id;
+          
+          console.log(`[CHAT] Found application ${application_id} for provider ${userId} and offer ${offer_id}`);
         } else {
           // Si application_id est fourni, vérifier que le provider est celui de l'application
           if (application && application.provider_id !== userId) {
