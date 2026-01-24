@@ -120,18 +120,24 @@ function generateMissionAgreementHtml({
   netAmount,
   formatDate,
 }) {
-  const companyName = companyProfile?.legal_name || companyUser?.email || "Non défini";
+  // Utiliser les infos légales du contrat si disponibles, sinon fallback sur les profils
+  const companyName = agreement.companyLegalName || companyProfile?.legal_name || companyUser?.email || "Non défini";
+  const companyVat = agreement.companyVatNumber || "";
+  const companyAddress = agreement.companyAddress || (companyProfile?.city && companyProfile?.postal_code ? `${companyProfile.city} ${companyProfile.postal_code}` : "");
   const companyCity = companyProfile?.city || "";
   const companyPostalCode = companyProfile?.postal_code || "";
-  const companyContact = companyProfile?.contact_name || "";
-  const companyEmail = companyUser?.email || "";
+  const companyContact = agreement.companyRepresentative || companyProfile?.contact_name || "";
+  const companyEmail = agreement.companyEmail || companyUser?.email || "";
   const companyPhone = companyUser?.phone || "";
 
-  const detailerName = detailerProfile?.display_name || detailerUser?.email || "Non défini";
+  const detailerName = agreement.detailerLegalName || detailerProfile?.display_name || detailerUser?.email || "Non défini";
+  const detailerVat = agreement.detailerVatNumber || "";
+  const detailerAddress = agreement.detailerAddress || (detailerProfile?.base_city && detailerProfile?.postal_code ? `${detailerProfile.base_city} ${detailerProfile.postal_code}` : "");
   const detailerCity = detailerProfile?.base_city || "";
   const detailerPostalCode = detailerProfile?.postal_code || "";
-  const detailerEmail = detailerProfile?.email || detailerUser?.email || "";
+  const detailerEmail = agreement.detailerEmail || detailerProfile?.email || detailerUser?.email || "";
   const detailerPhone = detailerProfile?.phone || detailerUser?.phone || "";
+  const detailerIban = agreement.detailerIban ? `****${agreement.detailerIban.slice(-4)}` : ""; // Masquer l'IBAN pour la sécurité
 
   const paymentScheduleHtml = generatePaymentScheduleHtml(payments, formatDate);
 
@@ -304,17 +310,20 @@ function generateMissionAgreementHtml({
       <div class="info-block">
         <h3>Entreprise (Client)</h3>
         <p><strong>${companyName}</strong></p>
-        ${companyContact ? `<p>Contact: ${companyContact}</p>` : ""}
-        ${companyCity || companyPostalCode ? `<p>${companyCity} ${companyPostalCode}</p>` : ""}
+        ${companyVat ? `<p>TVA: ${companyVat}</p>` : ""}
+        ${companyContact ? `<p>Représentant: ${companyContact}</p>` : ""}
+        ${companyAddress ? `<p>Adresse: ${companyAddress}</p>` : (companyCity || companyPostalCode ? `<p>${companyCity} ${companyPostalCode}</p>` : "")}
         ${companyEmail ? `<p>Email: ${companyEmail}</p>` : ""}
         ${companyPhone ? `<p>Téléphone: ${companyPhone}</p>` : ""}
       </div>
       <div class="info-block">
         <h3>Detailer (Prestataire)</h3>
         <p><strong>${detailerName}</strong></p>
-        ${detailerCity || detailerPostalCode ? `<p>${detailerCity} ${detailerPostalCode}</p>` : ""}
+        ${detailerVat ? `<p>TVA: ${detailerVat}</p>` : ""}
+        ${detailerAddress ? `<p>Adresse: ${detailerAddress}</p>` : (detailerCity || detailerPostalCode ? `<p>${detailerCity} ${detailerPostalCode}</p>` : "")}
         ${detailerEmail ? `<p>Email: ${detailerEmail}</p>` : ""}
         ${detailerPhone ? `<p>Téléphone: ${detailerPhone}</p>` : ""}
+        ${detailerIban ? `<p>IBAN: ${detailerIban}</p>` : ""}
       </div>
     </div>
   </div>
@@ -324,12 +333,17 @@ function generateMissionAgreementHtml({
     <div class="mission-details">
       <h3>${agreement.title || "Mission"}</h3>
       ${agreement.description ? `<p><strong>Description:</strong> ${agreement.description}</p>` : ""}
+      ${agreement.categories && agreement.categories.length > 0 ? `<p><strong>Catégories:</strong> ${agreement.categories.join(", ")}</p>` : ""}
+      ${agreement.missionType ? `<p><strong>Type de mission:</strong> ${agreement.missionType === "one-time" ? "Ponctuelle" : agreement.missionType === "recurring" ? "Récurrente" : "Long terme"}</p>` : ""}
       <p><strong>Localisation:</strong> ${agreement.locationCity || ""} ${agreement.locationPostalCode || ""}</p>
       <p><strong>Nombre de véhicules:</strong> ${agreement.vehicleCount || 0}</p>
       ${agreement.startDate ? `<p><strong>Date de début:</strong> ${formatDate(agreement.startDate)}</p>` : ""}
       ${agreement.endDate ? `<p><strong>Date de fin:</strong> ${formatDate(agreement.endDate)}</p>` : ""}
       ${agreement.estimatedDurationDays ? `<p><strong>Durée estimée:</strong> ${agreement.estimatedDurationDays} jours</p>` : ""}
+      ${agreement.companyAcceptedAt ? `<p><strong>Accepté par la company:</strong> ${formatDate(agreement.companyAcceptedAt)}</p>` : ""}
+      ${agreement.detailerAcceptedAt ? `<p><strong>Accepté par le detailer:</strong> ${formatDate(agreement.detailerAcceptedAt)}</p>` : ""}
       <p><strong>Statut:</strong> <span class="status-badge status-${agreement.status || "draft"}">${agreement.status || "draft"}</span></p>
+      ${agreement.contractVersion ? `<p><strong>Version du contrat:</strong> ${agreement.contractVersion}</p>` : ""}
     </div>
   </div>
 

@@ -392,15 +392,37 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
 
   const updatedAgreement = mapMissionAgreementRowToDto(data);
 
-  // 6) 🆕 CRÉER ET AUTORISER LES PAIEMENTS DU JOUR 1 (Jour 0 = activation)
+  // 6) 🆕 GÉNÉRER LE PDF DU CONTRAT (si pas déjà généré)
+  // Le PDF doit être généré avec les informations finales après acceptation par le detailer
+  let pdfUrl = existing.agreement_pdf_url;
+  if (!pdfUrl) {
+    try {
+      const { generateAndSaveMissionAgreementPdf } = await import("./missionAgreementPdf.service.js");
+      const generatedPdf = await generateAndSaveMissionAgreementPdf(id);
+      pdfUrl = generatedPdf;
+      
+      // Mettre à jour l'URL du PDF dans la base de données
+      await supabase
+        .from("mission_agreements")
+        .update({ agreement_pdf_url: pdfUrl })
+        .eq("id", id);
+      
+      console.log(`✅ [MISSION AGREEMENT] PDF generated and saved for agreement ${id}`);
+    } catch (pdfError) {
+      console.error("[MISSION AGREEMENT] Failed to generate PDF on detailer acceptance:", pdfError);
+      // Ne pas bloquer l'acceptation si le PDF échoue
+    }
+  }
+
+  // 7) 🆕 CRÉER ET AUTORISER LES PAIEMENTS DU JOUR 1 (Jour 0 = activation)
   // Les paiements seront capturés automatiquement au Jour 1 via cron job
   try {
-    // 6.1) Créer les paiements du jour 1 (acompte + commission)
+    // 7.1) Créer les paiements du jour 1 (acompte + commission)
     const { createDayOnePayments } = await import("./missionPaymentDayOne.service.js");
     await createDayOnePayments(id);
     console.log(`✅ [MISSION AGREEMENT] Day one payments created for agreement ${id} (Jour 0 activation)`);
     
-    // 6.2) Créer le plan de paiement intelligent (paiements mensuels/finaux)
+    // 7.2) Créer le plan de paiement intelligent (paiements mensuels/finaux)
     const { createIntelligentPaymentSchedule } = await import("./missionPaymentScheduleIntelligent.service.js");
     // authorizeAll = true : autorise tous les paiements immédiatement
     await createIntelligentPaymentSchedule(id, true);
