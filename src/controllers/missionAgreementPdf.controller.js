@@ -67,8 +67,13 @@ export async function generateMissionAgreementPdfController(req, res) {
     const userRole = req.user.role;
     const userId = req.user.id;
 
-    // Seule la company propriétaire ou un admin peut générer le PDF
-    if (userRole !== "admin" && (userRole !== "company" || agreement.companyId !== userId)) {
+    // Company ou detailer propriétaire, ou admin peut générer le PDF
+    const isOwner = 
+      (userRole === "company" && agreement.companyId === userId) ||
+      (userRole === "provider" && agreement.detailerId === userId) ||
+      userRole === "admin";
+
+    if (!isOwner) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
