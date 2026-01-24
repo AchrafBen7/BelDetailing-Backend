@@ -37,6 +37,42 @@ export function mapMissionAgreementRowToDto(row) {
     agreementPdfUrl: row.agreement_pdf_url,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    
+    // 🆕 STRUCTURE COMPLÈTE DU CONTRAT
+    // 1️⃣ Métadonnées du contrat (non modifiables)
+    contractVersion: row.contract_version || 1,
+    contractCreatedAt: row.contract_created_at || row.created_at,
+    categories: row.categories || (row.category ? [row.category] : []), // Array de catégories
+    missionType: row.mission_type || "one-time", // 'one-time', 'recurring', 'long-term'
+    country: row.country || "Belgium",
+    currency: row.currency || "eur",
+    commissionRate: row.commission_rate ? Number(row.commission_rate) : 0.07, // 7% par défaut
+    
+    // 2️⃣ Parties au contrat (obligatoire)
+    companyLegalName: row.company_legal_name,
+    companyVatNumber: row.company_vat_number,
+    companyLegalAddress: row.company_legal_address,
+    companyLegalRepresentative: row.company_legal_representative,
+    companyEmail: row.company_email,
+    detailerLegalName: row.detailer_legal_name,
+    detailerVatNumber: row.detailer_vat_number,
+    detailerAddress: row.detailer_address,
+    detailerIban: row.detailer_iban,
+    detailerEmail: row.detailer_email,
+    
+    // 3️⃣ Objet de la mission
+    exactAddress: row.exact_address, // Adresse exacte d'intervention (modifiable)
+    specificConstraints: row.specific_constraints,
+    requiredProducts: row.required_products, // JSON array
+    
+    // 4️⃣ Paramètres modifiables par la company
+    invoiceRequired: row.invoice_required ?? true,
+    paymentType: row.payment_type || "fractionated",
+    
+    // 5️⃣ Acceptation du contrat
+    companyAcceptedAt: row.company_accepted_at,
+    detailerAcceptedAt: row.detailer_accepted_at,
+    contractVersionAtAcceptance: row.contract_version_at_acceptance,
   };
 }
 
@@ -83,10 +119,46 @@ export async function createMissionAgreement({
   const depositAmount = Math.round((finalPrice * depositPercentage) / 100 * 100) / 100;
   const remainingAmount = Math.round((finalPrice - depositAmount) * 100) / 100;
 
-  // Récupérer le Stripe Connected Account ID du detailer
+  // 🆕 RÉCUPÉRER LES INFOS LÉGALES DE LA COMPANY
+  const { data: companyUser, error: companyUserError } = await supabase
+    .from("users")
+    .select("email, vat_number, stripe_customer_id")
+    .eq("id", companyId)
+    .single();
+
+  if (companyUserError) {
+    console.warn("[MISSION AGREEMENT] Error fetching company user:", companyUserError);
+  }
+
+  const { data: companyProfile, error: companyProfileError } = await supabase
+    .from("company_profiles")
+    .select("legal_name, city, postal_code, contact_name")
+    .eq("user_id", companyId)
+    .maybeSingle();
+
+  if (companyProfileError) {
+    console.warn("[MISSION AGREEMENT] Error fetching company profile:", companyProfileError);
+  }
+
+  // Construire l'adresse légale de la company
+  const companyLegalAddress = companyProfile
+    ? `${companyProfile.city || ""} ${companyProfile.postal_code || ""}`.trim()
+    : null;
+
+  // 🆕 RÉCUPÉRER LES INFOS LÉGALES DU DETAILER
+  const { data: detailerUser, error: detailerUserError } = await supabase
+    .from("users")
+    .select("email, vat_number")
+    .eq("id", detailerId)
+    .single();
+
+  if (detailerUserError) {
+    console.warn("[MISSION AGREEMENT] Error fetching detailer user:", detailerUserError);
+  }
+
   const { data: providerProfile, error: providerError } = await supabase
     .from("provider_profiles")
-    .select("stripe_account_id")
+    .select("stripe_account_id, display_name, base_city, postal_code, company_name")
     .eq("user_id", detailerId)
     .maybeSingle();
 
@@ -94,18 +166,54 @@ export async function createMissionAgreement({
     console.warn("[MISSION AGREEMENT] Error fetching provider profile:", providerError);
   }
 
-  // Récupérer le Stripe Customer ID de la company (sera créé plus tard si nécessaire)
-  const { data: companyUser, error: companyError } = await supabase
-    .from("users")
-    .select("stripe_customer_id")
-    .eq("id", companyId)
-    .single();
+  // Construire l'adresse du detailer
+  const detailerAddress = providerProfile
+    ? `${providerProfile.base_city || ""} ${providerProfile.postal_code || ""}`.trim()
+    : null;
 
-  if (companyError) {
-    console.warn("[MISSION AGREEMENT] Error fetching company user:", companyError);
+  // Récupérer le nom légal du detailer (company_name ou display_name)
+  const detailerLegalName = providerProfile?.company_name || providerProfile?.display_name || null;
+
+  // 🆕 RÉCUPÉRER L'IBAN DU DETAILER (depuis Stripe Connect account si disponible)
+  let detailerIban = null;
+  if (providerProfile?.stripe_account_id) {
+    try {
+      const Stripe = (await import("stripe")).default;
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+        apiVersion: "2025-11-17.clover",
+      });
+      
+      const account = await stripe.accounts.retrieve(providerProfile.stripe_account_id);
+      // Stripe stocke l'IBAN dans external_accounts
+      if (account.external_accounts?.data?.length > 0) {
+        const bankAccount = account.external_accounts.data.find(acc => acc.object === "bank_account");
+        if (bankAccount) {
+          detailerIban = bankAccount.last4 ? `****${bankAccount.last4}` : null; // Masquer pour sécurité
+        }
+      }
+    } catch (stripeError) {
+      console.warn("[MISSION AGREEMENT] Error fetching detailer IBAN from Stripe:", stripeError);
+      // Ne pas faire échouer la création si l'IBAN n'est pas disponible
+    }
   }
 
+  // 🆕 RÉCUPÉRER LES CATÉGORIES ET LE TYPE DE MISSION DEPUIS L'OFFRE
+  const { data: offer, error: offerError } = await supabase
+    .from("offers")
+    .select("categories, type")
+    .eq("id", offerId)
+    .maybeSingle();
+
+  if (offerError) {
+    console.warn("[MISSION AGREEMENT] Error fetching offer:", offerError);
+  }
+
+  const categories = offer?.categories || (offer?.category ? [offer.category] : []);
+  const missionType = offer?.type || "one-time"; // 'oneTime' → 'one-time' pour le contrat
+
+  // 🆕 STRUCTURE COMPLÈTE DU CONTRAT
   const insertPayload = {
+    // Champs existants
     offer_id: offerId,
     application_id: applicationId,
     company_id: companyId,
@@ -119,7 +227,7 @@ export async function createMissionAgreement({
     deposit_percentage: depositPercentage,
     deposit_amount: depositAmount,
     remaining_amount: remainingAmount,
-    payment_schedule: paymentSchedule || { type: "one_shot" },
+    payment_schedule: paymentSchedule || { type: "fractionated" }, // Par défaut fractionné
     operational_rules: null, // Sera défini lors de l'édition par la company
     start_date: null, // Sera défini plus tard
     end_date: null,
@@ -128,6 +236,43 @@ export async function createMissionAgreement({
     stripe_customer_id: companyUser?.stripe_customer_id || null,
     stripe_connected_account_id: providerProfile?.stripe_account_id || null,
     agreement_pdf_url: null, // Sera généré plus tard
+    
+    // 🆕 1️⃣ MÉTADONNÉES DU CONTRAT (NON MODIFIABLES)
+    contract_version: 1, // Version initiale
+    contract_created_at: new Date().toISOString(),
+    categories: categories, // Array de catégories depuis l'offre
+    mission_type: missionType === "oneTime" ? "one-time" : (missionType === "longTerm" ? "long-term" : missionType), // Normaliser
+    country: "Belgium", // Juridiction
+    currency: "eur", // Devise
+    commission_rate: 0.07, // 7% commission NIOS
+    
+    // 🆕 2️⃣ PARTIES AU CONTRAT (OBLIGATOIRE) - Company
+    company_legal_name: companyProfile?.legal_name || null,
+    company_vat_number: companyUser?.vat_number || null,
+    company_legal_address: companyLegalAddress,
+    company_legal_representative: companyProfile?.contact_name || null,
+    company_email: companyUser?.email || null,
+    
+    // 🆕 2️⃣ PARTIES AU CONTRAT (OBLIGATOIRE) - Detailer
+    detailer_legal_name: detailerLegalName,
+    detailer_vat_number: detailerUser?.vat_number || null,
+    detailer_address: detailerAddress,
+    detailer_iban: detailerIban, // IBAN masqué depuis Stripe
+    detailer_email: detailerUser?.email || null,
+    
+    // 🆕 3️⃣ OBJET DE LA MISSION
+    exact_address: null, // Sera défini par la company lors de l'édition
+    specific_constraints: null, // Sera défini par la company
+    required_products: null, // Sera défini par la company (JSON array)
+    
+    // 🆕 4️⃣ PARAMÈTRES MODIFIABLES PAR LA COMPANY
+    invoice_required: true, // Par défaut, facturation requise
+    payment_type: "fractionated", // Paiement fractionné obligatoire
+    
+    // 🆕 5️⃣ ACCEPTATION DU CONTRAT (sera rempli plus tard)
+    company_accepted_at: null,
+    detailer_accepted_at: null,
+    contract_version_at_acceptance: null,
   };
 
   const { data, error } = await supabase

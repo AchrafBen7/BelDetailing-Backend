@@ -246,13 +246,19 @@ export async function confirmMissionAgreementByCompany(id, userId) {
     }
   }
 
-  // 5) Mettre à jour le statut
+  // 5) 🆕 ENREGISTRER L'ACCEPTATION DE LA COMPANY
+  // Horodatage + version du contrat au moment de l'acceptation
+  const contractVersion = existing.contract_version || 1;
+  const now = new Date().toISOString();
+  
   const { data, error } = await supabase
     .from("mission_agreements")
     .update({
       status: "waiting_for_detailer_confirmation",
       agreement_pdf_url: pdfUrl || existing.agreement_pdf_url,
-      updated_at: new Date().toISOString(),
+      company_accepted_at: now, // 🆕 Horodatage acceptation company
+      contract_version_at_acceptance: contractVersion, // 🆕 Version au moment de l'acceptation
+      updated_at: now,
     })
     .eq("id", id)
     .select("*")
@@ -316,7 +322,12 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     throw err;
   }
 
-  // 3) 🆕 CRÉER LE PAYMENT INTENT PRINCIPAL (GARANTIE) AVANT DE CHANGER LE STATUT
+  // 3) 🆕 ENREGISTRER L'ACCEPTATION DU DETAILER
+  // Horodatage + version du contrat au moment de l'acceptation
+  const contractVersion = existing.contract_version || 1;
+  const now = new Date().toISOString();
+
+  // 4) 🆕 CRÉER LE PAYMENT INTENT PRINCIPAL (GARANTIE) AVANT DE CHANGER LE STATUT
   // Après double acceptation, créer un PaymentIntent principal pour le montant total
   // Ce PaymentIntent sert de "garantie" et sera utilisé pour les paiements programmés
   let mainPaymentIntentId = null;
@@ -356,14 +367,22 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     // On continue quand même pour que le contrat soit accepté
   }
 
-  // 4) Mettre à jour le statut à "active" (mission prête à démarrer)
+  // 5) 🆕 JOUR 0 — ACTIVATION DU CONTRAT
+  // Mettre à jour le statut à "active" (mission prête à démarrer)
   // Le statut "active" indique que la mission peut démarrer et que les paiements du jour 1 seront capturés automatiquement
+  // 
+  // 🟢 NOUVEAU FLOW : Jour 0 = Activation du contrat
+  // - SEPA mandate validé
+  // - Carte / compte vérifié
+  // - Prélèvement de l'acompte (600€) + Commission NIOS (210€) programmé pour Jour 1
   const { data, error } = await supabase
     .from("mission_agreements")
     .update({
       status: "active", // Mission active, prête pour les paiements du jour 1
       stripe_payment_intent_id: mainPaymentIntentId, // PaymentIntent principal (garantie)
-      updated_at: new Date().toISOString(),
+      detailer_accepted_at: now, // 🆕 Horodatage acceptation detailer
+      contract_version_at_acceptance: contractVersion, // 🆕 Version au moment de l'acceptation
+      updated_at: now,
     })
     .eq("id", id)
     .select("*")
@@ -372,6 +391,26 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
   if (error) throw error;
 
   const updatedAgreement = mapMissionAgreementRowToDto(data);
+
+  // 6) 🆕 CRÉER ET AUTORISER LES PAIEMENTS DU JOUR 1 (Jour 0 = activation)
+  // Les paiements seront capturés automatiquement au Jour 1 via cron job
+  try {
+    // 6.1) Créer les paiements du jour 1 (acompte + commission)
+    const { createDayOnePayments } = await import("./missionPaymentDayOne.service.js");
+    await createDayOnePayments(id);
+    console.log(`✅ [MISSION AGREEMENT] Day one payments created for agreement ${id} (Jour 0 activation)`);
+    
+    // 6.2) Créer le plan de paiement intelligent (paiements mensuels/finaux)
+    const { createIntelligentPaymentSchedule } = await import("./missionPaymentScheduleIntelligent.service.js");
+    // authorizeAll = true : autorise tous les paiements immédiatement
+    await createIntelligentPaymentSchedule(id, true);
+    
+    console.log(`✅ [MISSION AGREEMENT] Payment schedule created for agreement ${id} (Jour 0 activation)`);
+  } catch (scheduleError) {
+    console.error(`❌ [MISSION AGREEMENT] Error creating payment schedule for agreement ${id}:`, scheduleError);
+    // Ne pas faire échouer l'acceptation si la création du plan de paiement échoue
+    // Les paiements pourront être créés manuellement plus tard
+  }
 
   // 5) Envoyer notification à la company
   try {
