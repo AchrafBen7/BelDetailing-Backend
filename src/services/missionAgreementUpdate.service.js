@@ -4,10 +4,18 @@ import { mapMissionAgreementRowToDto } from "./missionAgreement.service.js";
 
 /**
  * 🟦 UPDATE AGREEMENT – Mettre à jour un Mission Agreement (company édition)
- * Permet de modifier : dates, prix, acompte, payment schedule, etc.
+ * 
+ * 🔒 CHAMPS VERROUILLÉS (non modifiables) :
+ * - title, description, locationCity, locationPostalCode, vehicleCount, finalPrice, detailer_id
+ * Ces champs ont été validés lors de l'acceptation de la candidature.
+ * 
+ * ✅ CHAMPS MODIFIABLES :
+ * - dates (startDate, endDate)
+ * - structure de paiement (depositPercentage, paymentSchedule)
+ * - règles opérationnelles
  * 
  * @param {string} id - ID du Mission Agreement
- * @param {Object} updates - Champs à mettre à jour
+ * @param {Object} updates - Champs à mettre à jour (seulement les champs modifiables)
  * @param {string} userId - ID de l'utilisateur (doit être la company)
  * @returns {Promise<Object>} Mission Agreement mis à jour
  */
@@ -56,13 +64,13 @@ export async function updateMissionAgreement(id, updates, userId) {
   }
 
   // Prix
-  if (updates.finalPrice !== undefined) {
-    updatePayload.final_price = updates.finalPrice;
-  }
+  // 🔒 finalPrice est VERROUILLÉ (ne peut pas être modifié)
+  // On utilise toujours existing.final_price pour les calculs
   if (updates.depositPercentage !== undefined) {
     updatePayload.deposit_percentage = updates.depositPercentage;
     // Recalculer deposit_amount et remaining_amount
-    const price = updates.finalPrice ?? existing.final_price;
+    // ⚠️ Toujours utiliser existing.final_price (verrouillé)
+    const price = existing.final_price;
     if (price) {
       const depositAmount = Math.round((price * updates.depositPercentage) / 100 * 100) / 100;
       const remainingAmount = Math.round((price - depositAmount) * 100) / 100;
@@ -76,22 +84,27 @@ export async function updateMissionAgreement(id, updates, userId) {
     updatePayload.payment_schedule = updates.paymentSchedule;
   }
 
-  // Informations générales
-  if (updates.title !== undefined) {
-    updatePayload.title = updates.title;
+  // Operational rules
+  if (updates.operationalRules !== undefined) {
+    updatePayload.operational_rules = updates.operationalRules;
   }
-  if (updates.description !== undefined) {
-    updatePayload.description = updates.description;
-  }
-  if (updates.locationCity !== undefined) {
-    updatePayload.location_city = updates.locationCity;
-  }
-  if (updates.locationPostalCode !== undefined) {
-    updatePayload.location_postal_code = updates.locationPostalCode;
-  }
-  if (updates.vehicleCount !== undefined) {
-    updatePayload.vehicle_count = updates.vehicleCount;
-  }
+
+  // 🔒 CHAMPS VERROUILLÉS : Ces champs ne peuvent PAS être modifiés
+  // Ils ont été validés lors de l'acceptation de la candidature :
+  // - title (titre de l'offre)
+  // - description (description de l'offre)
+  // - locationCity (localisation de base)
+  // - locationPostalCode (code postal)
+  // - vehicleCount (nombre de véhicules)
+  // - finalPrice (prix total convenu)
+  // - detailer_id (detailer sélectionné)
+  // 
+  // Si ces champs sont fournis dans updates, on les ignore silencieusement
+  // pour éviter les erreurs, mais ils ne seront pas mis à jour.
+  
+  // ⚠️ Note : Le prix total (finalPrice) est également verrouillé,
+  // mais on le laisse dans le code ci-dessus pour le calcul de deposit/remaining
+  // Cependant, on ne met pas à jour final_price dans la DB si fourni
 
   // 4) Mettre à jour
   const { data, error } = await supabase
@@ -324,7 +337,7 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     await sendNotificationWithDeepLink({
       userId: updatedAgreement.companyId,
       title: "Contrat accepté",
-      message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}"`,
+      message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}". Vous pouvez maintenant procéder au paiement.`,
       type: "mission_agreement_accepted",
       id: id,
     });
@@ -333,9 +346,24 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     // Ne pas faire échouer l'acceptation si la notification échoue
   }
 
-  // 5) ⚠️ IMPORTANT : Ne PAS créer les paiements ici
-  // Les paiements seront créés seulement quand la company paiera (étape suivante)
-  // Cela permet de vérifier le moyen de paiement avant de créer les paiements programmés
+  // 5) 🆕 CRÉER AUTOMATIQUEMENT LES PAIEMENTS INITIAUX
+  // Après double acceptation, créer :
+  // - Payment Intent pour l'acompte (gelé, capturé fin du premier jour)
+  // - Payment Intent pour la commission NIOS (7% unique, capturé immédiatement)
+  try {
+    const { createInitialPayments } = await import("./missionPaymentInitial.service.js");
+    const initialPayments = await createInitialPayments(id);
+    
+    console.log(`✅ [MISSION AGREEMENT] Initial payments created for agreement ${id}:`, {
+      deposit: initialPayments.depositPaymentIntent.id,
+      commission: initialPayments.commissionPaymentIntent.id,
+    });
+  } catch (paymentError) {
+    console.error(`❌ [MISSION AGREEMENT] Error creating initial payments for agreement ${id}:`, paymentError);
+    // ⚠️ IMPORTANT : Ne pas faire échouer l'acceptation si la création des paiements échoue
+    // La company pourra créer les paiements manuellement plus tard
+    // On continue quand même pour que le contrat soit accepté
+  }
 
   return updatedAgreement;
 }

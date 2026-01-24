@@ -450,18 +450,25 @@ export async function createSepaPaymentIntent({
     },
   };
   
-  // 6) Si applicationFeeAmount est fourni ET qu'un Connected Account est dans les metadata
-  // → Utiliser Stripe Connect avec on_behalf_of pour prélever la commission directement
-  if (applicationFeeAmount && applicationFeeAmount > 0 && metadata.stripeConnectedAccountId) {
+  // 6) Si un Connected Account est dans les metadata → Utiliser Stripe Connect
+  if (metadata.stripeConnectedAccountId) {
     // ✅ Utiliser Stripe Connect : créer le Payment Intent "on behalf of" le Connected Account
-    // Cela permet d'utiliser application_fee_amount pour prélever la commission NIOS directement
     paymentIntentPayload.on_behalf_of = metadata.stripeConnectedAccountId;
-    paymentIntentPayload.application_fee_amount = applicationFeeAmount;
-    paymentIntentPayload.transfer_data = {
-      destination: metadata.stripeConnectedAccountId,
-    };
     
-    console.log(`✅ [SEPA] Using Stripe Connect for mission payment: Connected Account ${metadata.stripeConnectedAccountId}, Application Fee: ${applicationFeeAmount} cents`);
+    if (applicationFeeAmount && applicationFeeAmount > 0) {
+      // Si applicationFeeAmount > 0 : prélever la commission NIOS directement
+      paymentIntentPayload.application_fee_amount = applicationFeeAmount;
+      paymentIntentPayload.transfer_data = {
+        destination: metadata.stripeConnectedAccountId,
+      };
+      console.log(`✅ [SEPA] Using Stripe Connect with commission: Connected Account ${metadata.stripeConnectedAccountId}, Application Fee: ${applicationFeeAmount} cents`);
+    } else {
+      // Si applicationFeeAmount = 0 ou null : transférer tout le montant au Connected Account (sans commission)
+      paymentIntentPayload.transfer_data = {
+        destination: metadata.stripeConnectedAccountId,
+      };
+      console.log(`✅ [SEPA] Using Stripe Connect without commission: Connected Account ${metadata.stripeConnectedAccountId}, Full amount transferred`);
+    }
   } else if (applicationFeeAmount && applicationFeeAmount > 0) {
     // ⚠️ Si applicationFeeAmount est fourni mais pas de Connected Account
     // → La commission sera gérée via un Transfer après capture (fallback)

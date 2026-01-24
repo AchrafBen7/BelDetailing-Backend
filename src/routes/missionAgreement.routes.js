@@ -15,6 +15,10 @@ import {
   getPaymentScheduleController,
 } from "../controllers/missionAgreement.controller.js";
 import {
+  getInitialPaymentsController,
+  createInitialPaymentsController,
+} from "../controllers/missionPaymentInitial.controller.js";
+import {
   downloadMissionAgreementPdfController,
   generateMissionAgreementPdfController,
 } from "../controllers/missionAgreementPdf.controller.js";
@@ -63,5 +67,11 @@ router.post("/:id/create-payments", createMissionPaymentsController);
 
 // GET /api/v1/mission-agreements/:id/payment-schedule (récapitulatif du plan de paiement)
 router.get("/:id/payment-schedule", getPaymentScheduleController);
+
+// GET /api/v1/mission-agreements/:id/initial-payments (récupérer les paiements initiaux)
+router.get("/:id/initial-payments", getInitialPaymentsController);
+
+// POST /api/v1/mission-agreements/:id/initial-payments/create (créer les paiements initiaux si manquants)
+router.post("/:id/initial-payments/create", createInitialPaymentsController);
 
 export default router;

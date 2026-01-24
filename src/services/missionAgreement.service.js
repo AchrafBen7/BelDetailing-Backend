@@ -25,6 +25,7 @@ export function mapMissionAgreementRowToDto(row) {
     depositAmount: row.deposit_amount ? Number(row.deposit_amount) : null,
     remainingAmount: row.remaining_amount ? Number(row.remaining_amount) : null,
     paymentSchedule: row.payment_schedule, // JSON object
+    operationalRules: row.operational_rules || null, // JSON object - Règles opérationnelles
     startDate: row.start_date,
     endDate: row.end_date,
     estimatedDurationDays: row.estimated_duration_days,
@@ -119,6 +120,7 @@ export async function createMissionAgreement({
     deposit_amount: depositAmount,
     remaining_amount: remainingAmount,
     payment_schedule: paymentSchedule || { type: "one_shot" },
+    operational_rules: null, // Sera défini lors de l'édition par la company
     start_date: null, // Sera défini plus tard
     end_date: null,
     estimated_duration_days: null,
