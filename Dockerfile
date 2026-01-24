@@ -10,8 +10,8 @@ RUN apk add --no-cache \
     ca-certificates \
     ttf-freefont
 
-# Définir Chrome comme executable par défaut
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+# Définir Chrome comme executable par défaut (seulement si on utilise Docker)
+# Sur Render sans Docker, Puppeteer téléchargera Chrome automatiquement
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app

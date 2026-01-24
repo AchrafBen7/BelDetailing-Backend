@@ -1,11 +1,10 @@
 import puppeteer from "puppeteer";
-import { install, getInstalledBrowsers } from "@puppeteer/browsers";
 
 /**
  * 🟦 HTML TO PDF – Convertir du HTML en PDF
  * 
  * Utilise Puppeteer avec Chrome.
- * Sur Render, Chrome est installé automatiquement si nécessaire.
+ * Puppeteer inclut Chrome par défaut, mais sur Render, on peut utiliser le Chrome système si disponible.
  */
 export async function htmlToPdf(html) {
   let browser;
@@ -29,38 +28,14 @@ export async function htmlToPdf(html) {
     // Sur Alpine (Dockerfile), utiliser le Chrome installé
     if (isProduction && process.env.PUPPETEER_EXECUTABLE_PATH) {
       launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-      console.log(`🔧 [PDF] Using Chrome from: ${launchOptions.executablePath}`);
+      console.log(`🔧 [PDF] Using system Chrome from: ${launchOptions.executablePath}`);
+    } else {
+      // Utiliser le Chrome fourni par Puppeteer (inclus dans le package)
+      console.log(`🔧 [PDF] Using Puppeteer's bundled Chrome`);
     }
 
-    try {
-      browser = await puppeteer.launch(launchOptions);
-    } catch (error) {
-      // Si Chrome n'est pas trouvé, essayer de l'installer automatiquement
-      if (error.message.includes("Could not find Chrome") || error.message.includes("executable doesn't exist")) {
-        console.log("📦 [PDF] Chrome not found, installing automatically...");
-        
-        const cacheDir = process.env.PUPPETEER_CACHE_DIR || "/opt/render/.cache/puppeteer";
-        
-        // Vérifier si Chrome est déjà installé
-        const installedBrowsers = await getInstalledBrowsers({ cacheDir });
-        
-        if (installedBrowsers.length === 0) {
-          console.log("📦 [PDF] Installing Chrome for Puppeteer...");
-          await install({
-            browser: "chrome",
-            cacheDir,
-          });
-          console.log("✅ [PDF] Chrome installed successfully");
-        } else {
-          console.log("✅ [PDF] Chrome already installed");
-        }
-        
-        // Réessayer avec le Chrome installé
-        browser = await puppeteer.launch(launchOptions);
-      } else {
-        throw error;
-      }
-    }
+    // Lancer Puppeteer (utilise le Chrome fourni par défaut si executablePath n'est pas défini)
+    browser = await puppeteer.launch(launchOptions);
     
     const page = await browser.newPage();
 
