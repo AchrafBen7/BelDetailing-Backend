@@ -1,5 +1,6 @@
 // src/services/missionAgreementPdf.service.js
 import { htmlToPdf } from "./pdf.service.js";
+import { generateMissionAgreementPdfWithPdfKit } from "./missionAgreementPdfPdfKit.service.js";
 import { getMissionAgreementById } from "./missionAgreement.service.js";
 import { getMissionPaymentsForAgreement } from "./missionPayment.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
@@ -98,9 +99,15 @@ export async function generateMissionAgreementPdf(missionAgreementId) {
   });
 
   // 8) Convertir en PDF
-  const pdfBuffer = await htmlToPdf(html);
-
-  return pdfBuffer;
+  // Essayer Puppeteer d'abord, puis fallback vers pdfkit si Chrome n'est pas disponible
+  try {
+    const pdfBuffer = await htmlToPdf(html);
+    return pdfBuffer;
+  } catch (error) {
+    console.warn("[MISSION AGREEMENT PDF] Puppeteer failed, using pdfkit fallback:", error.message);
+    // Fallback vers pdfkit (pas de Chrome nécessaire)
+    return await generateMissionAgreementPdfWithPdfKit(missionAgreementId);
+  }
 }
 
 /**

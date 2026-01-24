@@ -1,16 +1,29 @@
 import puppeteer from "puppeteer";
+import PDFDocument from "pdfkit";
 
 /**
  * 🟦 HTML TO PDF – Convertir du HTML en PDF
  * 
- * Utilise Puppeteer avec Chrome.
- * Puppeteer inclut Chrome par défaut, mais sur Render, on peut utiliser le Chrome système si disponible.
+ * Essaie d'abord Puppeteer, puis utilise pdfkit en fallback si Chrome n'est pas disponible.
  */
 export async function htmlToPdf(html) {
+  // Essayer Puppeteer d'abord
+  try {
+    return await htmlToPdfWithPuppeteer(html);
+  } catch (error) {
+    console.warn("⚠️ [PDF] Puppeteer failed, using pdfkit fallback:", error.message);
+    // Fallback vers pdfkit si Puppeteer échoue
+    return await htmlToPdfWithPdfKit(html);
+  }
+}
+
+/**
+ * 🟦 HTML TO PDF WITH PUPPETEER – Utilise Puppeteer (nécessite Chrome)
+ */
+async function htmlToPdfWithPuppeteer(html) {
   let browser;
   
   try {
-    // Configuration pour production (Render)
     const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER;
     
     const launchOptions = {
@@ -25,18 +38,14 @@ export async function htmlToPdf(html) {
       ],
     };
 
-    // Sur Alpine (Dockerfile), utiliser le Chrome installé
     if (isProduction && process.env.PUPPETEER_EXECUTABLE_PATH) {
       launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
       console.log(`🔧 [PDF] Using system Chrome from: ${launchOptions.executablePath}`);
     } else {
-      // Utiliser le Chrome fourni par Puppeteer (inclus dans le package)
       console.log(`🔧 [PDF] Using Puppeteer's bundled Chrome`);
     }
 
-    // Lancer Puppeteer (utilise le Chrome fourni par défaut si executablePath n'est pas défini)
     browser = await puppeteer.launch(launchOptions);
-    
     const page = await browser.newPage();
 
     await page.setContent(html, { waitUntil: "networkidle0" });
@@ -54,17 +63,78 @@ export async function htmlToPdf(html) {
     await browser.close();
     return pdfBuffer;
   } catch (error) {
-    console.error("❌ [PDF] Error generating PDF:", error);
-    
-    // Nettoyer le browser en cas d'erreur
     if (browser) {
       try {
         await browser.close();
       } catch (closeError) {
-        console.error("❌ [PDF] Error closing browser:", closeError);
+        // Ignore
       }
     }
-    
-    throw new Error(`Failed to generate PDF: ${error.message}`);
+    throw error;
   }
+}
+
+/**
+ * 🟦 HTML TO PDF WITH PDFKIT – Fallback utilisant pdfkit (pas de Chrome nécessaire)
+ * 
+ * Note: pdfkit ne peut pas parser le HTML directement, donc on extrait le texte principal.
+ * Pour un rendu complet, il faudrait parser le HTML ou utiliser les données brutes.
+ */
+async function htmlToPdfWithPdfKit(html) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: "A4", margin: 50 });
+      const chunks = [];
+
+      doc.on("data", (chunk) => chunks.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      // Extraire le texte principal du HTML (simple extraction)
+      const textContent = extractTextFromHtml(html);
+
+      // Générer le PDF avec pdfkit
+      doc.fontSize(20).text("Mission Agreement", { align: "center" });
+      doc.moveDown();
+      doc.fontSize(12);
+      
+      // Diviser le texte en lignes et les ajouter
+      const lines = textContent.split("\n").filter(line => line.trim().length > 0);
+      lines.forEach((line) => {
+        if (doc.y > 750) { // Nouvelle page si nécessaire
+          doc.addPage();
+        }
+        doc.text(line.trim(), { align: "left" });
+        doc.moveDown(0.5);
+      });
+
+      doc.end();
+    } catch (error) {
+      reject(new Error(`Failed to generate PDF with pdfkit: ${error.message}`));
+    }
+  });
+}
+
+/**
+ * 🟦 EXTRACT TEXT FROM HTML – Extraire le texte principal du HTML
+ */
+function extractTextFromHtml(html) {
+  // Supprimer les balises HTML et extraire le texte
+  let text = html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "") // Supprimer les scripts
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "") // Supprimer les styles
+    .replace(/<[^>]+>/g, "\n") // Remplacer les balises par des sauts de ligne
+    .replace(/\n\s*\n\s*\n/g, "\n\n") // Nettoyer les sauts de ligne multiples
+    .trim();
+
+  // Décoder les entités HTML
+  text = text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  return text;
 }
