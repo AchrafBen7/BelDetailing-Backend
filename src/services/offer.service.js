@@ -8,6 +8,7 @@ function mapOfferRowToDto(row) {
     id: row.id,
     title: row.title,
     category: row.category,
+    categories: row.categories || (row.category ? [row.category] : []), // 🆕 Support multiple categories
     description: row.description,
     vehicleCount: row.vehicle_count,
     priceMin: row.price_min,
