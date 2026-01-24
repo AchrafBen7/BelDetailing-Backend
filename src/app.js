@@ -199,16 +199,17 @@ cron.schedule("0 */6 * * *", async () => {
   }
 });
 
-// Tâche cron pour capturer automatiquement les paiements du jour 1 (commission + acompte)
+// Tâche cron pour libérer les acomptes à J+1 (jour après le premier jour de mission)
 // S'exécute toutes les heures (à la minute 0 de chaque heure)
-// Capture les paiements du jour 1 pour les missions dont le startDate est aujourd'hui
+// Libère les acomptes capturés pour les missions dont le startDate était hier
+import { releaseDepositsAtJPlusOneCron } from "./cron/releaseDepositsAtJPlusOne.js";
 cron.schedule("0 * * * *", async () => {
-  console.log("CRON running captureDayOnePayments...");
+  console.log("CRON running releaseDepositsAtJPlusOne...");
   try {
-    const result = await captureDayOnePaymentsCron();
-    console.log(`✅ CRON captureDayOnePayments completed: ${result.captured} captured, ${result.failed} failed, ${result.skipped} skipped`);
+    const result = await releaseDepositsAtJPlusOneCron();
+    console.log(`✅ CRON releaseDepositsAtJPlusOne completed: ${result.released} released, ${result.failed} failed, ${result.skipped} skipped`);
   } catch (err) {
-    console.error("❌ CRON captureDayOnePayments error:", err);
+    console.error("❌ CRON releaseDepositsAtJPlusOne error:", err);
   }
 });
 

@@ -61,7 +61,7 @@ export async function createMissionPayment({
   }
 
   // ✅ VALIDATION : type doit être valide
-  const validTypes = ["deposit", "installment", "final", "monthly"];
+  const validTypes = ["deposit", "commission", "installment", "final", "monthly"];
   if (!validTypes.includes(type)) {
     throw new Error(`Invalid payment type. Must be one of: ${validTypes.join(", ")}`);
   }
@@ -136,7 +136,7 @@ export async function getMissionPaymentsForAgreement(missionAgreementId) {
  * 🟦 UPDATE STATUS – Mettre à jour le statut d'un paiement
  */
 export async function updateMissionPaymentStatus(id, newStatus, additionalData = {}) {
-  const validStatuses = ["pending", "authorized", "captured", "failed", "refunded", "cancelled"];
+  const validStatuses = ["pending", "authorized", "captured", "captured_held", "transferred", "failed", "refunded", "cancelled"];
   if (!validStatuses.includes(newStatus)) {
     throw new Error(`Invalid status. Must be one of: ${validStatuses.join(", ")}`);
   }
@@ -174,6 +174,15 @@ export async function updateMissionPaymentStatus(id, newStatus, additionalData =
   }
   if (additionalData.stripeRefundId) {
     updatePayload.stripe_refund_id = additionalData.stripeRefundId;
+  }
+  if (additionalData.stripeTransferId) {
+    updatePayload.stripe_transfer_id = additionalData.stripeTransferId;
+  }
+  if (additionalData.transferredAt) {
+    updatePayload.transferred_at = additionalData.transferredAt;
+  }
+  if (additionalData.holdUntil) {
+    updatePayload.hold_until = additionalData.holdUntil;
   }
   if (additionalData.failureReason) {
     updatePayload.failure_reason = additionalData.failureReason;

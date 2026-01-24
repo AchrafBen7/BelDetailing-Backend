@@ -414,36 +414,62 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     }
   }
 
-  // 7) 🆕 CRÉER ET AUTORISER LES PAIEMENTS DU JOUR 1 (Jour 0 = activation)
-  // Les paiements seront capturés automatiquement au Jour 1 via cron job
+  // 7) 🆕 CAPTURE IMMÉDIATE DES PAIEMENTS (T0 - Débit automatique)
+  // Dès que le detailer accepte:
+  // - Commission NIOS (7%) : Capturée immédiatement et envoyée à NIOS
+  // - Acompte detailer (20%) : Capturé immédiatement mais "hold" jusqu'à J+1
   try {
-    // 7.1) Créer les paiements du jour 1 (acompte + commission)
-    const { createDayOnePayments } = await import("./missionPaymentDayOne.service.js");
-    await createDayOnePayments(id);
-    console.log(`✅ [MISSION AGREEMENT] Day one payments created for agreement ${id} (Jour 0 activation)`);
+    const { captureImmediatePaymentsOnAcceptance } = await import("./missionPaymentImmediateCapture.service.js");
+    const captureResult = await captureImmediatePaymentsOnAcceptance(id);
+    console.log(`✅ [MISSION AGREEMENT] Immediate payments captured for agreement ${id} (T0): ${captureResult.totalCaptured}€`);
+    console.log(`   - Commission: ${captureResult.commissionCaptured}€ (sent to NIOS immediately)`);
+    console.log(`   - Deposit: ${captureResult.depositCaptured}€ (held until J+1)`);
     
     // 7.2) Créer le plan de paiement intelligent (paiements mensuels/finaux)
     const { createIntelligentPaymentSchedule } = await import("./missionPaymentScheduleIntelligent.service.js");
     // authorizeAll = true : autorise tous les paiements immédiatement
     await createIntelligentPaymentSchedule(id, true);
     
-    console.log(`✅ [MISSION AGREEMENT] Payment schedule created for agreement ${id} (Jour 0 activation)`);
+    console.log(`✅ [MISSION AGREEMENT] Payment schedule created for agreement ${id} (remaining payments)`);
   } catch (scheduleError) {
     console.error(`❌ [MISSION AGREEMENT] Error creating payment schedule for agreement ${id}:`, scheduleError);
     // Ne pas faire échouer l'acceptation si la création du plan de paiement échoue
     // Les paiements pourront être créés manuellement plus tard
   }
 
-  // 5) Envoyer notification à la company
+  // 8) 🆕 ENVOYER DES NOTIFICATIONS DÉTAILLÉES
   try {
     const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
+    
+    // Calculer les montants pour les notifications
+    const totalAmount = updatedAgreement.finalPrice;
+    const commissionAmount = Math.round(totalAmount * 0.07 * 100) / 100; // 7%
+    const depositAmount = updatedAgreement.depositAmount || Math.round((totalAmount * 0.20) * 100) / 100; // 20%
+    const totalDebited = commissionAmount + depositAmount;
+    
+    // 8.1) Notification à la COMPANY (détails du débit)
     await sendNotificationWithDeepLink({
       userId: updatedAgreement.companyId,
-      title: "Contrat accepté",
-      message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}". La mission est maintenant active.`,
+      title: "✅ Contrat accepté - Paiements débités",
+      message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}".\n\n💳 Acompte: ${depositAmount}€ débité\n🧾 Commission NIOS: ${commissionAmount}€ débitée\n💰 Total: ${totalDebited}€\n\n🚀 La mission est officiellement lancée.`,
       type: "mission_agreement_accepted",
       id: id,
     });
+    
+    // 8.2) Notification au DETAILER (détails de réception)
+    const startDate = new Date(updatedAgreement.startDate);
+    const jPlusOne = new Date(startDate.getTime() + 24 * 60 * 60 * 1000); // J+1
+    const jPlusOneFormatted = jPlusOne.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+    
+    await sendNotificationWithDeepLink({
+      userId: updatedAgreement.detailerId,
+      title: "✅ Contrat validé - Acompte sécurisé",
+      message: `Contrat "${updatedAgreement.title || 'la mission'}" validé.\n\n💰 Acompte de ${depositAmount}€ sécurisé chez NIOS\n📅 Il vous sera versé le ${jPlusOneFormatted} (J+1)\n🧾 Paiements suivants planifiés automatiquement\n\n🚀 Vous pouvez commencer la mission en toute sécurité.`,
+      type: "mission_agreement_accepted",
+      id: id,
+    });
+    
+    console.log(`✅ [MISSION AGREEMENT] Notifications sent to company and detailer`);
   } catch (notifError) {
     console.error("[MISSION AGREEMENT] Notification send failed:", notifError);
     // Ne pas faire échouer l'acceptation si la notification échoue
