@@ -99,15 +99,10 @@ export async function generateMissionAgreementPdf(missionAgreementId) {
   });
 
   // 8) Convertir en PDF
-  // Essayer Puppeteer d'abord, puis fallback vers pdfkit si Chrome n'est pas disponible
-  try {
-    const pdfBuffer = await htmlToPdf(html);
-    return pdfBuffer;
-  } catch (error) {
-    console.warn("[MISSION AGREEMENT PDF] Puppeteer failed, using pdfkit fallback:", error.message);
-    // Fallback vers pdfkit (pas de Chrome nécessaire)
-    return await generateMissionAgreementPdfWithPdfKit(missionAgreementId);
-  }
+  // Utiliser directement pdfkit pour un design professionnel garanti
+  // (Puppeteer peut être utilisé plus tard si nécessaire, mais pdfkit offre un meilleur contrôle du design)
+  console.log("[MISSION AGREEMENT PDF] Using pdfkit for professional design");
+  return await generateMissionAgreementPdfWithPdfKit(missionAgreementId);
 }
 
 /**

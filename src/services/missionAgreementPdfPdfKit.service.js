@@ -10,7 +10,7 @@ import { MISSION_COMMISSION_RATE } from "../config/commission.js";
 /**
  * 🟦 GENERATE MISSION AGREEMENT PDF WITH PDFKIT – Générer le PDF avec pdfkit
  * 
- * Alternative à Puppeteer qui ne nécessite pas Chrome.
+ * Design professionnel avec structure claire et tableaux.
  * 
  * @param {string} missionAgreementId - ID du Mission Agreement
  * @returns {Promise<Buffer>} Buffer du PDF généré
@@ -88,56 +88,74 @@ export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) 
         return false;
       };
 
+      // Fonction helper pour dessiner un rectangle avec bordure
+      const drawBox = (x, y, width, height, fillColor, strokeColor, lineWidth = 1) => {
+        doc.rect(x, y, width, height)
+          .fill(fillColor)
+          .strokeColor(strokeColor)
+          .lineWidth(lineWidth)
+          .stroke();
+      };
+
+      // Fonction helper pour dessiner une ligne de séparation
+      const drawSeparator = (y, color = "#000000", width = 2) => {
+        doc.moveTo(50, y)
+          .lineTo(545, y)
+          .strokeColor(color)
+          .lineWidth(width)
+          .stroke();
+      };
+
       // ============================================
       // HEADER PROFESSIONNEL
       // ============================================
-      doc.rect(50, 50, 495, 80).fill("#000000");
+      const headerY = 50;
+      drawBox(50, headerY, 495, 80, "#000000", "#000000", 0);
+      
       doc.fillColor("#FFFFFF")
         .fontSize(24)
         .font("Helvetica-Bold")
-        .text("MISSION AGREEMENT", 50, 70, { width: 495, align: "center" });
+        .text("MISSION AGREEMENT", 50, headerY + 20, { width: 495, align: "center" });
+      
       doc.fontSize(12)
         .font("Helvetica")
-        .text("Contrat de mission NIOS", 50, 100, { width: 495, align: "center" });
+        .text("Contrat de mission NIOS", 50, headerY + 50, { width: 495, align: "center" });
+      
       doc.fillColor("#000000");
       
       // Référence du contrat
       doc.fontSize(9)
         .fillColor("#666666")
-        .text(`Référence: ${agreement.id}`, 50, 140, { width: 495, align: "right" });
-      doc.fillColor("#000000");
+        .text(`Référence: ${agreement.id}`, 50, headerY + 90, { width: 495, align: "right" });
       
-      doc.moveDown(3);
+      doc.fillColor("#000000");
+      doc.y = headerY + 100;
+      doc.moveDown(2);
 
       // ============================================
       // SECTION 1: PARTIES AU CONTRAT
       // ============================================
-      const startY = doc.y;
+      checkPageBreak(200);
       
       // Titre de section
       doc.fontSize(16)
         .font("Helvetica-Bold")
         .fillColor("#000000")
-        .text("PARTIES AU CONTRAT", 50, startY);
+        .text("PARTIES AU CONTRAT");
       
       // Ligne de séparation
-      doc.moveTo(50, startY + 20)
-        .lineTo(545, startY + 20)
-        .strokeColor("#000000")
-        .lineWidth(2)
-        .stroke();
+      drawSeparator(doc.y + 5, "#000000", 2);
       
-      doc.moveDown(1.5);
+      doc.moveDown(2);
+      
       const partiesStartY = doc.y;
+      const leftColX = 50;
+      const rightColX = 305;
+      const colWidth = 240;
+      const boxHeight = 130;
       
       // Colonne gauche - Company
-      const leftColX = 50;
-      const colWidth = 240;
-      doc.rect(leftColX, partiesStartY, colWidth, 120)
-        .fill("#F5F5F5")
-        .strokeColor("#CCCCCC")
-        .lineWidth(1)
-        .stroke();
+      drawBox(leftColX, partiesStartY, colWidth, boxHeight, "#F5F5F5", "#CCCCCC", 1);
       
       doc.fontSize(12)
         .font("Helvetica-Bold")
@@ -149,33 +167,28 @@ export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) 
         .fillColor("#333333");
       
       const companyName = agreement.companyLegalName || companyProfile?.legal_name || companyUser?.email || "Non défini";
-      doc.text(companyName, leftColX + 10, partiesStartY + 30, { width: colWidth - 20 });
+      let textY = partiesStartY + 30;
+      doc.text(companyName, leftColX + 10, textY, { width: colWidth - 20 });
       
-      let currentY = partiesStartY + 45;
+      textY += 20;
       if (agreement.companyVatNumber) {
-        doc.text(`TVA: ${agreement.companyVatNumber}`, leftColX + 10, currentY, { width: colWidth - 20 });
-        currentY += 15;
+        doc.text(`TVA: ${agreement.companyVatNumber}`, leftColX + 10, textY, { width: colWidth - 20 });
+        textY += 15;
       }
       if (agreement.companyRepresentative) {
-        doc.text(`Représentant: ${agreement.companyRepresentative}`, leftColX + 10, currentY, { width: colWidth - 20 });
-        currentY += 15;
+        doc.text(`Représentant: ${agreement.companyRepresentative}`, leftColX + 10, textY, { width: colWidth - 20 });
+        textY += 15;
       }
       if (agreement.companyAddress) {
-        doc.text(`Adresse: ${agreement.companyAddress}`, leftColX + 10, currentY, { width: colWidth - 20 });
-        currentY += 15;
+        doc.text(`Adresse: ${agreement.companyAddress}`, leftColX + 10, textY, { width: colWidth - 20 });
+        textY += 15;
       }
       if (agreement.companyEmail) {
-        doc.text(`Email: ${agreement.companyEmail}`, leftColX + 10, currentY, { width: colWidth - 20 });
-        currentY += 15;
+        doc.text(`Email: ${agreement.companyEmail}`, leftColX + 10, textY, { width: colWidth - 20 });
       }
       
       // Colonne droite - Detailer
-      const rightColX = 305;
-      doc.rect(rightColX, partiesStartY, colWidth, 120)
-        .fill("#F5F5F5")
-        .strokeColor("#CCCCCC")
-        .lineWidth(1)
-        .stroke();
+      drawBox(rightColX, partiesStartY, colWidth, boxHeight, "#F5F5F5", "#CCCCCC", 1);
       
       doc.fontSize(12)
         .font("Helvetica-Bold")
@@ -187,64 +200,71 @@ export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) 
         .fillColor("#333333");
       
       const detailerName = agreement.detailerLegalName || detailerProfile?.display_name || detailerUser?.email || "Non défini";
-      doc.text(detailerName, rightColX + 10, partiesStartY + 30, { width: colWidth - 20 });
+      textY = partiesStartY + 30;
+      doc.text(detailerName, rightColX + 10, textY, { width: colWidth - 20 });
       
-      currentY = partiesStartY + 45;
+      textY += 20;
       if (agreement.detailerVatNumber) {
-        doc.text(`TVA: ${agreement.detailerVatNumber}`, rightColX + 10, currentY, { width: colWidth - 20 });
-        currentY += 15;
+        doc.text(`TVA: ${agreement.detailerVatNumber}`, rightColX + 10, textY, { width: colWidth - 20 });
+        textY += 15;
       }
       if (agreement.detailerAddress) {
-        doc.text(`Adresse: ${agreement.detailerAddress}`, rightColX + 10, currentY, { width: colWidth - 20 });
-        currentY += 15;
+        doc.text(`Adresse: ${agreement.detailerAddress}`, rightColX + 10, textY, { width: colWidth - 20 });
+        textY += 15;
       }
       if (agreement.detailerEmail) {
-        doc.text(`Email: ${agreement.detailerEmail}`, rightColX + 10, currentY, { width: colWidth - 20 });
-        currentY += 15;
+        doc.text(`Email: ${agreement.detailerEmail}`, rightColX + 10, textY, { width: colWidth - 20 });
+        textY += 15;
       }
       if (agreement.detailerIban) {
         const maskedIban = `****${agreement.detailerIban.slice(-4)}`;
-        doc.text(`IBAN: ${maskedIban}`, rightColX + 10, currentY, { width: colWidth - 20 });
+        doc.text(`IBAN: ${maskedIban}`, rightColX + 10, textY, { width: colWidth - 20 });
       }
       
-      doc.y = partiesStartY + 130;
+      doc.y = partiesStartY + boxHeight + 10;
       doc.moveDown(2);
 
       // ============================================
       // SECTION 2: DÉTAILS DE LA MISSION
       // ============================================
-      const missionStartY = doc.y;
+      checkPageBreak(250);
       
       doc.fontSize(16)
         .font("Helvetica-Bold")
         .fillColor("#000000")
-        .text("DÉTAILS DE LA MISSION", 50, missionStartY);
+        .text("DÉTAILS DE LA MISSION");
       
-      doc.moveTo(50, missionStartY + 20)
-        .lineTo(545, missionStartY + 20)
-        .strokeColor("#000000")
-        .lineWidth(2)
-        .stroke();
+      drawSeparator(doc.y + 5, "#000000", 2);
       
-      doc.moveDown(1.5);
+      doc.moveDown(2);
+      
       const missionBoxY = doc.y;
+      const leftMargin = 60;
+      const labelWidth = 150;
+      const valueWidth = 320;
+      let missionY = missionBoxY + 15;
+      const lineHeight = 18;
+      
+      // Calculer la hauteur nécessaire
+      let contentHeight = 20; // Padding top
+      contentHeight += lineHeight; // Titre
+      if (agreement.description) contentHeight += lineHeight * 2; // Description (peut être sur plusieurs lignes)
+      if (agreement.categories && agreement.categories.length > 0) contentHeight += lineHeight;
+      if (agreement.missionType) contentHeight += lineHeight;
+      if (agreement.locationCity || agreement.locationPostalCode) contentHeight += lineHeight;
+      contentHeight += lineHeight; // Nombre de véhicules
+      if (agreement.startDate) contentHeight += lineHeight;
+      if (agreement.endDate) contentHeight += lineHeight;
+      if (agreement.estimatedDurationDays) contentHeight += lineHeight;
+      contentHeight += lineHeight; // Statut
+      contentHeight += 15; // Padding bottom
       
       // Boîte pour les détails de la mission
-      doc.rect(50, missionBoxY, 495, 180)
-        .fill("#FAFAFA")
-        .strokeColor("#DDDDDD")
-        .lineWidth(1)
-        .stroke();
+      drawBox(50, missionBoxY, 495, contentHeight, "#FAFAFA", "#DDDDDD", 1);
       
       doc.fontSize(10)
         .font("Helvetica")
         .fillColor("#333333");
-      
-      let missionY = missionBoxY + 15;
-      const lineHeight = 18;
-      const leftMargin = 60;
-      const labelWidth = 150;
-      const valueWidth = 320;
       
       // Titre
       doc.font("Helvetica-Bold")
@@ -257,11 +277,12 @@ export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) 
       if (agreement.description) {
         doc.font("Helvetica-Bold")
           .text("Description:", leftMargin, missionY, { width: labelWidth });
-        const descLines = doc.font("Helvetica").text(agreement.description, leftMargin + labelWidth, missionY, { 
-          width: valueWidth,
-          lineGap: 2
-        });
-        missionY += (descLines.length * lineHeight) || lineHeight;
+        doc.font("Helvetica")
+          .text(agreement.description, leftMargin + labelWidth, missionY, { 
+            width: valueWidth,
+            lineGap: 2
+          });
+        missionY += lineHeight * 2;
       }
       
       // Catégories
@@ -331,175 +352,141 @@ export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) 
       doc.font("Helvetica")
         .text(agreement.status || "draft", leftMargin + labelWidth, missionY, { width: valueWidth });
       
-      doc.y = missionBoxY + 195;
+      doc.y = missionBoxY + contentHeight + 10;
       doc.moveDown(2);
 
       // ============================================
       // SECTION 3: MONTANTS ET PAIEMENTS
       // ============================================
-      const amountsStartY = doc.y;
+      checkPageBreak(250);
       
       doc.fontSize(16)
         .font("Helvetica-Bold")
         .fillColor("#000000")
-        .text("MONTANTS ET PAIEMENTS", 50, amountsStartY);
+        .text("MONTANTS ET PAIEMENTS");
       
-      doc.moveTo(50, amountsStartY + 20)
-        .lineTo(545, amountsStartY + 20)
-        .strokeColor("#000000")
-        .lineWidth(2)
-        .stroke();
+      drawSeparator(doc.y + 5, "#000000", 2);
       
-      doc.moveDown(1.5);
+      doc.moveDown(2);
       
       // Tableau des montants
       const tableStartY = doc.y;
-      const tableRowHeight = 25;
+      const tableRowHeight = 28;
       const col1Width = 300;
       const col2Width = 195;
       
       // En-tête du tableau
-      doc.rect(50, tableStartY, col1Width, tableRowHeight)
-        .fill("#000000")
-        .stroke();
-      doc.rect(350, tableStartY, col2Width, tableRowHeight)
-        .fill("#000000")
-        .stroke();
+      drawBox(50, tableStartY, col1Width, tableRowHeight, "#000000", "#000000", 0);
+      drawBox(350, tableStartY, col2Width, tableRowHeight, "#000000", "#000000", 0);
       
       doc.fontSize(11)
         .font("Helvetica-Bold")
         .fillColor("#FFFFFF")
-        .text("Description", 55, tableStartY + 8, { width: col1Width - 10 });
-      doc.text("Montant (€)", 355, tableStartY + 8, { width: col2Width - 10, align: "right" });
+        .text("Description", 55, tableStartY + 9, { width: col1Width - 10 });
+      doc.text("Montant (€)", 355, tableStartY + 9, { width: col2Width - 10, align: "right" });
       
       doc.fillColor("#000000");
       let currentTableY = tableStartY + tableRowHeight;
       
       // Ligne 1: Montant total
-      doc.rect(50, currentTableY, col1Width, tableRowHeight)
-        .fill("#FFFFFF")
-        .stroke();
-      doc.rect(350, currentTableY, col2Width, tableRowHeight)
-        .fill("#FFFFFF")
-        .stroke();
+      drawBox(50, currentTableY, col1Width, tableRowHeight, "#FFFFFF", "#DDDDDD", 1);
+      drawBox(350, currentTableY, col2Width, tableRowHeight, "#FFFFFF", "#DDDDDD", 1);
       doc.fontSize(10)
         .font("Helvetica")
-        .text("Montant total de la mission", 55, currentTableY + 8, { width: col1Width - 10 });
+        .fillColor("#333333")
+        .text("Montant total de la mission", 55, currentTableY + 9, { width: col1Width - 10 });
       doc.font("Helvetica-Bold")
-        .text(`${totalAmount.toFixed(2)}`, 355, currentTableY + 8, { width: col2Width - 10, align: "right" });
+        .fillColor("#000000")
+        .text(`${totalAmount.toFixed(2)}`, 355, currentTableY + 9, { width: col2Width - 10, align: "right" });
       currentTableY += tableRowHeight;
       
       // Ligne 2: Acompte
-      doc.rect(50, currentTableY, col1Width, tableRowHeight)
-        .fill("#F9F9F9")
-        .stroke();
-      doc.rect(350, currentTableY, col2Width, tableRowHeight)
-        .fill("#F9F9F9")
-        .stroke();
+      drawBox(50, currentTableY, col1Width, tableRowHeight, "#F9F9F9", "#DDDDDD", 1);
+      drawBox(350, currentTableY, col2Width, tableRowHeight, "#F9F9F9", "#DDDDDD", 1);
       doc.font("Helvetica")
-        .text(`Acompte (${agreement.depositPercentage || 0}%)`, 55, currentTableY + 8, { width: col1Width - 10 });
-      doc.text(`${depositAmount.toFixed(2)}`, 355, currentTableY + 8, { width: col2Width - 10, align: "right" });
+        .fillColor("#333333")
+        .text(`Acompte (${agreement.depositPercentage || 0}%)`, 55, currentTableY + 9, { width: col1Width - 10 });
+      doc.text(`${depositAmount.toFixed(2)}`, 355, currentTableY + 9, { width: col2Width - 10, align: "right" });
       currentTableY += tableRowHeight;
       
       // Ligne 3: Solde restant
-      doc.rect(50, currentTableY, col1Width, tableRowHeight)
-        .fill("#FFFFFF")
-        .stroke();
-      doc.rect(350, currentTableY, col2Width, tableRowHeight)
-        .fill("#FFFFFF")
-        .stroke();
-      doc.text("Solde restant", 55, currentTableY + 8, { width: col1Width - 10 });
-      doc.text(`${remainingAmount.toFixed(2)}`, 355, currentTableY + 8, { width: col2Width - 10, align: "right" });
+      drawBox(50, currentTableY, col1Width, tableRowHeight, "#FFFFFF", "#DDDDDD", 1);
+      drawBox(350, currentTableY, col2Width, tableRowHeight, "#FFFFFF", "#DDDDDD", 1);
+      doc.text("Solde restant", 55, currentTableY + 9, { width: col1Width - 10 });
+      doc.text(`${remainingAmount.toFixed(2)}`, 355, currentTableY + 9, { width: col2Width - 10, align: "right" });
       currentTableY += tableRowHeight;
       
       // Ligne totale (bordure épaisse)
-      doc.rect(50, currentTableY, col1Width, tableRowHeight)
-        .fill("#000000")
-        .stroke();
-      doc.rect(350, currentTableY, col2Width, tableRowHeight)
-        .fill("#000000")
-        .stroke();
+      drawBox(50, currentTableY, col1Width, tableRowHeight, "#000000", "#000000", 0);
+      drawBox(350, currentTableY, col2Width, tableRowHeight, "#000000", "#000000", 0);
       doc.fontSize(11)
         .font("Helvetica-Bold")
         .fillColor("#FFFFFF")
-        .text("TOTAL", 55, currentTableY + 8, { width: col1Width - 10 });
-      doc.text(`${totalAmount.toFixed(2)}`, 355, currentTableY + 8, { width: col2Width - 10, align: "right" });
-      currentTableY += tableRowHeight + 10;
+        .text("TOTAL", 55, currentTableY + 9, { width: col1Width - 10 });
+      doc.text(`${totalAmount.toFixed(2)}`, 355, currentTableY + 9, { width: col2Width - 10, align: "right" });
+      currentTableY += tableRowHeight + 15;
       
       // Commission NIOS (boîte séparée)
       doc.fillColor("#000000");
       const commissionBoxY = currentTableY;
-      doc.rect(50, commissionBoxY, 495, 80)
-        .fill("#FFF9E6")
-        .strokeColor("#FFA500")
-        .lineWidth(2)
-        .stroke();
+      const commissionBoxHeight = 85;
+      drawBox(50, commissionBoxY, 495, commissionBoxHeight, "#FFF9E6", "#FFA500", 2);
       
       doc.fontSize(12)
         .font("Helvetica-Bold")
-        .text("COMMISSION NIOS", 60, commissionBoxY + 10);
+        .text("COMMISSION NIOS", 60, commissionBoxY + 12);
       
       doc.fontSize(10)
-        .font("Helvetica");
+        .font("Helvetica")
+        .fillColor("#333333");
       
-      const commissionY = commissionBoxY + 30;
+      const commissionY = commissionBoxY + 32;
       doc.text(`Montant brut: ${totalAmount.toFixed(2)} €`, 60, commissionY);
       doc.text(`Commission (${(MISSION_COMMISSION_RATE * 100).toFixed(0)}%): ${commissionAmount.toFixed(2)} €`, 60, commissionY + 18);
       doc.fontSize(11)
         .font("Helvetica-Bold")
+        .fillColor("#000000")
         .text(`Montant net pour le detailer: ${netAmount.toFixed(2)} €`, 60, commissionY + 36);
       
-      doc.y = commissionBoxY + 90;
+      doc.y = commissionBoxY + commissionBoxHeight + 10;
       doc.moveDown(2);
 
       // ============================================
       // SECTION 4: PLANNING DE PAIEMENT
       // ============================================
       if (payments && payments.length > 0) {
-        const paymentStartY = doc.y;
+        checkPageBreak(100 + (payments.length * 35));
         
         doc.fontSize(16)
           .font("Helvetica-Bold")
           .fillColor("#000000")
-          .text("PLANNING DE PAIEMENT", 50, paymentStartY);
+          .text("PLANNING DE PAIEMENT");
         
-        doc.moveTo(50, paymentStartY + 20)
-          .lineTo(545, paymentStartY + 20)
-          .strokeColor("#000000")
-          .lineWidth(2)
-          .stroke();
+        drawSeparator(doc.y + 5, "#000000", 2);
         
-        doc.moveDown(1.5);
+        doc.moveDown(2);
         
         // Tableau des paiements
         const paymentTableY = doc.y;
-        const paymentRowHeight = 30;
+        const paymentRowHeight = 32;
         const pCol1Width = 200;
         const pCol2Width = 120;
         const pCol3Width = 100;
         const pCol4Width = 75;
         
         // En-tête
-        doc.rect(50, paymentTableY, pCol1Width, paymentRowHeight)
-          .fill("#000000")
-          .stroke();
-        doc.rect(250, paymentTableY, pCol2Width, paymentRowHeight)
-          .fill("#000000")
-          .stroke();
-        doc.rect(370, paymentTableY, pCol3Width, paymentRowHeight)
-          .fill("#000000")
-          .stroke();
-        doc.rect(470, paymentTableY, pCol4Width, paymentRowHeight)
-          .fill("#000000")
-          .stroke();
+        drawBox(50, paymentTableY, pCol1Width, paymentRowHeight, "#000000", "#000000", 0);
+        drawBox(250, paymentTableY, pCol2Width, paymentRowHeight, "#000000", "#000000", 0);
+        drawBox(370, paymentTableY, pCol3Width, paymentRowHeight, "#000000", "#000000", 0);
+        drawBox(470, paymentTableY, pCol4Width, paymentRowHeight, "#000000", "#000000", 0);
         
         doc.fontSize(10)
           .font("Helvetica-Bold")
           .fillColor("#FFFFFF")
-          .text("Type", 55, paymentTableY + 10, { width: pCol1Width - 10 });
-        doc.text("Date", 255, paymentTableY + 10, { width: pCol2Width - 10 });
-        doc.text("Montant", 375, paymentTableY + 10, { width: pCol3Width - 10, align: "right" });
-        doc.text("Statut", 475, paymentTableY + 10, { width: pCol4Width - 10 });
+          .text("Type", 55, paymentTableY + 11, { width: pCol1Width - 10 });
+        doc.text("Date", 255, paymentTableY + 11, { width: pCol2Width - 10 });
+        doc.text("Montant", 375, paymentTableY + 11, { width: pCol3Width - 10, align: "right" });
+        doc.text("Statut", 475, paymentTableY + 11, { width: pCol4Width - 10 });
         
         doc.fillColor("#000000");
         let currentPaymentY = paymentTableY + paymentRowHeight;
@@ -535,29 +522,23 @@ export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) 
           // Alterner les couleurs de fond
           const bgColor = index % 2 === 0 ? "#FFFFFF" : "#F9F9F9";
           
-          doc.rect(50, currentPaymentY, pCol1Width, paymentRowHeight)
-            .fill(bgColor)
-            .stroke();
-          doc.rect(250, currentPaymentY, pCol2Width, paymentRowHeight)
-            .fill(bgColor)
-            .stroke();
-          doc.rect(370, currentPaymentY, pCol3Width, paymentRowHeight)
-            .fill(bgColor)
-            .stroke();
-          doc.rect(470, currentPaymentY, pCol4Width, paymentRowHeight)
-            .fill(bgColor)
-            .stroke();
+          drawBox(50, currentPaymentY, pCol1Width, paymentRowHeight, bgColor, "#DDDDDD", 1);
+          drawBox(250, currentPaymentY, pCol2Width, paymentRowHeight, bgColor, "#DDDDDD", 1);
+          drawBox(370, currentPaymentY, pCol3Width, paymentRowHeight, bgColor, "#DDDDDD", 1);
+          drawBox(470, currentPaymentY, pCol4Width, paymentRowHeight, bgColor, "#DDDDDD", 1);
           
           doc.fontSize(9)
             .font("Helvetica")
             .fillColor("#333333")
-            .text(title, 55, currentPaymentY + 10, { width: pCol1Width - 10 });
-          doc.text(scheduledDate, 255, currentPaymentY + 10, { width: pCol2Width - 10 });
+            .text(title, 55, currentPaymentY + 11, { width: pCol1Width - 10 });
+          doc.text(scheduledDate, 255, currentPaymentY + 11, { width: pCol2Width - 10 });
           doc.font("Helvetica-Bold")
-            .text(`${amount} €`, 375, currentPaymentY + 10, { width: pCol3Width - 10, align: "right" });
+            .fillColor("#000000")
+            .text(`${amount} €`, 375, currentPaymentY + 11, { width: pCol3Width - 10, align: "right" });
           doc.font("Helvetica")
             .fontSize(8)
-            .text(statusLabel, 475, currentPaymentY + 10, { width: pCol4Width - 10 });
+            .fillColor("#666666")
+            .text(statusLabel, 475, currentPaymentY + 11, { width: pCol4Width - 10 });
           
           currentPaymentY += paymentRowHeight;
         });
@@ -569,12 +550,10 @@ export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) 
       // ============================================
       // FOOTER PROFESSIONNEL
       // ============================================
-      const footerY = 750;
-      doc.moveTo(50, footerY)
-        .lineTo(545, footerY)
-        .strokeColor("#CCCCCC")
-        .lineWidth(1)
-        .stroke();
+      checkPageBreak(50);
+      
+      const footerY = Math.min(doc.y, 750);
+      drawSeparator(footerY, "#CCCCCC", 1);
       
       doc.fontSize(8)
         .font("Helvetica")
