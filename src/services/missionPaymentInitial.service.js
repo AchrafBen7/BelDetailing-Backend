@@ -47,6 +47,10 @@ export async function createInitialPayments(agreementId) {
     throw new Error("SEPA mandate required. Company must have an active SEPA mandate.");
   }
 
+  if (!sepaMandate.paymentMethodId) {
+    throw new Error("No active SEPA payment method found. Please set up SEPA Direct Debit first.");
+  }
+
   // 5) Vérifier le Stripe Connected Account du detailer
   if (!agreement.stripe_connected_account_id) {
     throw new Error("Detailer Stripe Connected Account ID not found. Please complete Stripe Connect onboarding first.");
@@ -85,15 +89,8 @@ export async function createInitialPayments(agreementId) {
       .eq("id", agreementId);
   }
 
-  // 8) Récupérer le payment method SEPA par défaut
-  const sepaMandate = await getSepaMandate(agreement.company_id);
-  if (!sepaMandate || !sepaMandate.paymentMethodId) {
-    throw new Error("No active SEPA payment method found. Please set up SEPA Direct Debit first.");
-  }
-
-  // 9) Créer le Payment Intent pour la commission NIOS (capturé immédiatement)
+  // 8) Créer le Payment Intent pour la commission NIOS (capturé immédiatement)
   // ⚠️ La commission NIOS est un paiement direct à NIOS, pas via Stripe Connect
-  const commissionAmountCents = Math.round(commissionAmount * 100);
   
   const commissionPaymentIntent = await stripe.paymentIntents.create({
     amount: commissionAmountCents,
@@ -158,10 +155,6 @@ export async function createInitialPayments(agreementId) {
   });
   
   // ⚠️ IMPORTANT : Le Payment Intent est créé avec capture_method: "manual"
-  // Il sera capturé automatiquement à la fin du premier jour via cron job
-  console.log(`✅ [INITIAL PAYMENTS] Deposit Payment Intent created (frozen): ${depositAmount}€ (${depositPaymentIntent.id})`);
-
-  // ⚠️ IMPORTANT : Ne PAS capturer l'acompte maintenant
   // Il sera capturé automatiquement à la fin du premier jour via cron job
   console.log(`✅ [INITIAL PAYMENTS] Deposit Payment Intent created (frozen): ${depositAmount}€ (${depositPaymentIntent.id})`);
 
