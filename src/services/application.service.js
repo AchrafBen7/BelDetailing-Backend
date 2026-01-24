@@ -351,7 +351,7 @@ export async function getMyApplications(userId) {
     .from("applications")
     .select(`
       *,
-      offer:offers(
+      offers!applications_offer_id_fkey(
         id,
         title,
         description,
@@ -370,24 +370,32 @@ export async function getMyApplications(userId) {
     .eq("provider_id", userId)
     .order("created_at", { ascending: false });
 
-  if (error) throw error;
+  if (error) {
+    console.error("[APPLICATIONS] getMyApplications error:", error);
+    throw error;
+  }
 
-  return data.map(row => ({
-    ...mapApplicationRowToDto(row),
-    offer: row.offer ? {
-      id: row.offer.id,
-      title: row.offer.title,
-      description: row.offer.description,
-      city: row.offer.city,
-      postalCode: row.offer.postal_code,
-      priceMin: row.offer.price_min,
-      priceMax: row.offer.price_max,
-      vehicleCount: row.offer.vehicle_count,
-      category: row.offer.category,
-      type: row.offer.type,
-      status: row.offer.status,
-      companyName: row.offer.company_name,
-      companyLogoUrl: row.offer.company_logo_url,
-    } : null,
-  }));
+  return (data || []).map(row => {
+    // Gérer le cas où offers est un tableau (relation Supabase)
+    const offerRow = Array.isArray(row.offers) ? row.offers[0] : row.offers;
+    
+    return {
+      ...mapApplicationRowToDto(row),
+      offer: offerRow ? {
+        id: offerRow.id,
+        title: offerRow.title,
+        description: offerRow.description,
+        city: offerRow.city,
+        postalCode: offerRow.postal_code,
+        priceMin: offerRow.price_min,
+        priceMax: offerRow.price_max,
+        vehicleCount: offerRow.vehicle_count,
+        category: offerRow.category,
+        type: offerRow.type,
+        status: offerRow.status,
+        companyName: offerRow.company_name,
+        companyLogoUrl: offerRow.company_logo_url,
+      } : null,
+    };
+  });
 }

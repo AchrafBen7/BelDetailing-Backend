@@ -90,3 +90,66 @@ export async function isOfferFavorite(offerId, userId) {
     return false;
   }
 }
+
+/**
+ * 🟦 GET MY OFFER FAVORITES – Récupérer toutes les offres favorites d'un utilisateur
+ * @param {string} userId - ID de l'utilisateur (provider ou company)
+ * @returns {Promise<Array>} Liste des offres favorites avec leurs détails
+ */
+export async function getMyOfferFavorites(userId) {
+  try {
+    // 1) Récupérer les favoris
+    const { data: favorites, error: favoritesError } = await supabase
+      .from("offer_favorites")
+      .select("offer_id, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (favoritesError) throw favoritesError;
+
+    if (!favorites || favorites.length === 0) {
+      return [];
+    }
+
+    // 2) Récupérer les détails des offres
+    const offerIds = favorites.map(f => f.offer_id);
+    
+    const { data: offers, error: offersError } = await supabase
+      .from("offers_with_counts")
+      .select("*")
+      .in("id", offerIds);
+
+    if (offersError) throw offersError;
+
+    // 3) Mapper les offres avec la date de favori
+    const favoritesMap = new Map(
+      favorites.map(f => [f.offer_id, f.created_at])
+    );
+
+    return (offers || []).map(offer => ({
+      id: offer.id,
+      title: offer.title,
+      category: offer.category,
+      categories: offer.categories || [],
+      description: offer.description,
+      vehicleCount: offer.vehicle_count,
+      priceMin: offer.price_min,
+      priceMax: offer.price_max,
+      city: offer.city,
+      postalCode: offer.postal_code,
+      lat: offer.lat,
+      lng: offer.lng,
+      type: offer.type,
+      status: offer.status,
+      createdAt: offer.created_at,
+      createdBy: offer.created_by,
+      companyName: offer.company_name,
+      companyLogoUrl: offer.company_logo_url,
+      applicationsCount: offer.applications_count,
+      favoritedAt: favoritesMap.get(offer.id), // Date d'ajout en favori
+    }));
+  } catch (err) {
+    console.error("[OFFER_FAVORITE] getMyOfferFavorites error:", err);
+    throw err;
+  }
+}

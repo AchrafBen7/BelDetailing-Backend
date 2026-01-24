@@ -22,6 +22,7 @@ import {
   addFavoriteController,
   removeFavoriteController,
   checkFavoriteController,
+  listFavoritesController,
 } from "../controllers/offerFavorite.controller.js";
 
 const router = Router();
@@ -41,6 +42,9 @@ router.get(
 );
 // GET /api/v1/offers/my - Offres créées par l'utilisateur connecté (company)
 router.get("/my", requireAuth, listMyOffersController);
+// GET /api/v1/offers/favorites - Offres favorites de l'utilisateur connecté (provider/company)
+// IMPORTANT: Cette route doit être définie AVANT les routes paramétrées "/:id"
+router.get("/favorites", requireAuth, listFavoritesController);
 router.post("/", requireAuth, createOfferController);
 
 // DETAIL & UPDATE & DELETE & CLOSE

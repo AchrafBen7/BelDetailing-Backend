@@ -3,6 +3,7 @@ import {
   addOfferFavorite,
   removeOfferFavorite,
   isOfferFavorite,
+  getMyOfferFavorites,
 } from "../services/offerFavorite.service.js";
 
 /**
@@ -68,5 +69,26 @@ export async function checkFavoriteController(req, res) {
   } catch (err) {
     console.error("[OFFER_FAVORITE] checkFavoriteController error:", err);
     return res.status(500).json({ error: "Could not check offer favorite status" });
+  }
+}
+
+/**
+ * GET /api/v1/offers/favorites
+ * Récupérer toutes les offres favorites de l'utilisateur connecté (provider/company)
+ */
+export async function listFavoritesController(req, res) {
+  try {
+    const userId = req.user.id;
+
+    // Seuls les providers et companies peuvent lister leurs favoris
+    if (req.user.role !== "provider" && req.user.role !== "company") {
+      return res.status(403).json({ error: "Only providers and companies can list offer favorites" });
+    }
+
+    const favorites = await getMyOfferFavorites(userId);
+    return res.json({ data: favorites });
+  } catch (err) {
+    console.error("[OFFER_FAVORITE] listFavoritesController error:", err);
+    return res.status(500).json({ error: "Could not fetch offer favorites" });
   }
 }
