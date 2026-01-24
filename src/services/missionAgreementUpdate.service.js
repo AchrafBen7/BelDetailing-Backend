@@ -316,11 +316,53 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     throw err;
   }
 
-  // 3) Mettre à jour le statut
+  // 3) 🆕 CRÉER LE PAYMENT INTENT PRINCIPAL (GARANTIE) AVANT DE CHANGER LE STATUT
+  // Après double acceptation, créer un PaymentIntent principal pour le montant total
+  // Ce PaymentIntent sert de "garantie" et sera utilisé pour les paiements programmés
+  let mainPaymentIntentId = null;
+  
+  try {
+    const { createSepaPaymentIntent } = await import("./sepaDirectDebit.service.js");
+    
+    // Vérifier le SEPA mandate
+    const { getSepaMandate } = await import("./sepaDirectDebit.service.js");
+    const sepaMandate = await getSepaMandate(existing.company_id);
+    
+    if (!sepaMandate || sepaMandate.status !== "active") {
+      console.warn(`⚠️ [MISSION AGREEMENT] SEPA mandate not active for company ${existing.company_id}. Payment Intent will not be created.`);
+    } else {
+      // Créer le PaymentIntent principal pour le montant total (garantie)
+      const mainPaymentIntent = await createSepaPaymentIntent({
+        companyUserId: existing.company_id,
+        amount: existing.final_price, // 3000€
+        currency: "eur",
+        paymentMethodId: null,
+        applicationFeeAmount: null, // Pas de commission sur le PaymentIntent principal
+        captureMethod: "manual", // Pas capturé immédiatement (garantie)
+        metadata: {
+          missionAgreementId: id,
+          type: "mission_main_guarantee",
+          userId: existing.company_id,
+        },
+      });
+
+      mainPaymentIntentId = mainPaymentIntent.id;
+      console.log(`✅ [MISSION AGREEMENT] Main Payment Intent created for agreement ${id}: ${mainPaymentIntent.id} (${existing.final_price}€)`);
+    }
+  } catch (paymentError) {
+    console.error(`❌ [MISSION AGREEMENT] Error creating main payment intent for agreement ${id}:`, paymentError);
+    // ⚠️ IMPORTANT : Ne pas faire échouer l'acceptation si la création du PaymentIntent échoue
+    // La company pourra créer les paiements manuellement plus tard
+    // On continue quand même pour que le contrat soit accepté
+  }
+
+  // 4) Mettre à jour le statut à "active" (mission prête à démarrer)
+  // Le statut "active" indique que la mission peut démarrer et que les paiements du jour 1 seront capturés automatiquement
   const { data, error } = await supabase
     .from("mission_agreements")
     .update({
-      status: "agreement_fully_confirmed",
+      status: "active", // Mission active, prête pour les paiements du jour 1
+      stripe_payment_intent_id: mainPaymentIntentId, // PaymentIntent principal (garantie)
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -331,38 +373,19 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
 
   const updatedAgreement = mapMissionAgreementRowToDto(data);
 
-  // 4) Envoyer notification à la company
+  // 5) Envoyer notification à la company
   try {
     const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
     await sendNotificationWithDeepLink({
       userId: updatedAgreement.companyId,
       title: "Contrat accepté",
-      message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}". Vous pouvez maintenant procéder au paiement.`,
+      message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}". La mission est maintenant active.`,
       type: "mission_agreement_accepted",
       id: id,
     });
   } catch (notifError) {
     console.error("[MISSION AGREEMENT] Notification send failed:", notifError);
     // Ne pas faire échouer l'acceptation si la notification échoue
-  }
-
-  // 5) 🆕 CRÉER AUTOMATIQUEMENT LES PAIEMENTS INITIAUX
-  // Après double acceptation, créer :
-  // - Payment Intent pour l'acompte (gelé, capturé fin du premier jour)
-  // - Payment Intent pour la commission NIOS (7% unique, capturé immédiatement)
-  try {
-    const { createInitialPayments } = await import("./missionPaymentInitial.service.js");
-    const initialPayments = await createInitialPayments(id);
-    
-    console.log(`✅ [MISSION AGREEMENT] Initial payments created for agreement ${id}:`, {
-      deposit: initialPayments.depositPaymentIntent.id,
-      commission: initialPayments.commissionPaymentIntent.id,
-    });
-  } catch (paymentError) {
-    console.error(`❌ [MISSION AGREEMENT] Error creating initial payments for agreement ${id}:`, paymentError);
-    // ⚠️ IMPORTANT : Ne pas faire échouer l'acceptation si la création des paiements échoue
-    // La company pourra créer les paiements manuellement plus tard
-    // On continue quand même pour que le contrat soit accepté
   }
 
   return updatedAgreement;

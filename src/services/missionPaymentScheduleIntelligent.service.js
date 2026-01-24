@@ -48,18 +48,8 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
   if (durationDays < 30) {
     console.log("📅 [PAYMENT SCHEDULE] Short mission (< 1 month) - Simple schedule");
 
-    // Acompte : fin du jour 1 (startDate + 1 jour à 23:59)
-    const depositDate = new Date(startDate);
-    depositDate.setDate(depositDate.getDate() + 1);
-    depositDate.setHours(23, 59, 59, 999);
-
-    const depositPayment = await createMissionPayment({
-      missionAgreementId,
-      type: "deposit",
-      amount: agreement.depositAmount,
-      scheduledDate: depositDate.toISOString(),
-    });
-    payments.push(depositPayment);
+    // ⚠️ IMPORTANT : L'acompte sera créé et capturé au jour 1 via captureDayOnePayments
+    // On ne crée PAS l'acompte ici, seulement le paiement final
 
     // Solde : dernier jour (endDate à 23:59)
     const finalDate = new Date(endDate);
@@ -68,25 +58,13 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
     const finalPayment = await createMissionPayment({
       missionAgreementId,
       type: "final",
-      amount: agreement.remainingAmount,
+      amount: agreement.remainingAmount, // 2400€ (solde restant après acompte)
       scheduledDate: finalDate.toISOString(),
     });
     payments.push(finalPayment);
 
-    // Autoriser les paiements si demandé
+    // Autoriser le paiement final si demandé
     if (authorizeAll) {
-      try {
-        await createPaymentIntentForMission({
-          missionAgreementId,
-          paymentId: depositPayment.id,
-          amount: agreement.depositAmount,
-          type: "deposit",
-        });
-        console.log(`✅ [PAYMENT SCHEDULE] Deposit authorized: ${depositPayment.id}`);
-      } catch (err) {
-        console.error(`❌ [PAYMENT SCHEDULE] Failed to authorize deposit:`, err);
-      }
-
       try {
         await createPaymentIntentForMission({
           missionAgreementId,
@@ -117,29 +95,17 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
   // 4) CAS 2 : Mission ≥ 1 mois (≥ 30 jours)
   console.log("📅 [PAYMENT SCHEDULE] Long mission (≥ 1 month) - Complex schedule");
 
-  // 4.1) Acompte : 20% au jour 1 (startDate + 1 jour à 23:59)
-  const depositDate = new Date(startDate);
-  depositDate.setDate(depositDate.getDate() + 1);
-  depositDate.setHours(23, 59, 59, 999);
+  // ⚠️ IMPORTANT : L'acompte (20%) sera créé et capturé au jour 1 via captureDayOnePayments
+  // On ne crée PAS l'acompte ici, seulement les paiements mensuels
 
-  const deposit20Percent = Math.round((totalAmount * 0.20) * 100) / 100;
-  const depositPayment = await createMissionPayment({
-    missionAgreementId,
-    type: "deposit",
-    amount: deposit20Percent,
-    scheduledDate: depositDate.toISOString(),
-  });
-  payments.push(depositPayment);
-
-  // 4.2) Commission NIOS : 7% 
-  // ⚠️ IMPORTANT : La commission sera prélevée via application_fee_amount dans Stripe
+  // 4.1) Commission NIOS : 7% 
+  // ⚠️ IMPORTANT : La commission sera créée et capturée au jour 1 via captureDayOnePayments
   // On ne crée PAS de paiement séparé pour la commission dans mission_payments
-  // Elle sera gérée automatiquement par Stripe lors de chaque capture
 
-  // 4.3) Solde restant : réparti mensuellement
-  // ⚠️ IMPORTANT : La commission sera prélevée via Stripe (application_fee_amount ou Transfer)
-  // On ne la soustrait PAS du solde restant ici
-  const remainingAfterDeposit = Math.round((totalAmount - deposit20Percent) * 100) / 100;
+  // 4.2) Solde restant : réparti mensuellement
+  // ⚠️ IMPORTANT : L'acompte (20%) sera capturé au jour 1, donc le solde restant = total - 20%
+  const deposit20Percent = Math.round((totalAmount * 0.20) * 100) / 100; // 600€ (20% de 3000€)
+  const remainingAfterDeposit = Math.round((totalAmount - deposit20Percent) * 100) / 100; // 2400€
   const monthlyInstallments = Math.max(1, durationMonths - 1); // -1 car le premier mois est l'acompte
   const monthlyAmount = Math.round((remainingAfterDeposit / monthlyInstallments) * 100) / 100;
 
@@ -168,22 +134,22 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
     payments.push(monthlyPayment);
   }
 
-  // Autoriser tous les paiements si demandé
-  if (authorizeAll) {
-    for (const payment of payments) {
-      try {
-        await createPaymentIntentForMission({
-          missionAgreementId,
-          paymentId: payment.id,
-          amount: payment.amount,
-          type: payment.type,
-        });
-        console.log(`✅ [PAYMENT SCHEDULE] Payment authorized: ${payment.id} (${payment.type})`);
-      } catch (err) {
-        console.error(`❌ [PAYMENT SCHEDULE] Failed to authorize payment ${payment.id}:`, err);
+    // Autoriser tous les paiements mensuels si demandé
+    if (authorizeAll) {
+      for (const payment of payments) {
+        try {
+          await createPaymentIntentForMission({
+            missionAgreementId,
+            paymentId: payment.id,
+            amount: payment.amount,
+            type: payment.type,
+          });
+          console.log(`✅ [PAYMENT SCHEDULE] Payment authorized: ${payment.id} (${payment.type})`);
+        } catch (err) {
+          console.error(`❌ [PAYMENT SCHEDULE] Failed to authorize payment ${payment.id}:`, err);
+        }
       }
     }
-  }
 
   return {
     scheduleType: "long_mission",
@@ -192,12 +158,12 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
     payments,
     summary: {
       totalAmount,
-      depositAmount: deposit20Percent,
-      commissionAmount,
-      remainingAmount: remainingAfterDeposit,
+      depositAmount: deposit20Percent, // Sera capturé au jour 1
+      commissionAmount, // Sera capturé au jour 1
+      remainingAmount: remainingAfterDeposit, // Paiements mensuels
       monthlyInstallments,
       monthlyAmount,
-      paymentCount: payments.length,
+      paymentCount: payments.length, // Seulement les paiements mensuels (pas l'acompte ni la commission)
     },
   };
 }

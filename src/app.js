@@ -6,6 +6,7 @@ import cron from "node-cron";
 import { autoCaptureBookings } from "./cron/autoCapture.js";
 import { captureScheduledPayments } from "./cron/captureScheduledPayments.js";
 import { retryFailedTransfers } from "./cron/retryFailedTransfers.js";
+import { captureDayOnePaymentsCron } from "./cron/captureDayOnePayments.js";
 import { supabaseAdmin as supabase } from "./config/supabase.js";
 import { httpLogger } from "./observability/logger.js";
 import { metricsEndpoint, metricsMiddleware } from "./observability/metrics.js";
@@ -195,6 +196,19 @@ cron.schedule("0 */6 * * *", async () => {
     console.log(`✅ CRON retryFailedTransfers completed: ${result.succeeded} succeeded, ${result.failed} failed out of ${result.total} total`);
   } catch (err) {
     console.error("❌ CRON retryFailedTransfers error:", err);
+  }
+});
+
+// Tâche cron pour capturer automatiquement les paiements du jour 1 (commission + acompte)
+// S'exécute toutes les heures (à la minute 0 de chaque heure)
+// Capture les paiements du jour 1 pour les missions dont le startDate est aujourd'hui
+cron.schedule("0 * * * *", async () => {
+  console.log("CRON running captureDayOnePayments...");
+  try {
+    const result = await captureDayOnePaymentsCron();
+    console.log(`✅ CRON captureDayOnePayments completed: ${result.captured} captured, ${result.failed} failed, ${result.skipped} skipped`);
+  } catch (err) {
+    console.error("❌ CRON captureDayOnePayments error:", err);
   }
 });
 

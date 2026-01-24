@@ -2,6 +2,7 @@ import { Router } from "express";
 import { cleanupExpiredBookings } from "../services/booking.service.js";
 import { captureScheduledPayments } from "../cron/captureScheduledPayments.js";
 import { retryFailedTransfers } from "../cron/retryFailedTransfers.js";
+import { captureDayOnePaymentsCron } from "../cron/captureDayOnePayments.js";
 
 const router = Router();
 
@@ -92,6 +93,41 @@ router.post("/retry-failed-transfers", async (req, res) => {
   } catch (err) {
     console.error("[CRON] retry failed transfers error:", err);
     return res.status(500).json({ error: "Retry failed transfers failed" });
+  }
+});
+
+/**
+ * 🔹 POST /api/v1/cron/capture-day-one-payments
+ * Capturer automatiquement les paiements du jour 1 (commission NIOS + acompte detailer)
+ * 
+ * Ce endpoint doit être appelé par un cron job (ex: toutes les heures) pour
+ * capturer les paiements du jour 1 pour les missions dont le startDate est aujourd'hui.
+ * 
+ * Query params:
+ * - date (optionnel): Date au format YYYY-MM-DD (défaut: aujourd'hui)
+ */
+router.post("/capture-day-one-payments", async (req, res) => {
+  const cronSecret = req.headers["x-cron-secret"];
+
+  if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const { date } = req.query; // Optionnel: date au format YYYY-MM-DD
+    const result = await captureDayOnePaymentsCron(date || null);
+
+    return res.json({
+      success: result.success,
+      captured: result.captured,
+      failed: result.failed,
+      skipped: result.skipped,
+      missions: result.missions,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("[CRON] capture day one payments error:", err);
+    return res.status(500).json({ error: "Capture day one payments failed" });
   }
 });
 

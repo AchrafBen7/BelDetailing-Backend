@@ -390,6 +390,7 @@ export async function createSepaPaymentIntent({
   currency = "eur",
   paymentMethodId = null,
   applicationFeeAmount = null, // Commission NIOS en centimes (optionnel)
+  captureMethod = "manual", // "manual" ou "automatic" (par défaut: "manual")
   metadata = {},
 }) {
   // 1) ✅ VALIDATION SEPA : Vérifier qu'un mandate SEPA actif existe
@@ -431,14 +432,14 @@ export async function createSepaPaymentIntent({
     throw new Error(`Payment method's SEPA mandate is not active. Current status: ${paymentMethodMandate.status}. Please set up a new SEPA Direct Debit.`);
   }
 
-  // 5) Créer le Payment Intent avec capture_method: "manual" (pour autorisation puis capture)
+  // 5) Créer le Payment Intent avec capture_method configurable
   const paymentIntentPayload = {
     amount: Math.round(amount * 100), // Convertir en centimes
     currency,
     customer: customerId,
     payment_method: finalPaymentMethodId,
     payment_method_types: ["sepa_debit"],
-    capture_method: "manual", // Autorisation puis capture manuelle
+    capture_method: captureMethod, // "manual" (par défaut) ou "automatic" (capture immédiate)
     off_session: true, // Prélèvement automatique (off-session)
     confirm: true, // Confirmer automatiquement (pour SEPA off-session)
     metadata: {

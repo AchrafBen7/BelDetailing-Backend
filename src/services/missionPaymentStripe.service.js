@@ -57,30 +57,43 @@ export async function createPaymentIntentForMission({
   // Note: Les mandates SEPA Stripe n'expirent pas automatiquement, mais on peut vérifier la date de création
   // Pour l'instant, on se contente de vérifier le statut "active"
 
-  // 3) Calculer la commission NIOS (7% pour les missions)
+  // 3) ⚠️ IMPORTANT : La commission NIOS (7%) est capturée une seule fois au jour 1
+  // Pour les paiements mensuels restants (type "monthly" ou "final"), pas de commission supplémentaire
+  // La commission a déjà été capturée séparément via captureDayOnePayments
   const { MISSION_COMMISSION_RATE } = await import("../config/commission.js");
-  const commissionAmount = Math.round(amount * MISSION_COMMISSION_RATE * 100) / 100; // 7% en euros
-  const commissionAmountCents = Math.round(commissionAmount * 100); // En centimes pour Stripe
+  let applicationFeeAmountCents = 0; // Par défaut, pas de commission
   
-  // 4) Vérifier que le detailer a un Stripe Connected Account (requis pour application_fee_amount)
+  // Seulement pour les types "deposit" (qui ne devrait plus être utilisé car géré au jour 1)
+  // Les paiements "monthly" et "final" n'ont pas de commission car elle a déjà été capturée
+  if (type === "deposit") {
+    // ⚠️ Ce cas ne devrait normalement pas se produire car l'acompte est géré au jour 1
+    // Mais on garde la logique pour compatibilité
+    const commissionAmount = Math.round(amount * MISSION_COMMISSION_RATE * 100) / 100;
+    applicationFeeAmountCents = Math.round(commissionAmount * 100);
+  }
+  // Pour "monthly" et "final" : applicationFeeAmountCents reste à 0
+  
+  // 4) Vérifier que le detailer a un Stripe Connected Account (requis pour Stripe Connect)
   if (!agreement.stripeConnectedAccountId) {
     throw new Error("Detailer Stripe Connected Account ID not found. Please complete Stripe Connect onboarding first.");
   }
   
-  // 5) Créer le Payment Intent SEPA avec application_fee_amount via Stripe Connect
+  // 5) Créer le Payment Intent SEPA avec Stripe Connect
+  // Pour les paiements mensuels/finaux : pas de commission (applicationFeeAmount = 0)
+  // Le montant complet est transféré au detailer via transfer_data
   const paymentIntent = await createSepaPaymentIntent({
     companyUserId: agreement.companyId,
     amount,
     currency: "eur",
     paymentMethodId: null, // Utilise le payment method par défaut
-    applicationFeeAmount: commissionAmountCents, // En centimes pour Stripe
+    applicationFeeAmount: applicationFeeAmountCents, // 0 pour monthly/final, commission pour deposit (si applicable)
     metadata: {
       missionAgreementId,
       paymentId,
       paymentType: type,
       userId: agreement.companyId, // Pour les transactions
       type: "mission", // Pour identifier les paiements de missions
-      commissionAmount: commissionAmount.toString(), // Pour le tracking
+      commissionAmount: applicationFeeAmountCents > 0 ? (applicationFeeAmountCents / 100).toString() : "0", // Pour le tracking
       stripeConnectedAccountId: agreement.stripeConnectedAccountId, // ✅ Requis pour Stripe Connect
     },
   });
@@ -144,15 +157,15 @@ export async function captureMissionPayment(paymentId) {
     }
   }
 
-  // 5) Transférer automatiquement vers le detailer (après capture)
-  try {
-    const { MISSION_COMMISSION_RATE } = await import("../config/commission.js");
-    await autoTransferOnPaymentCapture(paymentId, MISSION_COMMISSION_RATE); // 7% commission pour missions
-  } catch (payoutError) {
-    console.error(`❌ [MISSION PAYMENT] Auto-transfer failed for payment ${paymentId}:`, payoutError);
-    // Ne pas faire échouer la capture si le transfert échoue
-    // Le transfert pourra être retenté manuellement ou via webhook
-  }
+  // 5) ⚠️ IMPORTANT : Le transfert vers le detailer est automatique via Stripe Connect
+  // Les PaymentIntents sont créés avec `on_behalf_of` et `transfer_data`
+  // Donc le transfert se fait automatiquement lors de la capture
+  // On n'a pas besoin d'appeler `autoTransferOnPaymentCapture` pour les paiements mensuels/finaux
+  // 
+  // Exception : Si le PaymentIntent n'a pas été créé avec Stripe Connect (cas legacy),
+  // on peut appeler autoTransferOnPaymentCapture en fallback
+  // Mais normalement, tous les paiements de missions utilisent Stripe Connect
+  console.log(`✅ [MISSION PAYMENT] Transfer to detailer will be automatic via Stripe Connect for payment ${paymentId}`);
 
   // 6) Générer automatiquement les factures (company et detailer)
   try {
