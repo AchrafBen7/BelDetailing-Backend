@@ -139,7 +139,18 @@ export async function sendNotificationWithDeepLink({ userId, title, message, typ
     const { createNotification } = await import("./notification.service.js");
     // Normaliser le type (ex: "booking_created" → "booking", "service_started" → "service")
     const normalizedType = type.includes("_") ? type.split("_")[0] : type;
-    await createNotification(userId, title, message, normalizedType);
+    // ✅ Vérifier que userId n'est pas null avant d'appeler createNotification
+    if (!userId) {
+      console.warn("[ONESIGNAL] userId is null, skipping DB notification save");
+    } else {
+      await createNotification({
+        userId,
+        title,
+        message,
+        type: normalizedType,
+        data: id ? { id } : null,
+      });
+    }
   } catch (dbError) {
     // ⚠️ Si l'enregistrement en DB échoue, on continue quand même avec OneSignal
     // (ne pas bloquer l'envoi de la notification push)

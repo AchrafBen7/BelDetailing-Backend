@@ -270,14 +270,18 @@ export async function confirmMissionAgreementByCompany(id, userId) {
 
   // 6) Envoyer notification au detailer
   try {
-    const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
-    await sendNotificationWithDeepLink({
-      userId: updatedAgreement.detailerId,
-      title: "Nouveau contrat de mission",
-      message: `Un nouveau contrat de mission "${updatedAgreement.title || 'votre mission'}" vous attend`,
-      type: "mission_agreement_pending",
-      id: id,
-    });
+    if (updatedAgreement.detailerId) {
+      const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
+      await sendNotificationWithDeepLink({
+        userId: updatedAgreement.detailerId,
+        title: "Nouveau contrat de mission",
+        message: `Un nouveau contrat de mission "${updatedAgreement.title || 'votre mission'}" vous attend`,
+        type: "mission_agreement_pending",
+        id: id,
+      });
+    } else {
+      console.warn(`[MISSION AGREEMENT] Cannot send notification to detailer: detailerId is null for agreement ${id}`);
+    }
   } catch (notifError) {
     console.error("[MISSION AGREEMENT] Notification send failed:", notifError);
     // Ne pas faire échouer la confirmation si la notification échoue
@@ -448,26 +452,34 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     const totalDebited = commissionAmount + depositAmount;
     
     // 8.1) Notification à la COMPANY (détails du débit)
-    await sendNotificationWithDeepLink({
-      userId: updatedAgreement.companyId,
-      title: "✅ Contrat accepté - Paiements débités",
-      message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}".\n\n💳 Acompte: ${depositAmount}€ débité\n🧾 Commission NIOS: ${commissionAmount}€ débitée\n💰 Total: ${totalDebited}€\n\n🚀 La mission est officiellement lancée.`,
-      type: "mission_agreement_accepted",
-      id: id,
-    });
+    if (updatedAgreement.companyId) {
+      await sendNotificationWithDeepLink({
+        userId: updatedAgreement.companyId,
+        title: "✅ Contrat accepté - Paiements débités",
+        message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}".\n\n💳 Acompte: ${depositAmount}€ débité\n🧾 Commission NIOS: ${commissionAmount}€ débitée\n💰 Total: ${totalDebited}€\n\n🚀 La mission est officiellement lancée.`,
+        type: "mission_agreement_accepted",
+        id: id,
+      });
+    } else {
+      console.warn(`[MISSION AGREEMENT] Cannot send notification to company: companyId is null for agreement ${id}`);
+    }
     
     // 8.2) Notification au DETAILER (détails de réception)
-    const startDate = new Date(updatedAgreement.startDate);
-    const jPlusOne = new Date(startDate.getTime() + 24 * 60 * 60 * 1000); // J+1
-    const jPlusOneFormatted = jPlusOne.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
-    
-    await sendNotificationWithDeepLink({
-      userId: updatedAgreement.detailerId,
-      title: "✅ Contrat validé - Acompte sécurisé",
-      message: `Contrat "${updatedAgreement.title || 'la mission'}" validé.\n\n💰 Acompte de ${depositAmount}€ sécurisé chez NIOS\n📅 Il vous sera versé le ${jPlusOneFormatted} (J+1)\n🧾 Paiements suivants planifiés automatiquement\n\n🚀 Vous pouvez commencer la mission en toute sécurité.`,
-      type: "mission_agreement_accepted",
-      id: id,
-    });
+    if (updatedAgreement.detailerId) {
+      const startDate = new Date(updatedAgreement.startDate);
+      const jPlusOne = new Date(startDate.getTime() + 24 * 60 * 60 * 1000); // J+1
+      const jPlusOneFormatted = jPlusOne.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+      
+      await sendNotificationWithDeepLink({
+        userId: updatedAgreement.detailerId,
+        title: "✅ Contrat validé - Acompte sécurisé",
+        message: `Contrat "${updatedAgreement.title || 'la mission'}" validé.\n\n💰 Acompte de ${depositAmount}€ sécurisé chez NIOS\n📅 Il vous sera versé le ${jPlusOneFormatted} (J+1)\n🧾 Paiements suivants planifiés automatiquement\n\n🚀 Vous pouvez commencer la mission en toute sécurité.`,
+        type: "mission_agreement_accepted",
+        id: id,
+      });
+    } else {
+      console.warn(`[MISSION AGREEMENT] Cannot send notification to detailer: detailerId is null for agreement ${id}`);
+    }
     
     console.log(`✅ [MISSION AGREEMENT] Notifications sent to company and detailer`);
   } catch (notifError) {

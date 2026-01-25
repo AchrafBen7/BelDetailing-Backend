@@ -55,6 +55,40 @@ export async function applyToOffer(offerId, payload, user) {
     throw err;
   }
 
+  // 0.5) ✅ VÉRIFIER QUE LE DETAILER A UN STRIPE CONNECTED ACCOUNT CONFIGURÉ
+  // Le detailer doit avoir complété l'onboarding Stripe Connect avec son IBAN
+  // AVANT de pouvoir postuler à une offre (pour recevoir les paiements)
+  const { data: providerProfile, error: providerError } = await supabase
+    .from("provider_profiles")
+    .select("stripe_account_id")
+    .eq("user_id", user.id)
+    .single();
+
+  if (providerError || !providerProfile?.stripe_account_id) {
+    const err = new Error("Stripe Connect account not configured. Please complete Stripe Connect onboarding with your IBAN before applying to offers.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Vérifier que le Connected Account est actif (charges_enabled et payouts_enabled)
+  try {
+    const { getConnectedAccountStatus } = await import("./stripeConnect.service.js");
+    const accountStatus = await getConnectedAccountStatus(providerProfile.stripe_account_id);
+    
+    if (!accountStatus.chargesEnabled || !accountStatus.payoutsEnabled) {
+      const err = new Error("Stripe Connect account is not fully activated. Please complete the onboarding process to enable payments before applying to offers.");
+      err.statusCode = 400;
+      throw err;
+    }
+    
+    console.log(`✅ [APPLICATIONS] Provider ${user.id} has active Stripe Connect account: ${providerProfile.stripe_account_id}`);
+  } catch (statusError) {
+    console.error("[APPLICATIONS] Error checking Connected Account status:", statusError);
+    const err = new Error("Could not verify Stripe Connect account status. Please ensure your account is properly configured before applying to offers.");
+    err.statusCode = 400;
+    throw err;
+  }
+
   // 1) Vérifier si ce provider a déjà une application active sur cette offre
   const { data: existingApps, error: existingError } = await supabase
     .from("applications")
