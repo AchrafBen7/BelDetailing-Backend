@@ -57,11 +57,27 @@ export async function getOffers({ status, type }) {
 
   // 🆕 EXCLURE les offres avec candidature acceptée (pour OffersView et dashboard company)
   // Ces offres ne doivent plus être visibles car elles sont déjà attribuées
-  query = query.eq("has_accepted_application", false);
+  // Utiliser .or() pour inclure les valeurs NULL (nouvelles offres sans candidature)
+  query = query.or("has_accepted_application.eq.false,has_accepted_application.is.null");
+
+  console.log("[OFFERS] getOffers query - status:", status || "open", "type:", type || "all");
 
   const { data, error } = await query.order("created_at", { ascending: false });
 
-  if (error) throw error;
+  if (error) {
+    console.error("[OFFERS] getOffers error:", error);
+    throw error;
+  }
+
+  console.log("[OFFERS] getOffers returned", data.length, "offers");
+  if (data.length > 0) {
+    console.log("[OFFERS] First offer:", {
+      id: data[0].id,
+      title: data[0].title,
+      status: data[0].status,
+      has_accepted_application: data[0].has_accepted_application,
+    });
+  }
 
   return data.map(mapOfferRowToDto);
 }
@@ -181,9 +197,43 @@ export async function createOffer(payload, user) {
     title: data.title,
     category: data.category,
     categories: data.categories,
+    status: data.status,
+    created_by: data.created_by,
   });
 
-  return mapOfferRowToDto(data);
+  // ✅ Récupérer l'offre depuis la vue offers_with_counts pour avoir tous les champs (applications_count, etc.)
+  // Cela garantit la cohérence avec les autres endpoints qui utilisent cette vue
+  // Attendre un peu pour que la vue soit mise à jour (PostgreSQL peut avoir un léger délai)
+  await new Promise(resolve => setTimeout(resolve, 100)); // 100ms de délai
+  
+  const { data: viewData, error: viewError } = await supabase
+    .from("offers_with_counts")
+    .select("*")
+    .eq("id", data.id)
+    .single();
+
+  if (viewError) {
+    console.warn("[OFFERS] Could not fetch offer from view, using direct data:", viewError);
+    // Fallback : utiliser les données directes si la vue échoue
+    // Ajouter les champs manquants pour la compatibilité
+    const fallbackData = {
+      ...data,
+      applications_count: 0,
+      has_accepted_application: false,
+      company_name: data.company_name,
+      company_logo_url: data.company_logo_url,
+    };
+    return mapOfferRowToDto(fallbackData);
+  }
+
+  console.log("[OFFERS] Offer fetched from view:", {
+    id: viewData.id,
+    status: viewData.status,
+    has_accepted_application: viewData.has_accepted_application,
+    applications_count: viewData.applications_count,
+  });
+
+  return mapOfferRowToDto(viewData);
 }
 
 // 🟦 UPDATE – PATCH /api/v1/offers/:id  (ROLE: company, owner only)
@@ -463,7 +513,8 @@ export async function getMyOffers(userId) {
     .select("*")
     .eq("created_by", userId)
     // 🆕 EXCLURE les offres avec candidature acceptée (pour le dashboard company)
-    .eq("has_accepted_application", false)
+    // Utiliser .or() pour inclure les valeurs NULL (nouvelles offres sans candidature)
+    .or("has_accepted_application.eq.false,has_accepted_application.is.null")
     .order("created_at", { ascending: false });
 
   if (error) throw error;

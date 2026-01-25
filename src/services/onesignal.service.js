@@ -31,7 +31,11 @@ function ensureConfigured() {
  * @returns {Promise<Object>} OneSignal Player object
  */
 export async function registerDevice({ userId, token, platform = "ios" }) {
-  ensureConfigured();
+  // ✅ Vérifier si OneSignal est configuré, sinon retourner silencieusement
+  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
+    console.warn("[ONESIGNAL] OneSignal is not configured. Skipping device registration.");
+    return { success: false, reason: "OneSignal not configured" };
+  }
 
   const response = await fetch("https://onesignal.com/api/v1/players", {
     method: "POST",
@@ -70,7 +74,11 @@ export async function registerDevice({ userId, token, platform = "ios" }) {
  * @returns {Promise<Object>} Réponse OneSignal
  */
 export async function sendNotificationToUser({ userId, title, message, data, url }) {
-  ensureConfigured();
+  // ✅ Vérifier si OneSignal est configuré, sinon retourner silencieusement
+  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
+    console.warn("[ONESIGNAL] OneSignal is not configured (ONESIGNAL_APP_ID or ONESIGNAL_REST_API_KEY missing). Skipping push notification.");
+    return { success: false, reason: "OneSignal not configured" };
+  }
 
   const payload = {
     app_id: ONESIGNAL_APP_ID,
@@ -86,21 +94,26 @@ export async function sendNotificationToUser({ userId, title, message, data, url
     payload.url = url;
   }
 
-  const response = await fetch("https://onesignal.com/api/v1/notifications", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Basic ${ONESIGNAL_REST_API_KEY}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  try {
+    const response = await fetch("https://onesignal.com/api/v1/notifications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${ONESIGNAL_REST_API_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OneSignal send failed: ${text}`);
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`OneSignal send failed: ${text}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error("[ONESIGNAL] Error sending push notification:", error.message);
+    throw error; // Re-throw pour que l'appelant puisse gérer
   }
-
-  return response.json();
 }
 
 /**
@@ -135,6 +148,7 @@ export async function sendNotificationWithDeepLink({ userId, title, message, typ
   const finalDeepLink = deepLink || `beldetailing://${type}/${id}`;
 
   // ✅ Enregistrer la notification dans la table notifications AVANT l'envoi OneSignal
+  // Cette partie DOIT toujours fonctionner, même si OneSignal n'est pas configuré
   try {
     const { createNotification } = await import("./notification.service.js");
     // Normaliser le type (ex: "booking_created" → "booking", "service_started" → "service")
@@ -143,30 +157,51 @@ export async function sendNotificationWithDeepLink({ userId, title, message, typ
     if (!userId) {
       console.warn("[ONESIGNAL] userId is null, skipping DB notification save");
     } else {
-      await createNotification({
-        userId,
-        title,
-        message,
-        type: normalizedType,
-        data: id ? { id } : null,
-      });
+      // ✅ IMPORTANT : Utiliser directement supabase pour enregistrer en DB
+      // sans passer par sendNotificationToUser (qui nécessite OneSignal)
+      const { supabaseAdmin } = await import("../config/supabase.js");
+      const { error: dbError } = await supabaseAdmin
+        .from("notifications")
+        .insert({
+          user_id: userId,
+          title,
+          message,
+          type: normalizedType,
+          data: id ? { type, id } : null,
+          is_read: false,
+        });
+
+      if (dbError) {
+        console.error("[ONESIGNAL] Failed to save notification to DB:", dbError);
+        // Ne pas throw, continuer quand même
+      } else {
+        console.log("[ONESIGNAL] Notification saved to DB successfully");
+      }
     }
   } catch (dbError) {
-    // ⚠️ Si l'enregistrement en DB échoue, on continue quand même avec OneSignal
-    // (ne pas bloquer l'envoi de la notification push)
+    // ⚠️ Si l'enregistrement en DB échoue, on continue quand même
     console.error("[ONESIGNAL] Failed to save notification to DB:", dbError);
   }
 
-  // Envoyer la notification push via OneSignal
-  return sendNotificationToUser({
-    userId,
-    title,
-    message,
-    url: finalDeepLink, // Deep link pour routing iOS
-    data: {
-      type,
-      id, // booking_id, offer_id, transaction_id, etc.
-      deep_link: finalDeepLink, // Garder aussi dans data pour référence
-    },
-  });
+  // ✅ Envoyer la notification push via OneSignal (si configuré)
+  // Si OneSignal n'est pas configuré, on ignore silencieusement l'erreur
+  try {
+    return await sendNotificationToUser({
+      userId,
+      title,
+      message,
+      url: finalDeepLink, // Deep link pour routing iOS
+      data: {
+        type,
+        id, // booking_id, offer_id, transaction_id, etc.
+        deep_link: finalDeepLink, // Garder aussi dans data pour référence
+      },
+    });
+  } catch (onesignalError) {
+    // ⚠️ Si OneSignal n'est pas configuré ou échoue, on log mais on ne throw pas
+    // La notification est déjà enregistrée en DB, donc l'utilisateur la verra dans l'app
+    console.warn("[ONESIGNAL] OneSignal push notification failed (notification still saved to DB):", onesignalError.message);
+    // Retourner un objet vide pour indiquer que la notification DB a été créée
+    return { success: false, onesignalError: onesignalError.message, dbSaved: true };
+  }
 }

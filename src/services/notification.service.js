@@ -31,7 +31,8 @@ export async function createNotification({ userId, title, message, type, data = 
     throw error;
   }
 
-  // Envoyer une push notification via OneSignal
+  // Envoyer une push notification via OneSignal (si configuré)
+  // Si OneSignal n'est pas configuré, on ignore silencieusement l'erreur
   try {
     await sendNotificationToUser({
       userId,
@@ -43,7 +44,9 @@ export async function createNotification({ userId, title, message, type, data = 
       },
     });
   } catch (notifError) {
-    console.error("[NOTIFICATIONS] Error sending push notification:", notifError);
+    // ⚠️ Si OneSignal n'est pas configuré ou échoue, on log mais on ne throw pas
+    // La notification est déjà enregistrée en DB, donc l'utilisateur la verra dans l'app
+    console.warn("[NOTIFICATIONS] OneSignal push notification failed (notification still saved to DB):", notifError.message);
     // Ne pas faire échouer la création de notification si la push échoue
   }
 

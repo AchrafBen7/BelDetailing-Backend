@@ -433,6 +433,26 @@ export async function createSepaPaymentIntent({
     const finalPaymentMethod = await stripe.paymentMethods.retrieve(finalPaymentMethodId);
     console.log(`✅ [SEPA] Payment method ${finalPaymentMethodId} retrieved successfully`);
     
+    // ✅ CRUCIAL : Vérifier que le payment method est attaché au customer
+    // Pour SEPA avec off_session, le payment method DOIT être attaché au customer
+    if (!finalPaymentMethod.customer) {
+      console.log(`⚠️ [SEPA] Payment method not attached to customer. Attaching now...`);
+      await stripe.paymentMethods.attach(finalPaymentMethodId, {
+        customer: customerId,
+      });
+      console.log(`✅ [SEPA] Payment method attached to customer ${customerId}`);
+    } else if (finalPaymentMethod.customer !== customerId) {
+      console.warn(`⚠️ [SEPA] Payment method attached to different customer (${finalPaymentMethod.customer}). Re-attaching to ${customerId}...`);
+      // Détacher puis réattacher au bon customer
+      await stripe.paymentMethods.detach(finalPaymentMethodId);
+      await stripe.paymentMethods.attach(finalPaymentMethodId, {
+        customer: customerId,
+      });
+      console.log(`✅ [SEPA] Payment method re-attached to customer ${customerId}`);
+    } else {
+      console.log(`✅ [SEPA] Payment method already attached to customer ${customerId}`);
+    }
+    
     // Vérifier que le mandate est toujours actif (double vérification)
     const mandateCheck = await stripe.mandates.retrieve(finalMandateId);
     if (mandateCheck.status !== "active") {
@@ -457,7 +477,9 @@ export async function createSepaPaymentIntent({
     capture_method: captureMethod, // "manual" (par défaut) ou "automatic" (capture immédiate)
     off_session: true, // Prélèvement automatique (off-session)
     confirm: true, // Confirmer automatiquement (pour SEPA off-session)
-    setup_future_usage: "off_session", // Pour les paiements futurs
+    // ❌ CRUCIAL : Ne PAS définir setup_future_usage avec off_session=true
+    // Le mandate SEPA permet déjà les paiements futurs, pas besoin de setup_future_usage
+    // Si on définit setup_future_usage, Stripe bloque car incompatible avec off_session
     metadata: {
       userId: companyUserId,
       userRole: "company",
@@ -467,10 +489,16 @@ export async function createSepaPaymentIntent({
     },
   };
   
+  // ✅ S'assurer explicitement que setup_future_usage n'est PAS défini
+  // (même si Stripe pourrait l'ajouter automatiquement dans certains cas)
+  // On ne le définit pas du tout pour éviter tout conflit
+  
   // 6) Si un Connected Account est dans les metadata → Utiliser Stripe Connect
   if (metadata.stripeConnectedAccountId) {
-    // ✅ Utiliser Stripe Connect : créer le Payment Intent "on behalf of" le Connected Account
-    paymentIntentPayload.on_behalf_of = metadata.stripeConnectedAccountId;
+    // ✅ Utiliser Stripe Connect : application_fee_amount + transfer_data
+    // ⚠️ IMPORTANT : Ne PAS utiliser on_behalf_of avec off_session + confirm
+    // Cela peut causer Stripe à ajouter automatiquement setup_future_usage
+    // On utilise uniquement application_fee_amount + transfer_data
     
     if (applicationFeeAmount && applicationFeeAmount > 0) {
       // Si applicationFeeAmount > 0 : prélever la commission NIOS directement
@@ -479,12 +507,14 @@ export async function createSepaPaymentIntent({
         destination: metadata.stripeConnectedAccountId,
       };
       console.log(`✅ [SEPA] Using Stripe Connect with commission: Connected Account ${metadata.stripeConnectedAccountId}, Application Fee: ${applicationFeeAmount} cents`);
+      console.log(`⚠️ [SEPA] NOT using on_behalf_of to avoid setup_future_usage conflict with off_session`);
     } else {
       // Si applicationFeeAmount = 0 ou null : transférer tout le montant au Connected Account (sans commission)
       paymentIntentPayload.transfer_data = {
         destination: metadata.stripeConnectedAccountId,
       };
       console.log(`✅ [SEPA] Using Stripe Connect without commission: Connected Account ${metadata.stripeConnectedAccountId}, Full amount transferred`);
+      console.log(`⚠️ [SEPA] NOT using on_behalf_of to avoid setup_future_usage conflict with off_session`);
     }
   } else if (applicationFeeAmount && applicationFeeAmount > 0) {
     // ⚠️ Si applicationFeeAmount est fourni mais pas de Connected Account
@@ -494,6 +524,28 @@ export async function createSepaPaymentIntent({
     paymentIntentPayload.metadata.commissionAmount = applicationFeeAmount.toString();
     paymentIntentPayload.metadata.commissionHandling = "transfer_after_capture";
   }
+  
+  // ✅ CRUCIAL : S'assurer qu'aucun setup_future_usage n'est défini (même implicitement)
+  // Supprimer explicitement setup_future_usage si présent (par sécurité)
+  if (paymentIntentPayload.setup_future_usage !== undefined) {
+    delete paymentIntentPayload.setup_future_usage;
+    console.log(`⚠️ [SEPA] Removed setup_future_usage from PaymentIntent (incompatible with off_session)`);
+  }
+  
+  // Log le payload final pour debug (sans les données sensibles)
+  console.log(`🔍 [SEPA] PaymentIntent payload:`, {
+    amount: paymentIntentPayload.amount,
+    currency: paymentIntentPayload.currency,
+    payment_method: paymentIntentPayload.payment_method,
+    mandate: paymentIntentPayload.mandate,
+    off_session: paymentIntentPayload.off_session,
+    confirm: paymentIntentPayload.confirm,
+    capture_method: paymentIntentPayload.capture_method,
+    setup_future_usage: paymentIntentPayload.setup_future_usage, // Devrait être undefined
+    on_behalf_of: paymentIntentPayload.on_behalf_of,
+    application_fee_amount: paymentIntentPayload.application_fee_amount,
+    has_transfer_data: !!paymentIntentPayload.transfer_data,
+  });
   
   const paymentIntent = await stripe.paymentIntents.create(paymentIntentPayload);
 
