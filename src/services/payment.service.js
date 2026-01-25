@@ -8,14 +8,29 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 
 /* -----------------------------------------------------
    CREATE PAYMENT INTENT — Préautorisation standard
+   
+   ✅ NOUVEAU : Support pour Stripe Connect avec application_fee_amount
+   - Si providerStripeAccountId est fourni → utiliser transfer_data + application_fee_amount
+   - Commission NIOS = 10% par défaut (COMMISSION_RATE)
 ----------------------------------------------------- */
-export async function createPaymentIntent({ amount, currency, user }) {
+export async function createPaymentIntent({ 
+  amount, 
+  currency, 
+  user,
+  providerStripeAccountId = null, // ✅ Optionnel : ID du compte Stripe Connect du provider
+  commissionRate = 0.10, // ✅ Taux de commission NIOS (10% par défaut)
+}) {
   const customerId = await getOrCreateStripeCustomer(user);
 
-  const stripeIntent = await stripe.paymentIntents.create({
-    amount: Math.round(amount * 100),
+  const amountInCents = Math.round(amount * 100);
+  const applicationFeeAmount = providerStripeAccountId 
+    ? Math.round(amountInCents * commissionRate) // ✅ Commission NIOS en centimes
+    : null;
+
+  const paymentIntentPayload = {
+    amount: amountInCents,
     currency,
-    customer: customerId, // ✅ LIGNE CRUCIALE
+    customer: customerId,
     capture_method: "manual",
     // ✅ Utiliser automatic_payment_methods pour permettre Apple Pay natif
     automatic_payment_methods: {
@@ -26,7 +41,24 @@ export async function createPaymentIntent({ amount, currency, user }) {
       source: "beldetailing-app",
       type: "booking",
     },
-  });
+  };
+
+  // ✅ STRIPE CONNECT : Si le provider a un compte connecté, utiliser transfer_data + application_fee_amount
+  if (providerStripeAccountId && applicationFeeAmount > 0) {
+    paymentIntentPayload.transfer_data = {
+      destination: providerStripeAccountId, // ✅ Envoyer l'argent au compte connecté du provider
+    };
+    paymentIntentPayload.application_fee_amount = applicationFeeAmount; // ✅ Commission NIOS
+    
+    // Ajouter les métadonnées pour traçabilité
+    paymentIntentPayload.metadata.providerStripeAccountId = providerStripeAccountId;
+    paymentIntentPayload.metadata.commissionAmount = applicationFeeAmount.toString();
+    paymentIntentPayload.metadata.commissionRate = commissionRate.toString();
+    
+    console.log(`✅ [PAYMENT] Using Stripe Connect: destination=${providerStripeAccountId}, commission=${applicationFeeAmount} cents (${commissionRate * 100}%)`);
+  }
+
+  const stripeIntent = await stripe.paymentIntents.create(paymentIntentPayload);
 
   return {
     id: stripeIntent.id,
@@ -34,6 +66,7 @@ export async function createPaymentIntent({ amount, currency, user }) {
     amount,
     currency,
     status: stripeIntent.status,
+    applicationFeeAmount: applicationFeeAmount ? applicationFeeAmount / 100 : null, // ✅ Retourner en euros
   };
 }
 

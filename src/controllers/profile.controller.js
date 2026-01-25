@@ -88,6 +88,17 @@ export async function updateProfile(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  // ✅ Récupérer le rôle actuel de l'utilisateur
+  const { data: currentUser, error: currentUserError } = await supabase
+    .from("users")
+    .select("role")
+    .eq("id", userId)
+    .single();
+  
+  if (currentUserError) {
+    return res.status(500).json({ error: currentUserError.message });
+  }
+
   const {
     phone,
     role,
@@ -97,6 +108,43 @@ export async function updateProfile(req, res) {
     companyProfile,
     providerProfile,
   } = req.body;
+
+  // ✅ TRANSITION : Si un provider_passionate ajoute une TVA, passer en Pro
+  if (currentUser?.role === "provider_passionate" && vatNumber && vatNumber.trim() !== "") {
+    // Vérifier que la TVA n'est pas vide (validation basique)
+    if (vatNumber.trim().length < 8) {
+      return res.status(400).json({ error: "Invalid VAT number format" });
+    }
+    
+    // Mettre à jour le rôle vers "provider"
+    const { error: roleError } = await supabase
+      .from("users")
+      .update({
+        role: "provider",
+        vat_number: vatNumber.trim(),
+        is_vat_valid: false, // Sera validé plus tard via un service de validation
+      })
+      .eq("id", userId);
+    
+    if (roleError) {
+      return res.status(500).json({ error: roleError.message });
+    }
+    
+    // Réinitialiser le plafond (plus nécessaire pour les Pros)
+    await supabase
+      .from("provider_profiles")
+      .update({
+        annual_revenue_limit: null,
+        annual_revenue_current: null,
+        annual_revenue_year: null,
+      })
+      .eq("user_id", userId);
+    
+    console.log(`✅ [PROFILE] Provider_passionate ${userId} upgraded to provider (VAT: ${vatNumber.trim()})`);
+    
+    // Retourner le profil mis à jour
+    return await getProfile(req, res);
+  }
 
   // 1) Update table users
   const userUpdate = {};

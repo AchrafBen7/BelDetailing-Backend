@@ -299,6 +299,20 @@ export async function confirmMissionAgreementByCompany(id, userId) {
  * @returns {Promise<Object>} Mission Agreement accepté
  */
 export async function acceptMissionAgreementByDetailer(id, userId) {
+  // ✅ BLOQUER les provider_passionate (pas de B2B, pas de missions)
+  const { data: user, error: userError } = await supabase
+    .from("users")
+    .select("role")
+    .eq("id", userId)
+    .single();
+  
+  if (userError) throw userError;
+  
+  if (user?.role === "provider_passionate") {
+    const err = new Error("Passionate detailers cannot accept mission agreements. Please upgrade to Pro account (VAT required).");
+    err.statusCode = 403;
+    throw err;
+  }
   // 1) Vérifier que l'agreement existe et appartient à ce detailer
   const { data: existing, error: fetchError } = await supabase
     .from("mission_agreements")

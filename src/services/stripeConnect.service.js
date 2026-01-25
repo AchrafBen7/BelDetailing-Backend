@@ -14,9 +14,13 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 /**
  * Crée (ou récupère) un compte connecté Stripe pour un provider.
  * - providerUserId = user_id du provider dans ta DB (provider_profiles.user_id)
+ * 
+ * ✅ NOUVEAU : Support pour provider_passionate avec compte "Individual"
+ * - provider (pro) → Business account (avec TVA)
+ * - provider_passionate → Individual account (sans TVA)
  */
 export async function createOrGetConnectedAccount(providerUserId) {
-  // 1) Récupérer le provider_profile
+  // 1) Récupérer le provider_profile et le rôle de l'utilisateur
   const { data: provider, error } = await supabase
     .from("provider_profiles")
     .select("*")
@@ -27,30 +31,82 @@ export async function createOrGetConnectedAccount(providerUserId) {
     throw new Error("Provider profile not found for this user");
   }
 
-  // 2) Si on a déjà un stripe_account_id → on le retourne
+  // 2) Récupérer le rôle de l'utilisateur
+  const { data: user, error: userError } = await supabase
+    .from("users")
+    .select("role")
+    .eq("id", providerUserId)
+    .single();
+
+  if (userError || !user) {
+    throw new Error("User not found");
+  }
+
+  const userRole = user.role;
+
+  // 3) Si on a déjà un stripe_account_id → on le retourne
   if (provider.stripe_account_id) {
     return { stripeAccountId: provider.stripe_account_id, created: false };
   }
 
-  // 3) Sinon, on crée un nouveau compte connecté avec le controller demandé
-  const account = await stripe.accounts.create({
-    controller: {
-      // La plateforme gère les frais
-      fees: {
-        payer: "application", // ⚠️ NE PAS METTRE DE type EN TOP LEVEL
-      },
-      // La plateforme porte les pertes / refunds / chargebacks
-      losses: {
-        payments: "application",
-      },
-      // Dashboard Express pour le detailer
-      stripe_dashboard: {
-        type: "express",
-      },
-    },
-  });
+  // 4) Créer un nouveau compte connecté selon le type
+  let accountPayload;
 
-  // 4) On sauvegarde l'ID Stripe dans provider_profiles
+  if (userRole === "provider_passionate") {
+    // ✅ COMPTE INDIVIDUAL (passionné sans TVA)
+    accountPayload = {
+      type: "express",
+      business_type: "individual", // ✅ Personne physique (pas de TVA requise)
+      controller: {
+        // La plateforme gère les frais
+        fees: {
+          payer: "application", // NIOS prend la commission via application_fee_amount
+        },
+        // La plateforme porte les pertes / refunds / chargebacks
+        losses: {
+          payments: "application",
+        },
+        // Dashboard Express pour le passionné
+        stripe_dashboard: {
+          type: "express",
+        },
+      },
+      metadata: {
+        provider_user_id: providerUserId,
+        account_type: "individual", // Pour traçabilité
+        user_role: "provider_passionate",
+      },
+    };
+  } else {
+    // ✅ COMPTE BUSINESS (provider pro avec TVA)
+    accountPayload = {
+      type: "express",
+      business_type: "company", // ✅ Société (TVA requise)
+      controller: {
+        // La plateforme gère les frais
+        fees: {
+          payer: "application",
+        },
+        // La plateforme porte les pertes / refunds / chargebacks
+        losses: {
+          payments: "application",
+        },
+        // Dashboard Express pour le detailer
+        stripe_dashboard: {
+          type: "express",
+        },
+      },
+      metadata: {
+        provider_user_id: providerUserId,
+        account_type: "business",
+        user_role: "provider",
+      },
+    };
+  }
+
+  const account = await stripe.accounts.create(accountPayload);
+
+  // 5) On sauvegarde l'ID Stripe dans provider_profiles
   const { error: updateError } = await supabase
     .from("provider_profiles")
     .update({ stripe_account_id: account.id })
@@ -59,6 +115,8 @@ export async function createOrGetConnectedAccount(providerUserId) {
   if (updateError) {
     throw new Error("Could not save stripe_account_id in provider_profiles");
   }
+
+  console.log(`✅ [STRIPE CONNECT] Account created for ${userRole}: ${account.id} (type: ${accountPayload.business_type})`);
 
   return { stripeAccountId: account.id, created: true };
 }

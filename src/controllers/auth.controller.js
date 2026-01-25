@@ -73,8 +73,11 @@ export async function register(req, res) {
 
   const finalRole = (role || "customer").toLowerCase();
 
-  // 🌟 RÈGLE : VAT obligatoire pour provider/company
-  if ((finalRole === "provider" || finalRole === "company") && !vat_number) {
+  // 🌟 RÈGLE : VAT obligatoire pour provider/company (mais PAS pour provider_passionate)
+  // ✅ provider_passionate n'a PAS besoin de TVA
+  if (finalRole === "provider_passionate") {
+    // Pas de vérification TVA pour les passionnés
+  } else if ((finalRole === "provider" || finalRole === "company") && !vat_number) {
     return res.status(400).json({
       error: "VAT number is required for providers and companies."
     });
@@ -109,8 +112,8 @@ export async function register(req, res) {
     email: authUser.email,
     phone: phone || "",
     role: finalRole,
-    vat_number: finalRole !== "customer" ? vat_number : null,
-    is_vat_valid: finalRole !== "customer" ? false : null,
+    vat_number: (finalRole !== "customer" && finalRole !== "provider_passionate") ? vat_number : null,
+    is_vat_valid: (finalRole !== "customer" && finalRole !== "provider_passionate") ? false : null,
     welcoming_offer_used: false, // ✅ Explicitement FALSE pour tous les nouveaux comptes
     dismissed_first_booking_offer: false, // ✅ Explicitement FALSE pour tous les nouveaux comptes
   });
@@ -180,6 +183,37 @@ export async function register(req, res) {
         years_of_experience: 0,
         logo_url: null,
         banner_url: null,
+      });
+
+    if (provProfileErr) {
+      return res.status(500).json({ error: provProfileErr.message });
+    }
+  }
+
+  // PROVIDER_PASSIONATE (profile)
+  if (finalRole === "provider_passionate") {
+    const { error: provProfileErr } = await supabaseAdmin
+      .from("provider_profiles")
+      .insert({
+        user_id: authUser.id,
+        display_name: authUser.email.split("@")[0],
+        bio: "",
+        base_city: "",
+        postal_code: "",
+        lat: 0,
+        lng: 0,
+        has_mobile_service: false,
+        min_price: 0,
+        rating: 0,
+        review_count: 0,
+        services: [],
+        team_size: 1,
+        years_of_experience: 0,
+        logo_url: null,
+        banner_url: null,
+        annual_revenue_limit: 2000.00, // ✅ Plafond à 2000€
+        annual_revenue_current: 0.00,
+        annual_revenue_year: new Date().getFullYear(),
       });
 
     if (provProfileErr) {

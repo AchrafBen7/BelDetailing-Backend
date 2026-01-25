@@ -12,7 +12,8 @@ import {
  */
 export async function createOrGetAccountController(req, res) {
   try {
-    if (req.user.role !== "provider") {
+    // ✅ PERMETTRE provider ET provider_passionate (compte Individual)
+    if (req.user.role !== "provider" && req.user.role !== "provider_passionate") {
       return res.status(403).json({ error: "Only providers can have Stripe accounts" });
     }
 
@@ -34,7 +35,8 @@ export async function createOrGetAccountController(req, res) {
  */
 export async function createOnboardingLinkController(req, res) {
   try {
-    if (req.user.role !== "provider") {
+    // ✅ PERMETTRE provider ET provider_passionate
+    if (req.user.role !== "provider" && req.user.role !== "provider_passionate") {
       return res.status(403).json({ error: "Only providers can onboard to Stripe" });
     }
 
@@ -54,7 +56,8 @@ export async function createOnboardingLinkController(req, res) {
  */
 export async function getAccountStatusController(req, res) {
   try {
-    if (req.user.role !== "provider") {
+    // ✅ PERMETTRE provider ET provider_passionate
+    if (req.user.role !== "provider" && req.user.role !== "provider_passionate") {
       return res.status(403).json({ error: "Only providers can have Stripe accounts" });
     }
 
@@ -70,7 +73,8 @@ export async function getAccountStatusController(req, res) {
 
 export async function getPayoutSummaryController(req, res) {
   try {
-    if (req.user.role !== "provider") {
+    // ✅ PERMETTRE provider ET provider_passionate
+    if (req.user.role !== "provider" && req.user.role !== "provider_passionate") {
       return res
         .status(403)
         .json({ error: "Only providers can view payouts" });
