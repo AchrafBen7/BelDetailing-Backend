@@ -28,12 +28,17 @@ function mapOfferRowToDto(row) {
     applications: null,
     companyName: row.company_name,
     companyLogoUrl: row.company_logo_url,
+    // 🆕 Nombre de candidatures (depuis offers_with_counts)
+    applicationsCount: row.applications_count ?? 0,
+    // 🆕 Flag pour indiquer si une candidature est acceptée
+    hasAcceptedApplication: row.has_accepted_application ?? false,
   };
 }
 
 // 🟦 LIST – GET /api/v1/offers?status=&type=
 // Par défaut, ne retourne QUE les offres "open" (pour les detailers)
 // Les offres "closed" ne sont pas visibles dans OffersView
+// 🆕 Exclut automatiquement les offres avec candidature acceptée
 export async function getOffers({ status, type }) {
   let query = supabase.from("offers_with_counts").select("*");
 
@@ -49,6 +54,10 @@ export async function getOffers({ status, type }) {
   if (type) {
     query = query.eq("type", type);
   }
+
+  // 🆕 EXCLURE les offres avec candidature acceptée (pour OffersView et dashboard company)
+  // Ces offres ne doivent plus être visibles car elles sont déjà attribuées
+  query = query.eq("has_accepted_application", false);
 
   const { data, error } = await query.order("created_at", { ascending: false });
 
@@ -447,11 +456,14 @@ export async function reopenOffer(id, user) {
 // 🟦 GET MY OFFERS – GET /api/v1/offers/my (ROLE: company)
 // Retourne TOUTES les offres de la company (y compris "closed")
 // Utilisé dans le dashboard company "Mes offres"
+// 🆕 Exclut les offres avec candidature acceptée (ne doivent plus être visibles visuellement)
 export async function getMyOffers(userId) {
   const { data, error } = await supabase
-    .from("offers")
+    .from("offers_with_counts")
     .select("*")
     .eq("created_by", userId)
+    // 🆕 EXCLURE les offres avec candidature acceptée (pour le dashboard company)
+    .eq("has_accepted_application", false)
     .order("created_at", { ascending: false });
 
   if (error) throw error;

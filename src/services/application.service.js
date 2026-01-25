@@ -346,6 +346,7 @@ export async function refuseApplication(id, user) {
 }
 
 // 🟦 GET MY APPLICATIONS – GET /api/v1/applications/me (provider)
+// 🆕 Exclut les candidatures refusées (ne doivent plus apparaître dans "Mes candidatures")
 export async function getMyApplications(userId) {
   const { data, error } = await supabase
     .from("applications")
@@ -361,6 +362,7 @@ export async function getMyApplications(userId) {
         price_max,
         vehicle_count,
         category,
+        categories,
         type,
         status,
         company_name,
@@ -368,6 +370,8 @@ export async function getMyApplications(userId) {
       )
     `)
     .eq("provider_id", userId)
+    // 🆕 EXCLURE les candidatures refusées
+    .neq("status", "refused")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -391,6 +395,7 @@ export async function getMyApplications(userId) {
         priceMax: offerRow.price_max,
         vehicleCount: offerRow.vehicle_count,
         category: offerRow.category,
+        categories: offerRow.categories || (offerRow.category ? [offerRow.category] : []), // 🆕 Support multiple categories
         type: offerRow.type,
         status: offerRow.status,
         companyName: offerRow.company_name,
