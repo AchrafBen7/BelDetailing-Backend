@@ -345,59 +345,14 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
   const contractVersion = existing.contract_version || 1;
   const now = new Date().toISOString();
 
-  // 4) 🆕 CRÉER LE PAYMENT INTENT PRINCIPAL (GARANTIE) AVANT DE CHANGER LE STATUT
-  // Après double acceptation, créer un PaymentIntent principal pour le montant total
-  // Ce PaymentIntent sert de "garantie" et sera utilisé pour les paiements programmés
-  let mainPaymentIntentId = null;
-  
-  try {
-    const { createSepaPaymentIntent } = await import("./sepaDirectDebit.service.js");
-    
-    // Vérifier le SEPA mandate
-    const { getSepaMandate } = await import("./sepaDirectDebit.service.js");
-    const sepaMandate = await getSepaMandate(existing.company_id);
-    
-    if (!sepaMandate || sepaMandate.status !== "active") {
-      console.warn(`⚠️ [MISSION AGREEMENT] SEPA mandate not active for company ${existing.company_id}. Payment Intent will not be created.`);
-    } else {
-      // Créer le PaymentIntent principal pour le montant total (garantie)
-      const mainPaymentIntent = await createSepaPaymentIntent({
-        companyUserId: existing.company_id,
-        amount: existing.final_price, // 3000€
-        currency: "eur",
-        paymentMethodId: null,
-        applicationFeeAmount: null, // Pas de commission sur le PaymentIntent principal
-        captureMethod: "manual", // Pas capturé immédiatement (garantie)
-        metadata: {
-          missionAgreementId: id,
-          type: "mission_main_guarantee",
-          userId: existing.company_id,
-        },
-      });
-
-      mainPaymentIntentId = mainPaymentIntent.id;
-      console.log(`✅ [MISSION AGREEMENT] Main Payment Intent created for agreement ${id}: ${mainPaymentIntent.id} (${existing.final_price}€)`);
-    }
-  } catch (paymentError) {
-    console.error(`❌ [MISSION AGREEMENT] Error creating main payment intent for agreement ${id}:`, paymentError);
-    // ⚠️ IMPORTANT : Ne pas faire échouer l'acceptation si la création du PaymentIntent échoue
-    // La company pourra créer les paiements manuellement plus tard
-    // On continue quand même pour que le contrat soit accepté
-  }
-
-  // 5) 🆕 JOUR 0 — ACTIVATION DU CONTRAT
-  // Mettre à jour le statut à "active" (mission prête à démarrer)
-  // Le statut "active" indique que la mission peut démarrer et que les paiements du jour 1 seront capturés automatiquement
-  // 
-  // 🟢 NOUVEAU FLOW : Jour 0 = Activation du contrat
-  // - SEPA mandate validé
-  // - Carte / compte vérifié
-  // - Prélèvement de l'acompte (600€) + Commission NIOS (210€) programmé pour Jour 1
+  // 4) ✅ NOUVEAU FLOW SEPA ON-SESSION
+  // Le detailer accepte le contrat → statut = "agreement_fully_confirmed"
+  // AUCUN PaymentIntent n'est créé automatiquement
+  // La company devra confirmer le paiement ON-SESSION via un écran dédié
   const { data, error } = await supabase
     .from("mission_agreements")
     .update({
-      status: "active", // Mission active, prête pour les paiements du jour 1
-      stripe_payment_intent_id: mainPaymentIntentId, // PaymentIntent principal (garantie)
+      status: "agreement_fully_confirmed", // ✅ Contrat accepté par les deux parties, en attente de confirmation de paiement ON-SESSION
       detailer_accepted_at: now, // 🆕 Horodatage acceptation detailer
       contract_version_at_acceptance: contractVersion, // 🆕 Version au moment de l'acceptation
       updated_at: now,
@@ -410,8 +365,9 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
 
   const updatedAgreement = mapMissionAgreementRowToDto(data);
   
-  console.log(`✅ [MISSION AGREEMENT] Status updated to "active" for agreement ${id}`);
+  console.log(`✅ [MISSION AGREEMENT] Status updated to "agreement_fully_confirmed" for agreement ${id}`);
   console.log(`ℹ️ [MISSION AGREEMENT] Agreement details: finalPrice=${updatedAgreement.finalPrice}€, depositAmount=${updatedAgreement.depositAmount}€, stripeConnectedAccountId=${updatedAgreement.stripeConnectedAccountId}`);
+  console.log(`ℹ️ [MISSION AGREEMENT] ⚠️ IMPORTANT: No PaymentIntent created automatically. Company must confirm payment ON-SESSION.`);
 
   // 6) 🆕 GÉNÉRER LE PDF DU CONTRAT (si pas déjà généré)
   // Le PDF doit être généré avec les informations finales après acceptation par le detailer
@@ -435,38 +391,13 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     }
   }
 
-  // 7) 🆕 CAPTURE IMMÉDIATE DES PAIEMENTS (T0 - Débit automatique)
-  // Dès que le detailer accepte:
-  // - Commission NIOS (7%) : Capturée immédiatement et envoyée à NIOS
-  // - Acompte detailer (20%) : Capturé immédiatement mais "hold" jusqu'à J+1
-  try {
-    console.log(`🔄 [MISSION AGREEMENT] Starting immediate payment capture for agreement ${id}...`);
-    const { captureImmediatePaymentsOnAcceptance } = await import("./missionPaymentImmediateCapture.service.js");
-    const captureResult = await captureImmediatePaymentsOnAcceptance(id);
-    console.log(`✅ [MISSION AGREEMENT] Immediate payments captured for agreement ${id} (T0): ${captureResult.totalCaptured}€`);
-    console.log(`   - Commission: ${captureResult.commissionCaptured}€ (sent to NIOS immediately)`);
-    console.log(`   - Deposit: ${captureResult.depositCaptured}€ (held until J+1)`);
-    
-    // 7.2) Créer le plan de paiement intelligent (paiements mensuels/finaux)
-    try {
-      const { createIntelligentPaymentSchedule } = await import("./missionPaymentScheduleIntelligent.service.js");
-      // authorizeAll = true : autorise tous les paiements immédiatement
-      await createIntelligentPaymentSchedule(id, true);
-      console.log(`✅ [MISSION AGREEMENT] Payment schedule created for agreement ${id} (remaining payments)`);
-    } catch (scheduleError) {
-      console.error(`❌ [MISSION AGREEMENT] Error creating payment schedule for agreement ${id}:`, scheduleError);
-      // Ne pas faire échouer l'acceptation si la création du plan de paiement échoue
-      // Les paiements pourront être créés manuellement plus tard
-    }
-  } catch (captureError) {
-    console.error(`❌ [MISSION AGREEMENT] CRITICAL ERROR: Failed to capture immediate payments for agreement ${id}:`, captureError);
-    console.error(`❌ [MISSION AGREEMENT] Error details:`, captureError.message);
-    console.error(`❌ [MISSION AGREEMENT] Stack trace:`, captureError.stack);
-    // ⚠️ IMPORTANT : Ne pas faire échouer l'acceptation, mais logger l'erreur de manière visible
-    // Les paiements pourront être créés manuellement plus tard via le dashboard
-  }
+  // 7) ✅ NOUVEAU FLOW SEPA ON-SESSION
+  // AUCUN paiement n'est créé automatiquement
+  // La company devra confirmer le paiement ON-SESSION via l'endpoint /confirm-payment
+  // Cela évite les blocages Stripe Radar (pas d'action humaine = risque élevé)
+  console.log(`ℹ️ [MISSION AGREEMENT] No automatic payment capture. Company must confirm payment ON-SESSION.`);
 
-  // 8) 🆕 ENVOYER DES NOTIFICATIONS DÉTAILLÉES
+  // 8) ✅ ENVOYER DES NOTIFICATIONS
   try {
     const { sendNotificationWithDeepLink } = await import("./onesignal.service.js");
     
@@ -474,31 +405,27 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     const totalAmount = updatedAgreement.finalPrice;
     const commissionAmount = Math.round(totalAmount * 0.07 * 100) / 100; // 7%
     const depositAmount = updatedAgreement.depositAmount || Math.round((totalAmount * 0.20) * 100) / 100; // 20%
-    const totalDebited = commissionAmount + depositAmount;
+    const totalToConfirm = commissionAmount + depositAmount;
     
-    // 8.1) Notification à la COMPANY (détails du débit)
+    // 8.1) Notification à la COMPANY (confirmation de paiement requise)
     if (updatedAgreement.companyId) {
       await sendNotificationWithDeepLink({
         userId: updatedAgreement.companyId,
-        title: "✅ Contrat accepté - Paiements débités",
-        message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}".\n\n💳 Acompte: ${depositAmount}€ débité\n🧾 Commission NIOS: ${commissionAmount}€ débitée\n💰 Total: ${totalDebited}€\n\n🚀 La mission est officiellement lancée.`,
-        type: "mission_agreement_accepted",
+        title: "✅ Contrat accepté - Confirmer le paiement",
+        message: `Le detailer a accepté le contrat "${updatedAgreement.title || 'votre mission'}".\n\n💳 Veuillez confirmer le prélèvement SEPA de ${totalToConfirm}€ (acompte + commission) pour activer la mission.`,
+        type: "mission_agreement_payment_required",
         id: id,
       });
     } else {
       console.warn(`[MISSION AGREEMENT] Cannot send notification to company: companyId is null for agreement ${id}`);
     }
     
-    // 8.2) Notification au DETAILER (détails de réception)
+    // 8.2) Notification au DETAILER (en attente de confirmation de paiement)
     if (updatedAgreement.detailerId) {
-      const startDate = new Date(updatedAgreement.startDate);
-      const jPlusOne = new Date(startDate.getTime() + 24 * 60 * 60 * 1000); // J+1
-      const jPlusOneFormatted = jPlusOne.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
-      
       await sendNotificationWithDeepLink({
         userId: updatedAgreement.detailerId,
-        title: "✅ Contrat validé - Acompte sécurisé",
-        message: `Contrat "${updatedAgreement.title || 'la mission'}" validé.\n\n💰 Acompte de ${depositAmount}€ sécurisé chez NIOS\n📅 Il vous sera versé le ${jPlusOneFormatted} (J+1)\n🧾 Paiements suivants planifiés automatiquement\n\n🚀 Vous pouvez commencer la mission en toute sécurité.`,
+        title: "✅ Contrat accepté - En attente de paiement",
+        message: `Contrat "${updatedAgreement.title || 'la mission'}" accepté.\n\n⏳ En attente de confirmation de paiement par la company pour activer la mission.`,
         type: "mission_agreement_accepted",
         id: id,
       });

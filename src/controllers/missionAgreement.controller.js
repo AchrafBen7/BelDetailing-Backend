@@ -12,6 +12,8 @@ import {
   confirmMissionAgreementByCompany,
   acceptMissionAgreementByDetailer,
 } from "../services/missionAgreementUpdate.service.js";
+import { confirmMissionPaymentOnSession } from "../services/missionPaymentOnSession.service.js";
+import { cancelMissionAgreement } from "../services/missionCancellation.service.js";
 import {
   createIntelligentPaymentSchedule,
   getPaymentScheduleSummary,
@@ -287,6 +289,59 @@ export async function acceptMissionAgreementController(req, res) {
     console.error("[MISSION AGREEMENT] accept error:", err);
     const statusCode = err.statusCode || 500;
     return res.status(statusCode).json({ error: err.message || "Could not accept mission agreement" });
+  }
+}
+
+/**
+ * 🔹 POST /api/v1/mission-agreements/:id/confirm-payment
+ * Confirmer le paiement SEPA ON-SESSION (Company)
+ * ⚠️ CRITICAL: Cette action doit être effectuée ON-SESSION pour éviter les blocages Stripe Radar
+ */
+export async function confirmMissionPaymentController(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (req.user.role !== "company") {
+      return res.status(403).json({ error: "Only companies can confirm mission payments" });
+    }
+
+    const result = await confirmMissionPaymentOnSession(id, req.user.id);
+
+    return res.json({ data: result });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] confirm payment error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not confirm mission payment" });
+  }
+}
+
+/**
+ * 🔹 POST /api/v1/mission-agreements/:id/cancel
+ * Annuler une mission (Company ou Detailer)
+ * ⚠️ CRITICAL: Gère les remboursements selon le timing (avant/après J+1)
+ */
+export async function cancelMissionAgreementController(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || reason.trim() === "") {
+      return res.status(400).json({ error: "Cancellation reason is required" });
+    }
+
+    // Vérifier que l'utilisateur est company ou provider
+    if (req.user.role !== "company" && req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only companies or providers can cancel missions" });
+    }
+
+    const requestedBy = req.user.role === "company" ? "company" : "detailer";
+    const result = await cancelMissionAgreement(id, requestedBy, reason);
+
+    return res.json({ data: result });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] cancel error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not cancel mission agreement" });
   }
 }
 

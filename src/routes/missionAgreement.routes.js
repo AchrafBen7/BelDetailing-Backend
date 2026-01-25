@@ -11,6 +11,8 @@ import {
   updateMissionAgreementController,
   confirmMissionAgreementController,
   acceptMissionAgreementController,
+  confirmMissionPaymentController,
+  cancelMissionAgreementController,
   createMissionPaymentsController,
   getPaymentScheduleController,
 } from "../controllers/missionAgreement.controller.js";
@@ -61,6 +63,12 @@ router.post("/:id/confirm", confirmMissionAgreementController);
 
 // POST /api/v1/mission-agreements/:id/accept (detailer acceptance)
 router.post("/:id/accept", acceptMissionAgreementController);
+
+// POST /api/v1/mission-agreements/:id/confirm-payment (company - confirmer le paiement SEPA ON-SESSION)
+router.post("/:id/confirm-payment", confirmMissionPaymentController);
+
+// POST /api/v1/mission-agreements/:id/cancel (company ou provider - annuler la mission)
+router.post("/:id/cancel", cancelMissionAgreementController);
 
 // POST /api/v1/mission-agreements/:id/create-payments (company - créer le plan de paiement)
 router.post("/:id/create-payments", createMissionPaymentsController);
