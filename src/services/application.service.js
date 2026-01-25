@@ -58,9 +58,10 @@ export async function applyToOffer(offerId, payload, user) {
   // 0.5) ✅ VÉRIFIER QUE LE DETAILER A UN STRIPE CONNECTED ACCOUNT CONFIGURÉ
   // Le detailer doit avoir complété l'onboarding Stripe Connect avec son IBAN
   // AVANT de pouvoir postuler à une offre (pour recevoir les paiements)
+  // On récupère aussi display_name pour éviter une deuxième requête
   const { data: providerProfile, error: providerError } = await supabase
     .from("provider_profiles")
-    .select("stripe_account_id")
+    .select("stripe_account_id, display_name")
     .eq("user_id", user.id)
     .single();
 
@@ -107,17 +108,6 @@ export async function applyToOffer(offerId, payload, user) {
     const err = new Error("Application already exists for this offer");
     err.statusCode = 400;
     throw err;
-  }
-
-  // 2) Aller chercher le display_name du provider
-  const { data: providerProfile, error: providerErr } = await supabase
-    .from("provider_profiles")
-    .select("display_name")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (providerErr) {
-    console.warn("[APPLICATIONS] provider_profiles lookup error:", providerErr);
   }
 
   const nowIso = new Date().toISOString();
