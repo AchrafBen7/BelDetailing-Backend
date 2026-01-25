@@ -395,6 +395,9 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
   if (error) throw error;
 
   const updatedAgreement = mapMissionAgreementRowToDto(data);
+  
+  console.log(`✅ [MISSION AGREEMENT] Status updated to "active" for agreement ${id}`);
+  console.log(`ℹ️ [MISSION AGREEMENT] Agreement details: finalPrice=${updatedAgreement.finalPrice}€, depositAmount=${updatedAgreement.depositAmount}€, stripeConnectedAccountId=${updatedAgreement.stripeConnectedAccountId}`);
 
   // 6) 🆕 GÉNÉRER LE PDF DU CONTRAT (si pas déjà généré)
   // Le PDF doit être généré avec les informations finales après acceptation par le detailer
@@ -423,6 +426,7 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
   // - Commission NIOS (7%) : Capturée immédiatement et envoyée à NIOS
   // - Acompte detailer (20%) : Capturé immédiatement mais "hold" jusqu'à J+1
   try {
+    console.log(`🔄 [MISSION AGREEMENT] Starting immediate payment capture for agreement ${id}...`);
     const { captureImmediatePaymentsOnAcceptance } = await import("./missionPaymentImmediateCapture.service.js");
     const captureResult = await captureImmediatePaymentsOnAcceptance(id);
     console.log(`✅ [MISSION AGREEMENT] Immediate payments captured for agreement ${id} (T0): ${captureResult.totalCaptured}€`);
@@ -430,15 +434,22 @@ export async function acceptMissionAgreementByDetailer(id, userId) {
     console.log(`   - Deposit: ${captureResult.depositCaptured}€ (held until J+1)`);
     
     // 7.2) Créer le plan de paiement intelligent (paiements mensuels/finaux)
-    const { createIntelligentPaymentSchedule } = await import("./missionPaymentScheduleIntelligent.service.js");
-    // authorizeAll = true : autorise tous les paiements immédiatement
-    await createIntelligentPaymentSchedule(id, true);
-    
-    console.log(`✅ [MISSION AGREEMENT] Payment schedule created for agreement ${id} (remaining payments)`);
-  } catch (scheduleError) {
-    console.error(`❌ [MISSION AGREEMENT] Error creating payment schedule for agreement ${id}:`, scheduleError);
-    // Ne pas faire échouer l'acceptation si la création du plan de paiement échoue
-    // Les paiements pourront être créés manuellement plus tard
+    try {
+      const { createIntelligentPaymentSchedule } = await import("./missionPaymentScheduleIntelligent.service.js");
+      // authorizeAll = true : autorise tous les paiements immédiatement
+      await createIntelligentPaymentSchedule(id, true);
+      console.log(`✅ [MISSION AGREEMENT] Payment schedule created for agreement ${id} (remaining payments)`);
+    } catch (scheduleError) {
+      console.error(`❌ [MISSION AGREEMENT] Error creating payment schedule for agreement ${id}:`, scheduleError);
+      // Ne pas faire échouer l'acceptation si la création du plan de paiement échoue
+      // Les paiements pourront être créés manuellement plus tard
+    }
+  } catch (captureError) {
+    console.error(`❌ [MISSION AGREEMENT] CRITICAL ERROR: Failed to capture immediate payments for agreement ${id}:`, captureError);
+    console.error(`❌ [MISSION AGREEMENT] Error details:`, captureError.message);
+    console.error(`❌ [MISSION AGREEMENT] Stack trace:`, captureError.stack);
+    // ⚠️ IMPORTANT : Ne pas faire échouer l'acceptation, mais logger l'erreur de manière visible
+    // Les paiements pourront être créés manuellement plus tard via le dashboard
   }
 
   // 8) 🆕 ENVOYER DES NOTIFICATIONS DÉTAILLÉES

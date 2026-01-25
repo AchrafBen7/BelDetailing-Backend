@@ -27,10 +27,14 @@ export async function captureImmediatePaymentsOnAcceptance(missionAgreementId) {
   const agreement = await getMissionAgreementById(missionAgreementId);
   
   if (!agreement) {
+    console.error(`❌ [IMMEDIATE CAPTURE] Mission Agreement not found: ${missionAgreementId}`);
     throw new Error("Mission Agreement not found");
   }
 
+  console.log(`ℹ️ [IMMEDIATE CAPTURE] Agreement status: ${agreement.status}, finalPrice: ${agreement.finalPrice}€, stripeConnectedAccountId: ${agreement.stripeConnectedAccountId}`);
+
   if (agreement.status !== "active") {
+    console.error(`❌ [IMMEDIATE CAPTURE] Mission Agreement is not active. Current status: ${agreement.status}`);
     throw new Error(`Mission Agreement is not active. Current status: ${agreement.status}`);
   }
 
