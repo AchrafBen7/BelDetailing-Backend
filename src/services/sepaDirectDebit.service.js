@@ -493,36 +493,30 @@ export async function createSepaPaymentIntent({
   // (même si Stripe pourrait l'ajouter automatiquement dans certains cas)
   // On ne le définit pas du tout pour éviter tout conflit
   
-  // 6) Si un Connected Account est dans les metadata → Utiliser Stripe Connect
+  // 6) ✅ FIX SEPA : Ne PAS utiliser transfer_data + application_fee_amount avec SEPA Direct Debit
+  // ⚠️ IMPORTANT : Avec SEPA Direct Debit, l'utilisation de transfer_data + application_fee_amount
+  // cause une erreur Stripe "unexpected error" car SEPA est asynchrone et Stripe est très sensible
+  // aux flows Connect avec destination charges.
+  // 
+  // Solution : Séparer la charge et le transfert
+  // - Créer le PaymentIntent sur la plateforme (sans transfer_data, sans application_fee_amount)
+  // - Créer un Transfer séparé vers le Connected Account après que le paiement soit succeeded
+  // 
+  // Si un Connected Account est dans les metadata, on le stocke pour référence mais on ne l'utilise pas
+  // dans le PaymentIntent (le Transfer sera créé séparément)
   if (metadata.stripeConnectedAccountId) {
-    // ✅ Utiliser Stripe Connect : application_fee_amount + transfer_data
-    // ⚠️ IMPORTANT : Ne PAS utiliser on_behalf_of avec off_session + confirm
-    // Cela peut causer Stripe à ajouter automatiquement setup_future_usage
-    // On utilise uniquement application_fee_amount + transfer_data
-    
-    if (applicationFeeAmount && applicationFeeAmount > 0) {
-      // Si applicationFeeAmount > 0 : prélever la commission NIOS directement
-      paymentIntentPayload.application_fee_amount = applicationFeeAmount;
-      paymentIntentPayload.transfer_data = {
-        destination: metadata.stripeConnectedAccountId,
-      };
-      console.log(`✅ [SEPA] Using Stripe Connect with commission: Connected Account ${metadata.stripeConnectedAccountId}, Application Fee: ${applicationFeeAmount} cents`);
-      console.log(`⚠️ [SEPA] NOT using on_behalf_of to avoid setup_future_usage conflict with off_session`);
-    } else {
-      // Si applicationFeeAmount = 0 ou null : transférer tout le montant au Connected Account (sans commission)
-      paymentIntentPayload.transfer_data = {
-        destination: metadata.stripeConnectedAccountId,
-      };
-      console.log(`✅ [SEPA] Using Stripe Connect without commission: Connected Account ${metadata.stripeConnectedAccountId}, Full amount transferred`);
-      console.log(`⚠️ [SEPA] NOT using on_behalf_of to avoid setup_future_usage conflict with off_session`);
-    }
-  } else if (applicationFeeAmount && applicationFeeAmount > 0) {
-    // ⚠️ Si applicationFeeAmount est fourni mais pas de Connected Account
-    // → La commission sera gérée via un Transfer après capture (fallback)
-    console.warn(`⚠️ [SEPA] applicationFeeAmount provided (${applicationFeeAmount} cents) but no Connected Account. Commission will be handled via Transfer after capture.`);
+    console.log(`ℹ️ [SEPA] Connected Account found in metadata: ${metadata.stripeConnectedAccountId}`);
+    console.log(`ℹ️ [SEPA] Transfer will be created separately after payment succeeded (SEPA fix)`);
+    // Stocker le Connected Account ID dans les metadata pour référence ultérieure
+    paymentIntentPayload.metadata.stripeConnectedAccountId = metadata.stripeConnectedAccountId;
+  }
+  
+  if (applicationFeeAmount && applicationFeeAmount > 0) {
+    console.warn(`⚠️ [SEPA] applicationFeeAmount provided (${applicationFeeAmount} cents) but not used with SEPA Direct Debit`);
+    console.warn(`⚠️ [SEPA] Commission will be handled separately (stays on platform or via Transfer)`);
     // Stocker le montant de la commission dans les metadata pour référence
     paymentIntentPayload.metadata.commissionAmount = applicationFeeAmount.toString();
-    paymentIntentPayload.metadata.commissionHandling = "transfer_after_capture";
+    paymentIntentPayload.metadata.commissionHandling = "platform_or_separate_transfer";
   }
   
   // ✅ CRUCIAL : S'assurer qu'aucun setup_future_usage n'est défini (même implicitement)
