@@ -432,15 +432,32 @@ export async function createSepaPaymentIntent({
   try {
     const finalPaymentMethod = await stripe.paymentMethods.retrieve(finalPaymentMethodId);
     console.log(`✅ [SEPA] Payment method ${finalPaymentMethodId} retrieved successfully`);
+    console.log(`🔍 [SEPA] Payment method details:`, {
+      id: finalPaymentMethod.id,
+      type: finalPaymentMethod.type,
+      customer: finalPaymentMethod.customer,
+      sepaDebit: finalPaymentMethod.sepa_debit ? {
+        last4: finalPaymentMethod.sepa_debit.last4,
+        mandate: finalPaymentMethod.sepa_debit.mandate,
+      } : null,
+    });
     
     // ✅ CRUCIAL : Vérifier que le payment method est attaché au customer
     // Pour SEPA avec off_session, le payment method DOIT être attaché au customer
+    // ⚠️ Si le payment method n'est pas attaché, Stripe retournera payment_method: null dans le PaymentIntent
     if (!finalPaymentMethod.customer) {
       console.log(`⚠️ [SEPA] Payment method not attached to customer. Attaching now...`);
       await stripe.paymentMethods.attach(finalPaymentMethodId, {
         customer: customerId,
       });
       console.log(`✅ [SEPA] Payment method attached to customer ${customerId}`);
+      
+      // ✅ Vérifier après attachement que le payment method est bien attaché
+      const recheckPaymentMethod = await stripe.paymentMethods.retrieve(finalPaymentMethodId);
+      if (!recheckPaymentMethod.customer || recheckPaymentMethod.customer !== customerId) {
+        throw new Error(`Failed to attach payment method ${finalPaymentMethodId} to customer ${customerId}`);
+      }
+      console.log(`✅ [SEPA] Payment method attachment verified: customer = ${recheckPaymentMethod.customer}`);
     } else if (finalPaymentMethod.customer !== customerId) {
       console.warn(`⚠️ [SEPA] Payment method attached to different customer (${finalPaymentMethod.customer}). Re-attaching to ${customerId}...`);
       // Détacher puis réattacher au bon customer
@@ -449,32 +466,59 @@ export async function createSepaPaymentIntent({
         customer: customerId,
       });
       console.log(`✅ [SEPA] Payment method re-attached to customer ${customerId}`);
+      
+      // ✅ Vérifier après réattachement
+      const recheckPaymentMethod = await stripe.paymentMethods.retrieve(finalPaymentMethodId);
+      if (!recheckPaymentMethod.customer || recheckPaymentMethod.customer !== customerId) {
+        throw new Error(`Failed to re-attach payment method ${finalPaymentMethodId} to customer ${customerId}`);
+      }
+      console.log(`✅ [SEPA] Payment method re-attachment verified: customer = ${recheckPaymentMethod.customer}`);
     } else {
       console.log(`✅ [SEPA] Payment method already attached to customer ${customerId}`);
     }
     
-    // Vérifier que le mandate est toujours actif (double vérification)
+    // ✅ Vérifier que le mandate est toujours actif (double vérification)
     const mandateCheck = await stripe.mandates.retrieve(finalMandateId);
     if (mandateCheck.status !== "active") {
       throw new Error(`SEPA mandate is not active. Current status: ${mandateCheck.status}. Please set up a new SEPA Direct Debit.`);
     }
     console.log(`✅ [SEPA] Mandate ${finalMandateId} is active`);
+    
+    // ✅ Vérifier que le payment method a bien le mandate associé
+    if (finalPaymentMethod.sepa_debit?.mandate !== finalMandateId) {
+      console.warn(`⚠️ [SEPA] Payment method mandate (${finalPaymentMethod.sepa_debit?.mandate}) differs from expected mandate (${finalMandateId})`);
+      // Ce n'est pas forcément une erreur fatale, mais on log pour debug
+    }
+    
   } catch (err) {
     console.error(`[SEPA] Error verifying payment method or mandate:`, err.message);
+    console.error(`[SEPA] Error details:`, {
+      message: err.message,
+      type: err.type,
+      code: err.code,
+      statusCode: err.statusCode,
+    });
     throw new Error(`Invalid SEPA payment method or mandate: ${err.message}`);
   }
 
   console.log(`✅ [SEPA] Using payment method ${finalPaymentMethodId} with active mandate ${finalMandateId}`);
+  console.log(`🔍 [SEPA] Final verification: payment_method=${finalPaymentMethodId}, customer=${customerId}, mandate=${finalMandateId}`);
 
-  // 5) Créer le Payment Intent avec capture_method configurable
+  // 5) ✅ SEPA ASYNCHRONE : Créer le Payment Intent SANS capture_method
+  // ⚠️ IMPORTANT : SEPA n'a PAS besoin de capture_method (c'est automatique et asynchrone)
+  // Le PaymentIntent sera en "processing" initialement (NORMAL pour SEPA)
+  // Le statut sera mis à jour via webhooks : processing → succeeded (2-5 jours)
+  // 
+  // ✅ CRUCIAL : Le payment_method DOIT être attaché au customer AVANT de créer le PaymentIntent
+  // Sinon Stripe retournera payment_method: null et le PaymentIntent sera en requires_payment_method
   const paymentIntentPayload = {
     amount: Math.round(amount * 100), // Convertir en centimes
     currency,
     customer: customerId,
-    payment_method: finalPaymentMethodId,
+    payment_method: finalPaymentMethodId, // ✅ CRUCIAL : Payment method DOIT être fourni ET attaché au customer
     payment_method_types: ["sepa_debit"],
     mandate: finalMandateId, // ✅ CRUCIAL : Spécifier le mandate ID pour SEPA Direct Debit
-    capture_method: captureMethod, // "manual" (par défaut) ou "automatic" (capture immédiate)
+    // ❌ PAS de capture_method pour SEPA - c'est automatique et asynchrone
     off_session: true, // Prélèvement automatique (off-session)
     confirm: true, // Confirmer automatiquement (pour SEPA off-session)
     // ❌ CRUCIAL : Ne PAS définir setup_future_usage avec off_session=true
@@ -530,18 +574,39 @@ export async function createSepaPaymentIntent({
   console.log(`🔍 [SEPA] PaymentIntent payload:`, {
     amount: paymentIntentPayload.amount,
     currency: paymentIntentPayload.currency,
+    customer: paymentIntentPayload.customer,
     payment_method: paymentIntentPayload.payment_method,
     mandate: paymentIntentPayload.mandate,
     off_session: paymentIntentPayload.off_session,
     confirm: paymentIntentPayload.confirm,
-    capture_method: paymentIntentPayload.capture_method,
+    capture_method: paymentIntentPayload.capture_method, // Devrait être undefined pour SEPA
     setup_future_usage: paymentIntentPayload.setup_future_usage, // Devrait être undefined
     on_behalf_of: paymentIntentPayload.on_behalf_of,
     application_fee_amount: paymentIntentPayload.application_fee_amount,
     has_transfer_data: !!paymentIntentPayload.transfer_data,
   });
   
+  // ✅ CRUCIAL : Vérifier une dernière fois que le payment_method est bien attaché
+  try {
+    const finalCheck = await stripe.paymentMethods.retrieve(finalPaymentMethodId);
+    if (!finalCheck.customer || finalCheck.customer !== customerId) {
+      throw new Error(`Payment method ${finalPaymentMethodId} is not attached to customer ${customerId}. Cannot create PaymentIntent.`);
+    }
+    console.log(`✅ [SEPA] Final check passed: payment_method ${finalPaymentMethodId} is attached to customer ${customerId}`);
+  } catch (checkError) {
+    console.error(`❌ [SEPA] Final check failed:`, checkError.message);
+    throw new Error(`Payment method verification failed: ${checkError.message}`);
+  }
+  
   const paymentIntent = await stripe.paymentIntents.create(paymentIntentPayload);
+  
+  // ✅ Vérifier que le PaymentIntent a bien un payment_method (pas null)
+  if (!paymentIntent.payment_method) {
+    console.error(`❌ [SEPA] PaymentIntent created but payment_method is null! PaymentIntent:`, paymentIntent.id);
+    throw new Error(`PaymentIntent created but payment_method is null. This should not happen.`);
+  }
+  
+  console.log(`✅ [SEPA] PaymentIntent created successfully: ${paymentIntent.id}, payment_method: ${paymentIntent.payment_method}, status: ${paymentIntent.status}`);
 
   return {
     id: paymentIntent.id,

@@ -136,7 +136,8 @@ export async function getMissionPaymentsForAgreement(missionAgreementId) {
  * 🟦 UPDATE STATUS – Mettre à jour le statut d'un paiement
  */
 export async function updateMissionPaymentStatus(id, newStatus, additionalData = {}) {
-  const validStatuses = ["pending", "authorized", "captured", "captured_held", "transferred", "failed", "refunded", "cancelled"];
+  // ✅ SEPA ASYNCHRONE : Ajouter "processing" et "succeeded" pour SEPA Direct Debit
+  const validStatuses = ["pending", "authorized", "processing", "succeeded", "captured", "captured_held", "transferred", "failed", "refunded", "cancelled"];
   if (!validStatuses.includes(newStatus)) {
     throw new Error(`Invalid status. Must be one of: ${validStatuses.join(", ")}`);
   }
@@ -153,7 +154,8 @@ export async function updateMissionPaymentStatus(id, newStatus, additionalData =
     updatePayload.authorized_at = additionalData.authorizedAt;
   }
 
-  if (newStatus === "captured" && !additionalData.capturedAt) {
+  // ✅ SEPA : "succeeded" est équivalent à "captured" pour SEPA (argent reçu)
+  if ((newStatus === "captured" || newStatus === "succeeded") && !additionalData.capturedAt) {
     updatePayload.captured_at = new Date().toISOString();
   } else if (additionalData.capturedAt) {
     updatePayload.captured_at = additionalData.capturedAt;
