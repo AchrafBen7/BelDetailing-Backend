@@ -63,20 +63,9 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
     });
     payments.push(finalPayment);
 
-    // Autoriser le paiement final si demandé
-    if (authorizeAll) {
-      try {
-        await createPaymentIntentForMission({
-          missionAgreementId,
-          paymentId: finalPayment.id,
-          amount: agreement.remainingAmount,
-          type: "final",
-        });
-        console.log(`✅ [PAYMENT SCHEDULE] Final payment authorized: ${finalPayment.id}`);
-      } catch (err) {
-        console.error(`❌ [PAYMENT SCHEDULE] Failed to authorize final payment:`, err);
-      }
-    }
+    // ⚠️ CRITICAL: Ne PAS autoriser automatiquement le paiement final
+    // Il sera autorisé après le premier paiement on-session réussi (via webhook)
+    console.log(`⚠️ [PAYMENT SCHEDULE] Final payment will be authorized after first on-session payment succeeds`);
 
     return {
       scheduleType: "short_mission",
@@ -134,19 +123,15 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
     payments.push(monthlyPayment);
   }
 
-    // Autoriser tous les paiements mensuels si demandé
+    // ⚠️ CRITICAL: Ne PAS autoriser automatiquement les paiements programmés (monthly/final)
+    // Stripe bloque les paiements SEPA off_session si le mandate n'a pas été utilisé en on-session avant
+    // Les paiements programmés seront autorisés automatiquement après le premier paiement on-session réussi
+    // via le webhook payment_intent.succeeded
     if (authorizeAll) {
-      for (const payment of payments) {
-        try {
-          await createPaymentIntentForMission({
-            missionAgreementId,
-            paymentId: payment.id,
-            amount: payment.amount,
-            type: payment.type,
-          });
-          console.log(`✅ [PAYMENT SCHEDULE] Payment authorized: ${payment.id} (${payment.type})`);
-        } catch (err) {
-          console.error(`❌ [PAYMENT SCHEDULE] Failed to authorize payment ${payment.id}:`, err);
+      console.log(`⚠️ [PAYMENT SCHEDULE] Skipping automatic authorization for scheduled payments (monthly/final)`);
+      console.log(`⚠️ [PAYMENT SCHEDULE] These will be authorized after first on-session payment succeeds`);
+      // Ne pas créer les PaymentIntents maintenant - ils seront créés automatiquement
+      // après que le premier paiement (deposit + commission) soit confirmé on-session
         }
       }
     }
