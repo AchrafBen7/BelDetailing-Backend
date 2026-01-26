@@ -1,17 +1,27 @@
 // src/app.js
+console.log("🔄 [APP] Loading express and middleware...");
 import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cron from "node-cron";
+console.log("✅ [APP] Express and middleware loaded");
+
+console.log("🔄 [APP] Loading cron jobs...");
 import { autoCaptureBookings } from "./cron/autoCapture.js";
 import { captureScheduledPayments } from "./cron/captureScheduledPayments.js";
 import { retryFailedTransfers } from "./cron/retryFailedTransfers.js";
 import { captureDayOnePaymentsCron } from "./cron/captureDayOnePayments.js";
+console.log("✅ [APP] Cron jobs loaded");
+
+console.log("🔄 [APP] Loading config and observability...");
 import { supabaseAdmin as supabase } from "./config/supabase.js";
 import { httpLogger } from "./observability/logger.js";
 import { metricsEndpoint, metricsMiddleware } from "./observability/metrics.js";
+console.log("✅ [APP] Config and observability loaded");
 // Redis sera initialisé après le démarrage du serveur (dans server.js)
 
+console.log("🔄 [APP] Loading routes (this may take a moment)...");
+const startRoutesImport = Date.now();
 import authRoutes from "./routes/auth.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
 import providerRoutes from "./routes/provider.route.js";
@@ -39,8 +49,12 @@ import googleReviewRoutes from "./routes/googleReview.routes.js";
 import portfolioRoutes from "./routes/portfolio.routes.js";
 import servicePhotosRoutes from "./routes/servicePhotos.routes.js";
 import noShowRoutes from "./routes/noShow.routes.js";
-console.log("✅ [APP] All routes loaded");
+const routesImportTime = Date.now() - startRoutesImport;
+console.log(`✅ [APP] All routes loaded in ${routesImportTime}ms`);
+
+console.log("🔄 [APP] Creating Express app...");
 const app = express();
+console.log("✅ [APP] Express app created");
 
 app.use(helmet());
 

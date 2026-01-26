@@ -26,8 +26,17 @@ if (result.error) {
 // Maintenant on peut importer le reste
 // Note: Les logs après les imports peuvent ne pas s'afficher immédiatement
 // car les imports ES modules sont évalués avant l'exécution du code
+console.log("🔄 [SERVER] Starting imports...");
+
+console.log("🔄 [SERVER] Loading tracing...");
 import { shutdownTracing } from "./observability/tracing.js";
+console.log("✅ [SERVER] Tracing loaded");
+
+console.log("🔄 [SERVER] Loading app (this may take a moment)...");
+const startAppImport = Date.now();
 import app from "./app.js";
+const appImportTime = Date.now() - startAppImport;
+console.log(`✅ [SERVER] App loaded in ${appImportTime}ms`);
 
 console.log("✅ [SERVER] All dependencies loaded");
 

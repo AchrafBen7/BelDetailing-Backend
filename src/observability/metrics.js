@@ -1,7 +1,17 @@
 import client from "prom-client";
 
 const register = new client.Registry();
-client.collectDefaultMetrics({ register });
+
+// ⚡ Collecter les métriques de manière non-bloquante
+// Cela évite de bloquer le démarrage du serveur
+setImmediate(() => {
+  try {
+    client.collectDefaultMetrics({ register });
+    console.log("✅ [METRICS] Default metrics collection started");
+  } catch (err) {
+    console.warn("⚠️ [METRICS] Failed to start default metrics collection:", err.message);
+  }
+});
 
 const httpRequestDuration = new client.Histogram({
   name: "http_request_duration_ms",
