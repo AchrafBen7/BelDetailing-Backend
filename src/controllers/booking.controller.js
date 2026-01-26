@@ -14,8 +14,9 @@ import {
 import { sendNotificationToUser, sendNotificationWithDeepLink } from "../services/onesignal.service.js";
 import { sendPeppolInvoice } from "../services/peppol.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { BOOKING_COMMISSION_RATE } from "../config/commission.js";
 
-const COMMISSION_RATE = 0.10;
+const COMMISSION_RATE = BOOKING_COMMISSION_RATE; // 10% pour les bookings
 const NIOS_MANAGEMENT_FEE_RATE = 0.05; // 5% frais de gestion NIOS
 const NIOS_MANAGEMENT_FEE_MIN = 10.0; // Minimum 10€ de frais de gestion
 let providerProfilesSupportsIdColumn;
@@ -324,6 +325,54 @@ export async function createBooking(req, res) {
       return res.status(404).json({ error: "Provider not found" });
     }
 
+    // ✅ Vérifier le plafond annuel pour les provider_passionate
+    const { data: providerUser, error: providerUserError } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", provider_id)
+      .single();
+    
+    if (!providerUserError && providerUser?.role === "provider_passionate") {
+      const { data: providerProfile, error: profileError } = await supabase
+        .from("provider_profiles")
+        .select("annual_revenue_limit, annual_revenue_current, annual_revenue_year")
+        .eq("user_id", provider_id)
+        .single();
+      
+      if (!profileError && providerProfile) {
+        const currentYear = new Date().getFullYear();
+        const isNewYear = providerProfile.annual_revenue_year !== currentYear;
+        
+        // Réinitialiser si nouvelle année
+        if (isNewYear) {
+          await supabase
+            .from("provider_profiles")
+            .update({
+              annual_revenue_current: 0,
+              annual_revenue_year: currentYear,
+            })
+            .eq("user_id", provider_id);
+          
+          providerProfile.annual_revenue_current = 0;
+          providerProfile.annual_revenue_year = currentYear;
+        }
+        
+        // Calculer le nouveau revenu avec ce booking
+        const servicesTotalPrice = services.reduce(
+          (sum, service) => sum + Number(service.price || 0),
+          0
+        );
+        const newRevenue = (providerProfile.annual_revenue_current || 0) + servicesTotalPrice;
+        const limit = providerProfile.annual_revenue_limit || 2000; // ✅ Plafond à 2000€
+        
+        if (newRevenue > limit) {
+          return res.status(403).json({
+            error: `Annual revenue limit reached (${limit}€). Please upgrade to Pro account (VAT required) to continue.`
+          });
+        }
+      }
+    }
+
     const servicesTotalPrice = services.reduce(
       (sum, service) => sum + Number(service.price || 0),
       0
@@ -552,9 +601,30 @@ export async function createBooking(req, res) {
 
     console.log("✅ [BOOKINGS] createBooking - Customer fetched:", customer.email);
 
+    // ✅ Récupérer le Stripe Connect account du provider (si disponible)
+    const { data: providerProfile, error: providerProfileError } = await supabase
+      .from("provider_profiles")
+      .select("stripe_account_id")
+      .eq("user_id", provider_id)
+      .maybeSingle();
+    
+    const providerStripeAccountId = providerProfile?.stripe_account_id || null;
+    
+    // ✅ Vérifier le rôle du provider pour déterminer le taux de commission
+    const { data: providerUser, error: providerUserError } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", provider_id)
+      .maybeSingle();
+    
+    // Commission NIOS : 10% pour tous (passionnés et pros)
+    const commissionRate = COMMISSION_RATE; // 0.10 (10%)
+
     console.log("🔵 [BOOKINGS] createBooking - Creating payment intent...");
     console.log("🔵 [BOOKINGS] createBooking - Payment method:", paymentMethod);
     console.log("🔵 [BOOKINGS] createBooking - Total price:", totalPrice);
+    console.log("🔵 [BOOKINGS] createBooking - Provider Stripe Account:", providerStripeAccountId || "none");
+    console.log("🔵 [BOOKINGS] createBooking - Provider role:", providerUser?.role || "unknown");
     
     let intent = null;
     if (paymentMethod === "cash") {
@@ -564,6 +634,8 @@ export async function createBooking(req, res) {
         amount: depositAmount,
         currency,
         user: customer,
+        providerStripeAccountId, // ✅ Passer le Stripe Connect account si disponible
+        commissionRate, // ✅ Commission NIOS
       });
     } else {
       console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent:", totalPrice);
@@ -571,6 +643,8 @@ export async function createBooking(req, res) {
         amount: totalPrice,
         currency,
         user: customer,
+        providerStripeAccountId, // ✅ Passer le Stripe Connect account si disponible
+        commissionRate, // ✅ Commission NIOS
       });
     }
 

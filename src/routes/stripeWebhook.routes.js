@@ -76,6 +76,63 @@ router.post(
           break;
         }
 
+        case "payment_intent.processing": {
+          // ✅ SEPA ASYNCHRONE : Le prélèvement est envoyé à la banque
+          const intent = event.data.object;
+          const missionAgreementId = intent.metadata?.missionAgreementId;
+          const paymentId = intent.metadata?.paymentId;
+          const paymentType = intent.metadata?.paymentType;
+          const type = intent.metadata?.type;
+
+          // ✅ Gérer les MISSION PAYMENTS SEPA
+          if (missionAgreementId && paymentId && type === "mission_immediate_capture") {
+            console.log(`⏳ [WEBHOOK] PaymentIntent processing for mission payment ${paymentId} (agreement: ${missionAgreementId})`);
+            console.log(`ℹ️ [WEBHOOK] SEPA payment order sent to bank, waiting for confirmation (2-5 days)`);
+
+            // Mettre à jour le statut du paiement de mission à "processing"
+            const { error: updateError } = await supabase
+              .from("mission_payments")
+              .update({
+                status: "processing", // ✅ Statut SEPA : prélèvement envoyé à la banque
+                stripe_charge_id: intent.latest_charge || null,
+              })
+              .eq("id", paymentId);
+
+            if (updateError) {
+              console.error("[WEBHOOK] Error updating mission payment to processing:", updateError);
+            } else {
+              console.log(`✅ [WEBHOOK] Mission payment ${paymentId} updated to "processing" status`);
+            }
+
+            // ✅ ENVOYER NOTIFICATION À LA COMPANY (prélèvement envoyé)
+            try {
+              const { data: agreement } = await supabase
+                .from("mission_agreements")
+                .select("company_id, title")
+                .eq("id", missionAgreementId)
+                .single();
+
+              if (agreement?.company_id) {
+                await sendNotificationToUser({
+                  userId: agreement.company_id,
+                  title: "Prélèvement SEPA envoyé",
+                  message: `Le prélèvement de ${(intent.amount / 100).toFixed(2)}€ pour "${agreement.title}" a été envoyé à votre banque. Confirmation sous 2-5 jours.`,
+                  data: {
+                    type: "mission_payment_processing",
+                    mission_agreement_id: missionAgreementId,
+                    payment_id: paymentId,
+                    amount: intent.amount / 100,
+                  },
+                });
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
+            }
+          }
+
+          break;
+        }
+
         case "payment_intent.succeeded": {
           const intent = event.data.object;
           const bookingId = intent.metadata?.bookingId;
@@ -99,20 +156,153 @@ router.post(
 
           // ✅ Gérer les MISSION PAYMENTS
           if (missionAgreementId && paymentId) {
-            console.log(`✅ PI succeeded for mission payment ${paymentId} (agreement: ${missionAgreementId})`);
+            console.log(`✅ [WEBHOOK] PI succeeded for mission payment ${paymentId} (agreement: ${missionAgreementId})`);
+            console.log(`✅ [WEBHOOK] SEPA payment confirmed - money received (2-5 days after processing)`);
 
-            // Mettre à jour le statut du paiement de mission
-            const { error: updateError } = await supabase
-              .from("mission_payments")
-              .update({
-                status: "captured",
-                stripe_charge_id: intent.latest_charge || null,
-                captured_at: new Date().toISOString(),
-              })
-              .eq("id", paymentId);
+            // ✅ Gérer les paiements combinés (acompte + commission)
+            if (paymentType === "combined") {
+              const commissionPaymentId = intent.metadata?.commissionPaymentId;
+              const depositPaymentId = intent.metadata?.depositPaymentId;
+              const depositAmount = parseFloat(intent.metadata?.depositAmount || "0");
+              
+              // Mettre à jour les deux paiements
+              if (commissionPaymentId) {
+                await supabase
+                  .from("mission_payments")
+                  .update({
+                    status: "succeeded",
+                    stripe_charge_id: intent.latest_charge || null,
+                    captured_at: new Date().toISOString(),
+                  })
+                  .eq("id", commissionPaymentId);
+              }
+              
+              if (depositPaymentId) {
+                await supabase
+                  .from("mission_payments")
+                  .update({
+                    status: "succeeded",
+                    stripe_charge_id: intent.latest_charge || null,
+                    captured_at: new Date().toISOString(),
+                  })
+                  .eq("id", depositPaymentId);
+              }
 
-            if (updateError) {
-              console.error("[WEBHOOK] Error updating mission payment:", updateError);
+              // ✅ CRITICAL: Mettre à jour le payment_status de la mission
+              await supabase
+                .from("mission_agreements")
+                .update({
+                  payment_status: "succeeded", // ✅ Paiement réussi
+                  status: "active", // ✅ Mission active
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", missionAgreementId);
+              
+              // ✅ NOUVEAU : Créer automatiquement les PaymentIntents pour les paiements programmés
+              // Maintenant que le mandate a été utilisé en on-session, les paiements off_session sont autorisés
+              console.log(`🔄 [WEBHOOK] First on-session payment succeeded - creating PaymentIntents for scheduled payments`);
+              
+              const { data: scheduledPayments, error: scheduledError } = await supabase
+                .from("mission_payments")
+                .select("*")
+                .eq("mission_agreement_id", missionAgreementId)
+                .eq("status", "pending")
+                .not("type", "in", '("commission","deposit")');
+              
+              if (scheduledError) {
+                console.error(`❌ [WEBHOOK] Failed to fetch scheduled payments:`, scheduledError);
+              } else if (scheduledPayments && scheduledPayments.length > 0) {
+                console.log(`🔄 [WEBHOOK] Found ${scheduledPayments.length} scheduled payments to authorize`);
+                
+                const { createPaymentIntentForMission } = await import("../services/missionPaymentStripe.service.js");
+                
+                for (const payment of scheduledPayments) {
+                  try {
+                    await createPaymentIntentForMission({
+                      missionAgreementId,
+                      paymentId: payment.id,
+                      amount: payment.amount,
+                      type: payment.type,
+                    });
+                    console.log(`✅ [WEBHOOK] PaymentIntent created for ${payment.type} payment ${payment.id}`);
+                  } catch (err) {
+                    console.error(`❌ [WEBHOOK] Failed to create PaymentIntent for ${payment.id}:`, err.message);
+                    // Ne pas bloquer si un paiement échoue - le cron job réessaiera
+                  }
+                }
+              } else {
+                console.log(`ℹ️ [WEBHOOK] No scheduled payments to authorize`);
+              }
+              
+              // ✅ Vérifier si on est à J+1 pour créer le transfer de l'acompte
+              const { data: agreement } = await supabase
+                .from("mission_agreements")
+                .select("start_date, stripe_connected_account_id")
+                .eq("id", missionAgreementId)
+                .single();
+              
+              if (agreement?.start_date) {
+                const startDate = new Date(agreement.start_date);
+                const jPlusOne = new Date(startDate.getTime() + 24 * 60 * 60 * 1000); // J+1
+                const now = new Date();
+                
+                if (now >= jPlusOne && depositPaymentId) {
+                  // ✅ On est à J+1, créer le transfer
+                  console.log(`🔄 [WEBHOOK] J+1 reached, creating Transfer for deposit payment ${depositPaymentId}`);
+                  
+                  try {
+                    const { createTransferToDetailer } = await import("../services/missionPayout.service.js");
+                    const transferResult = await createTransferToDetailer({
+                      missionAgreementId: missionAgreementId,
+                      paymentId: depositPaymentId,
+                      amount: depositAmount,
+                      commissionRate: 0, // Pas de commission (déjà capturée)
+                    });
+                    
+                    console.log(`✅ [WEBHOOK] Deposit transferred to detailer: ${transferResult.id}, amount: ${transferResult.amount}€`);
+                    
+                    const transferExecutedAt = new Date().toISOString();
+                    
+                    await supabase
+                      .from("mission_payments")
+                      .update({
+                        status: "transferred",
+                        transferred_at: transferExecutedAt,
+                        stripe_transfer_id: transferResult.id,
+                      })
+                      .eq("id", depositPaymentId);
+
+                    // ✅ CRITICAL: Mettre à jour les colonnes d'audit de la mission
+                    await supabase
+                      .from("mission_agreements")
+                      .update({
+                        transfer_executed_at: transferExecutedAt,
+                        transfer_id: transferResult.id,
+                        updated_at: transferExecutedAt,
+                      })
+                      .eq("id", missionAgreementId);
+                  } catch (transferError) {
+                    console.error(`❌ [WEBHOOK] Transfer failed for deposit payment ${depositPaymentId}:`, transferError);
+                    // Le transfer sera retenté via cron job
+                  }
+                } else {
+                  console.log(`ℹ️ [WEBHOOK] Not yet J+1 (start: ${startDate.toISOString()}, J+1: ${jPlusOne.toISOString()}, now: ${now.toISOString()}). Transfer will be created via cron job.`);
+                }
+              }
+            } else {
+              // ✅ Mettre à jour le statut du paiement de mission à "succeeded" (argent reçu)
+              const { error: updateError } = await supabase
+                .from("mission_payments")
+                .update({
+                  status: "succeeded", // ✅ Statut SEPA : argent réellement reçu
+                  stripe_charge_id: intent.latest_charge || null,
+                  captured_at: new Date().toISOString(), // ✅ Timestamp de réception
+                })
+                .eq("id", paymentId);
+
+              if (updateError) {
+                console.error("[WEBHOOK] Error updating mission payment:", updateError);
+              }
             }
 
             // Si c'est le paiement d'acompte, activer le Mission Agreement
@@ -156,15 +346,66 @@ router.post(
             }
 
             // ✅ TRANSFERT AUTOMATIQUE VERS LE DETAILER (après capture)
+            // ⚠️ IMPORTANT : Pour les paiements d'acompte (deposit), la commission est déjà capturée séparément
+            // Donc on ne doit PAS déduire de commission sur l'acompte (commissionRate: 0)
             try {
-              const { autoTransferOnPaymentCapture } = await import("../services/missionPayout.service.js");
-              const { MISSION_COMMISSION_RATE } = await import("../config/commission.js");
+              const { createTransferToDetailer } = await import("../services/missionPayout.service.js");
               
-              await autoTransferOnPaymentCapture(paymentId, MISSION_COMMISSION_RATE);
-              console.log(`✅ [WEBHOOK] Auto-transfer triggered for payment ${paymentId}`);
+              // Récupérer le paiement pour vérifier son type
+              const { data: payment } = await supabase
+                .from("mission_payments")
+                .select("id, type, amount, status, stripe_payment_intent_id")
+                .eq("id", paymentId)
+                .single();
+              
+              if (payment && (payment.status === "succeeded" || payment.status === "processing") && paymentType === "deposit") {
+                // ✅ Pour l'acompte : Transfer complet sans commission (commission déjà capturée séparément)
+                console.log(`🔄 [WEBHOOK] Creating Transfer for deposit payment ${paymentId} (no commission, already captured separately)`);
+                
+                const transferResult = await createTransferToDetailer({
+                  missionAgreementId: missionAgreementId,
+                  paymentId: paymentId,
+                  amount: payment.amount,
+                  commissionRate: 0, // ✅ Pas de commission sur l'acompte (déjà capturée séparément)
+                });
+                
+                console.log(`✅ [WEBHOOK] Deposit transferred to detailer: ${transferResult.id}, amount: ${transferResult.amount}€`);
+                
+                const transferExecutedAt = new Date().toISOString();
+                
+                // Mettre à jour le statut du paiement à "transferred"
+                await supabase
+                  .from("mission_payments")
+                  .update({
+                    status: "transferred",
+                    transferred_at: transferExecutedAt,
+                    stripe_transfer_id: transferResult.id,
+                  })
+                  .eq("id", paymentId);
+
+                // ✅ CRITICAL: Mettre à jour les colonnes d'audit de la mission
+                await supabase
+                  .from("mission_agreements")
+                  .update({
+                    transfer_executed_at: transferExecutedAt,
+                    transfer_id: transferResult.id,
+                    updated_at: transferExecutedAt,
+                  })
+                  .eq("id", missionAgreementId);
+              } else if (payment && (payment.status === "succeeded" || payment.status === "processing") && paymentType !== "deposit" && paymentType !== "commission") {
+                // ✅ Pour les autres paiements (installment, final, monthly) : Transfer avec commission
+                const { MISSION_COMMISSION_RATE } = await import("../config/commission.js");
+                const { autoTransferOnPaymentCapture } = await import("../services/missionPayout.service.js");
+                
+                await autoTransferOnPaymentCapture(paymentId, MISSION_COMMISSION_RATE);
+                console.log(`✅ [WEBHOOK] Auto-transfer triggered for payment ${paymentId} (with commission)`);
+              } else {
+                console.log(`ℹ️ [WEBHOOK] Skipping transfer for payment ${paymentId} (type: ${paymentType}, status: ${payment?.status})`);
+              }
             } catch (transferError) {
               console.error(`❌ [WEBHOOK] Auto-transfer failed for payment ${paymentId}:`, transferError);
               // Ne pas faire échouer le webhook, juste logger
+              // Le Transfer sera retenté via cron job si nécessaire
             }
 
             // ✅ GÉNÉRATION AUTOMATIQUE DES FACTURES (company et detailer)
@@ -198,6 +439,51 @@ router.post(
                 payment_intent_id: intent.id,
               })
               .eq("id", bookingId);
+
+            // ✅ Mettre à jour le revenu annuel pour les provider_passionate
+            try {
+              const { data: booking } = await supabase
+                .from("bookings")
+                .select("provider_id, price")
+                .eq("id", bookingId)
+                .single();
+              
+              if (booking) {
+                const { data: providerUser } = await supabase
+                  .from("users")
+                  .select("role")
+                  .eq("id", booking.provider_id)
+                  .single();
+                
+                if (providerUser?.role === "provider_passionate") {
+                  const { data: providerProfile } = await supabase
+                    .from("provider_profiles")
+                    .select("annual_revenue_current, annual_revenue_year")
+                    .eq("user_id", booking.provider_id)
+                    .single();
+                  
+                  if (providerProfile) {
+                    const currentYear = new Date().getFullYear();
+                    const isNewYear = providerProfile.annual_revenue_year !== currentYear;
+                    
+                    await supabase
+                      .from("provider_profiles")
+                      .update({
+                        annual_revenue_current: isNewYear 
+                          ? booking.price 
+                          : (providerProfile.annual_revenue_current || 0) + booking.price,
+                        annual_revenue_year: currentYear,
+                      })
+                      .eq("user_id", booking.provider_id);
+                    
+                    console.log(`✅ [WEBHOOK] Annual revenue updated for provider_passionate ${booking.provider_id}: ${isNewYear ? booking.price : (providerProfile.annual_revenue_current || 0) + booking.price}€`);
+                  }
+                }
+              }
+            } catch (revenueError) {
+              console.error("[WEBHOOK] Error updating annual revenue:", revenueError);
+              // Ne pas faire échouer le webhook, juste logger
+            }
 
             // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement réussi)
             try {
@@ -267,6 +553,116 @@ router.post(
           break;
         }
 
+        case "payment_intent.requires_payment_method": {
+          const intent = event.data.object;
+          const missionAgreementId = intent.metadata?.missionAgreementId;
+          const paymentId = intent.metadata?.paymentId;
+
+          // ✅ Gérer les MISSION PAYMENTS
+          if (missionAgreementId && paymentId) {
+            console.log(`⚠️ PI requires_payment_method for mission payment ${paymentId} (agreement: ${missionAgreementId})`);
+
+            // Mettre à jour le statut du paiement de mission
+            await supabase
+              .from("mission_payments")
+              .update({
+                status: "failed",
+                failure_reason: "Payment method required. Please update your payment method.",
+                failed_at: new Date().toISOString(),
+              })
+              .eq("id", paymentId);
+
+            // ✅ CRITICAL: Mettre à jour le payment_status de la mission
+            await supabase
+              .from("mission_agreements")
+              .update({
+                payment_status: "requires_payment_method",
+                status: "agreement_fully_confirmed", // ✅ Retour au statut précédent
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", missionAgreementId);
+
+            // ✅ ENVOYER NOTIFICATION À LA COMPANY
+            try {
+              const { sendNotificationWithDeepLink } = await import("../services/onesignal.service.js");
+              const { data: agreement } = await supabase
+                .from("mission_agreements")
+                .select("company_id, title")
+                .eq("id", missionAgreementId)
+                .single();
+
+              if (agreement?.company_id) {
+                await sendNotificationWithDeepLink({
+                  userId: agreement.company_id,
+                  title: "Mise à jour du moyen de paiement requise",
+                  message: `Votre moyen de paiement pour "${agreement.title || 'votre mission'}" doit être mis à jour.`,
+                  type: "mission_payment_requires_method",
+                  id: missionAgreementId,
+                });
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
+            }
+          }
+
+          break;
+        }
+
+        case "payment_intent.canceled": {
+          const intent = event.data.object;
+          const missionAgreementId = intent.metadata?.missionAgreementId;
+          const paymentId = intent.metadata?.paymentId;
+
+          // ✅ Gérer les MISSION PAYMENTS
+          if (missionAgreementId && paymentId) {
+            console.log(`⚠️ PI canceled for mission payment ${paymentId} (agreement: ${missionAgreementId})`);
+
+            // Mettre à jour le statut du paiement de mission
+            await supabase
+              .from("mission_payments")
+              .update({
+                status: "failed",
+                failure_reason: "Payment canceled",
+                failed_at: new Date().toISOString(),
+              })
+              .eq("id", paymentId);
+
+            // ✅ CRITICAL: Mettre à jour le payment_status de la mission
+            await supabase
+              .from("mission_agreements")
+              .update({
+                payment_status: "canceled",
+                status: "agreement_fully_confirmed", // ✅ Retour au statut précédent
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", missionAgreementId);
+
+            // ✅ ENVOYER NOTIFICATION À LA COMPANY
+            try {
+              const { sendNotificationWithDeepLink } = await import("../services/onesignal.service.js");
+              const { data: agreement } = await supabase
+                .from("mission_agreements")
+                .select("company_id, title")
+                .eq("id", missionAgreementId)
+                .single();
+
+              if (agreement?.company_id) {
+                await sendNotificationWithDeepLink({
+                  userId: agreement.company_id,
+                  title: "Paiement annulé",
+                  message: `Le paiement pour "${agreement.title || 'votre mission'}" a été annulé.`,
+                  type: "mission_payment_canceled",
+                  id: missionAgreementId,
+                });
+              }
+            } catch (notifError) {
+              console.error("[WEBHOOK] Notification send failed:", notifError);
+            }
+          }
+
+          break;
+        }
+
         case "payment_intent.payment_failed": {
           const intent = event.data.object;
           const bookingId = intent.metadata?.bookingId;
@@ -293,6 +689,17 @@ router.post(
             if (updateError) {
               console.error("[WEBHOOK] Error updating mission payment:", updateError);
             }
+
+            // ✅ CRITICAL: Mettre à jour le payment_status de la mission
+            // Si le paiement échoue, la mission ne peut PAS démarrer
+            await supabase
+              .from("mission_agreements")
+              .update({
+                payment_status: "payment_failed", // ✅ Statut d'échec
+                status: "agreement_fully_confirmed", // ✅ Retour au statut précédent (pas active sans paiement)
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", missionAgreementId);
 
             // ✅ ENVOYER NOTIFICATIONS (paiement échoué) → company + detailer
             try {
@@ -402,23 +809,173 @@ router.post(
 case "setup_intent.succeeded": {
   const setupIntent = event.data.object;
 
+  console.log("🔄 [WEBHOOK] setup_intent.succeeded - START");
+  console.log("📦 [WEBHOOK] Setup Intent ID:", setupIntent.id);
+  console.log("📦 [WEBHOOK] Setup Intent status:", setupIntent.status);
+  console.log("📦 [WEBHOOK] Setup Intent customer:", setupIntent.customer);
+  console.log("📦 [WEBHOOK] Setup Intent payment_method:", setupIntent.payment_method);
+  console.log("📦 [WEBHOOK] Setup Intent mandate:", setupIntent.mandate); // ✅ IMPORTANT : Le mandate peut être ici !
+
   const customerId = setupIntent.customer;
   const paymentMethodId = setupIntent.payment_method;
 
-  if (!customerId || !paymentMethodId) break;
+  if (!customerId || !paymentMethodId) {
+    console.warn("⚠️ [WEBHOOK] Missing customerId or paymentMethodId");
+    console.warn("⚠️ [WEBHOOK] customerId:", customerId, "paymentMethodId:", paymentMethodId);
+    break;
+  }
 
-  // ✅ NE PAS re-attach
-  // Stripe l’a déjà fait
+  console.log("✅ [WEBHOOK] Setup Intent succeeded:", setupIntent.id);
+  console.log("📦 [WEBHOOK] Customer:", customerId, "Payment Method:", paymentMethodId);
 
-  // Juste définir comme carte par défaut
-  await stripe.customers.update(customerId, {
-    invoice_settings: {
-      default_payment_method: paymentMethodId,
-    },
-  });
+  // Récupérer le payment method pour déterminer le type
+  try {
+    console.log("🔄 [WEBHOOK] Retrieving payment method:", paymentMethodId);
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+    console.log("✅ [WEBHOOK] Payment method retrieved");
+    console.log("📦 [WEBHOOK] Payment method type:", paymentMethod.type);
+    console.log("📦 [WEBHOOK] Payment method ID:", paymentMethod.id);
+    console.log("📦 [WEBHOOK] Payment method customer:", paymentMethod.customer);
 
+    if (paymentMethod.type === "sepa_debit") {
+      console.log("✅ [WEBHOOK] Payment method is SEPA Debit");
+      console.log("📦 [WEBHOOK] SEPA Debit details:", JSON.stringify(paymentMethod.sepa_debit, null, 2));
+      
+      // ✅ GESTION SEPA MANDATE
+      // ⚠️ IMPORTANT : Le mandate peut être dans le Setup Intent OU dans le Payment Method
+      // Pour les Setup Intents SEPA, Stripe met souvent le mandate directement dans le Setup Intent
+      let mandateId = setupIntent.mandate || paymentMethod.sepa_debit?.mandate;
+      console.log("📦 [WEBHOOK] Mandate ID from Setup Intent:", setupIntent.mandate);
+      console.log("📦 [WEBHOOK] Mandate ID from Payment Method:", paymentMethod.sepa_debit?.mandate);
+      console.log("📦 [WEBHOOK] Final mandate ID:", mandateId);
+      
+      // Si pas de mandate immédiatement, attendre et réessayer (max 3 tentatives)
+      if (!mandateId) {
+        console.log("⚠️ [WEBHOOK] SEPA has no mandate yet, waiting...");
+        
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Attendre 2 secondes
+          
+          // Recharger le Setup Intent ET le payment method
+          const refreshedSetupIntent = await stripe.setupIntents.retrieve(setupIntent.id);
+          const refreshedPaymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+          
+          mandateId = refreshedSetupIntent.mandate || refreshedPaymentMethod.sepa_debit?.mandate;
+          
+          if (mandateId) {
+            console.log(`✅ [WEBHOOK] SEPA mandate found after ${attempt + 1} attempt(s):`, mandateId);
+            break;
+          }
+        }
+      }
+      
+      if (mandateId) {
+        console.log("✅ [WEBHOOK] SEPA mandate found:", mandateId);
+        
+        // Récupérer le mandate pour vérifier son statut
+        const mandate = await stripe.mandates.retrieve(mandateId);
+        console.log("📦 [WEBHOOK] Mandate status:", mandate.status);
+        
+        // Le mandate peut être "pending" ou "active"
+        // On accepte "active" et "pending" (pending signifie que l'utilisateur a accepté mais que la banque n'a pas encore validé)
+        if (mandate.status === "active" || mandate.status === "pending") {
+          console.log(`✅ [WEBHOOK] SEPA mandate is ${mandate.status}`);
+          
+          // Trouver l'utilisateur par son stripe_customer_id
+          const { data: user } = await supabase
+            .from("users")
+            .select("id, email, role")
+            .eq("stripe_customer_id", customerId)
+            .single();
+          
+          if (user && user.role === "company") {
+            console.log("✅ [WEBHOOK] Sending notification to company:", user.id);
+            await sendNotificationToUser({
+              userId: user.id,
+              title: "Mandat SEPA configuré",
+              message: mandate.status === "active" 
+                ? "Votre mandat SEPA a été activé avec succès. Vous pouvez maintenant créer des offres."
+                : "Votre mandat SEPA est en attente de validation. Vous pouvez créer des offres, mais les paiements seront traités une fois le mandat activé.",
+              data: {
+                type: "sepa_mandate_activated",
+                mandate_id: mandateId,
+                payment_method_id: paymentMethodId,
+                mandate_status: mandate.status,
+              },
+            });
+          }
+        } else {
+          console.warn(`⚠️ [WEBHOOK] SEPA mandate status is not active/pending: ${mandate.status}`);
+        }
+      } else {
+        console.warn("⚠️ [WEBHOOK] SEPA payment method has no mandate after retries");
+      }
+    } else if (paymentMethod.type === "card") {
+      // ✅ GESTION CARTE (comportement existant)
+      // Juste définir comme carte par défaut
+      await stripe.customers.update(customerId, {
+        invoice_settings: {
+          default_payment_method: paymentMethodId,
+        },
+      });
+      console.log("✅ [WEBHOOK] Card set as default payment method");
+    }
+  } catch (error) {
+    console.error("❌ [WEBHOOK] Error processing setup_intent.succeeded:", error);
+    console.error("❌ [WEBHOOK] Error details:", {
+      message: error.message,
+      stack: error.stack,
+      type: error.type,
+      code: error.code,
+    });
+  }
+
+  console.log("🔄 [WEBHOOK] setup_intent.succeeded - END");
   break;
 }
+
+        case "mandate.updated": {
+          const mandate = event.data.object;
+          console.log("✅ [WEBHOOK] Mandate updated:", mandate.id, "status:", mandate.status);
+          
+          // Si le mandate devient actif, envoyer une notification
+          if (mandate.status === "active" && mandate.type === "sepa_debit") {
+            // Trouver le customer via le payment method
+            const paymentMethodId = mandate.payment_method;
+            if (paymentMethodId) {
+              try {
+                const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+                const customerId = paymentMethod.customer;
+                
+                if (customerId) {
+                  const { data: user } = await supabase
+                    .from("users")
+                    .select("id, email, role")
+                    .eq("stripe_customer_id", customerId)
+                    .single();
+                  
+                  if (user && user.role === "company") {
+                    console.log("✅ [WEBHOOK] Sending notification: mandate became active");
+                    await sendNotificationToUser({
+                      userId: user.id,
+                      title: "Mandat SEPA activé",
+                      message: "Votre mandat SEPA a été activé avec succès. Vous pouvez maintenant créer des offres.",
+                      data: {
+                        type: "sepa_mandate_activated",
+                        mandate_id: mandate.id,
+                        payment_method_id: paymentMethodId,
+                      },
+                    });
+                  }
+                }
+              } catch (error) {
+                console.error("❌ [WEBHOOK] Error processing mandate.updated:", error);
+              }
+            }
+          }
+          break;
+        }
+
         case "refund.succeeded": {
           const refund = event.data.object;
           const paymentIntentId = refund.payment_intent;
