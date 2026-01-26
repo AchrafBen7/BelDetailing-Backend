@@ -132,8 +132,6 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
       console.log(`⚠️ [PAYMENT SCHEDULE] These will be authorized after first on-session payment succeeds`);
       // Ne pas créer les PaymentIntents maintenant - ils seront créés automatiquement
       // après que le premier paiement (deposit + commission) soit confirmé on-session
-        }
-      }
     }
 
   return {
