@@ -610,12 +610,8 @@ export async function createBooking(req, res) {
     
     const providerStripeAccountId = providerProfile?.stripe_account_id || null;
     
-    // ✅ Vérifier le rôle du provider pour déterminer le taux de commission
-    const { data: providerUser, error: providerUserError } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", provider_id)
-      .maybeSingle();
+    // ✅ Réutiliser providerUser déclaré plus haut (ligne 329) pour éviter la duplication
+    // Le rôle a déjà été récupéré pour vérifier le plafond annuel des provider_passionate
     
     // Commission NIOS : 10% pour tous (passionnés et pros)
     const commissionRate = COMMISSION_RATE; // 0.10 (10%)

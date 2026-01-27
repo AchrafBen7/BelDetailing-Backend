@@ -28,9 +28,8 @@ if (result.error) {
 // car les imports ES modules sont évalués avant l'exécution du code
 console.log("🔄 [SERVER] Starting imports...");
 
-console.log("🔄 [SERVER] Loading tracing...");
-import { shutdownTracing } from "./observability/tracing.js";
-console.log("✅ [SERVER] Tracing loaded");
+// ⚠️ IMPORTANT: Tracing est chargé de manière lazy pour éviter les timeouts au démarrage
+// import { shutdownTracing } from "./observability/tracing.js"; // ❌ Ne pas importer au top-level
 
 console.log("🔄 [SERVER] Loading app (this may take a moment)...");
 const startAppImport = Date.now();
@@ -74,15 +73,16 @@ const shutdown = signal => {
       // Silently fail
     }
     
-    shutdownTracing()
-      .then(() => {
-        console.log("HTTP server closed.");
-        process.exit(0);
-      })
-      .catch(() => {
-        console.log("HTTP server closed.");
-        process.exit(0);
-      });
+    // ✅ Charger tracing de manière lazy seulement pour le shutdown
+    try {
+      const { shutdownTracing } = await import("./observability/tracing.js");
+      await shutdownTracing();
+    } catch (err) {
+      // Silently fail
+    }
+    
+    console.log("HTTP server closed.");
+    process.exit(0);
   });
 
   setTimeout(() => {

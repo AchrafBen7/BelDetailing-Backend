@@ -1,4 +1,5 @@
-import puppeteer from "puppeteer";
+// ⚠️ IMPORTANT: Puppeteer est chargé de manière lazy pour éviter les timeouts au démarrage
+// import puppeteer from "puppeteer"; // ❌ Ne pas importer au top-level
 import PDFDocument from "pdfkit";
 
 /**
@@ -19,8 +20,13 @@ export async function htmlToPdf(html) {
 
 /**
  * 🟦 HTML TO PDF WITH PUPPETEER – Utilise Puppeteer (nécessite Chrome)
+ * Puppeteer est chargé dynamiquement pour éviter les timeouts au démarrage
  */
 async function htmlToPdfWithPuppeteer(html) {
+  // ✅ Charger Puppeteer de manière lazy (seulement quand nécessaire)
+  const puppeteer = await import("puppeteer");
+  const puppeteerDefault = puppeteer.default || puppeteer;
+  
   let browser;
   
   try {
@@ -45,7 +51,7 @@ async function htmlToPdfWithPuppeteer(html) {
       console.log(`🔧 [PDF] Using Puppeteer's bundled Chrome`);
     }
 
-    browser = await puppeteer.launch(launchOptions);
+    browser = await puppeteerDefault.launch(launchOptions);
     const page = await browser.newPage();
 
     await page.setContent(html, { waitUntil: "networkidle0" });

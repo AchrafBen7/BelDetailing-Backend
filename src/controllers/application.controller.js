@@ -33,6 +33,13 @@ export async function listApplicationsForOffer(req, res) {
 // 🔹 POST /api/v1/offers/:offerId/apply  (provider)
 export async function applyToOfferController(req, res) {
   try {
+    // ✅ BLOQUER les provider_passionate (pas de B2B)
+    if (req.user.role === "provider_passionate") {
+      return res.status(403).json({ 
+        error: "Passionate detailers cannot apply to offers. Please upgrade to Pro account (VAT required)." 
+      });
+    }
+    
     if (req.user.role !== "provider") {
       return res.status(403).json({ error: "Only providers can apply" });
     }
@@ -77,7 +84,9 @@ export async function applyToOfferController(req, res) {
   } catch (err) {
     console.error("[APPLICATIONS] apply error:", err);
     const status = err.statusCode || 500;
-    return res.status(status).json({ error: "Could not apply to offer" });
+    // ✅ Renvoyer le message d'erreur réel pour que l'utilisateur sache pourquoi la candidature a échoué
+    const errorMessage = err.message || "Could not apply to offer";
+    return res.status(status).json({ error: errorMessage });
   }
 }
 
@@ -230,11 +239,35 @@ export async function acceptApplicationController(req, res) {
       // La conversation pourra être créée manuellement plus tard
     }
     
+    // ✅ Récupérer l'application complète pour la réponse iOS
+    const { mapApplicationRowToDto } = await import("../services/application.service.js");
+    const { data: applicationRow, error: appFetchError } = await supabase
+      .from("applications")
+      .select("*")
+      .eq("id", id)
+      .single();
+    
+    const applicationDto = appFetchError ? null : mapApplicationRowToDto(applicationRow);
+    
+    // ✅ Format de réponse compatible avec AcceptApplicationResponse (iOS)
     return res.json({ 
       data: {
-        ...acceptResult,
-        // ⚠️ Pas de booking pour les missions - gérées via Mission Agreement uniquement
-        missionAgreement,
+        missionAgreement: {
+          id: missionAgreement.id,
+          offerId: missionAgreement.offerId,
+          companyId: missionAgreement.companyId,
+          detailerId: missionAgreement.detailerId,
+          finalPrice: missionAgreement.finalPrice,
+          depositPercentage: missionAgreement.depositPercentage,
+          depositAmount: missionAgreement.depositAmount,
+          remainingAmount: missionAgreement.remainingAmount,
+          status: missionAgreement.status,
+          createdAt: missionAgreement.createdAt,
+          pdfUrl: missionAgreement.pdfUrl,
+        },
+        application: applicationDto, // Application complète
+        booking: null, // ⚠️ Pas de booking pour les missions - gérées via Mission Agreement uniquement
+        paymentIntent: null, // ⚠️ Les paiements sont créés plus tard après confirmation du contrat
       }
     });
   } catch (err) {
