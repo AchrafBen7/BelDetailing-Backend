@@ -409,8 +409,15 @@ export async function createSepaPaymentIntent({
 
   // 3) ✅ UTILISER DIRECTEMENT le paymentMethodId et mandateId depuis getSepaMandate
   // getSepaMandate a déjà vérifié que le mandate est actif, donc on peut l'utiliser directement
+  // ⚠️ CRUCIAL : Utiliser le paymentMethodId retourné par getSepaMandate car il est garanti d'avoir le mandate associé
   let finalPaymentMethodId = paymentMethodId || sepaMandate.paymentMethodId;
   let finalMandateId = sepaMandate.id; // Le mandate ID retourné par getSepaMandate
+  
+  // ✅ Vérifier que le paymentMethodId fourni correspond bien au mandate
+  if (paymentMethodId && paymentMethodId !== sepaMandate.paymentMethodId) {
+    console.warn(`⚠️ [SEPA] Provided paymentMethodId (${paymentMethodId}) differs from mandate paymentMethodId (${sepaMandate.paymentMethodId}). Using mandate paymentMethodId to ensure mandate association.`);
+    finalPaymentMethodId = sepaMandate.paymentMethodId; // ✅ Utiliser celui qui a le mandate
+  }
 
   // Si paymentMethodId est fourni explicitement, vérifier qu'il correspond au mandate
   if (paymentMethodId && paymentMethodId !== sepaMandate.paymentMethodId) {
@@ -486,8 +493,40 @@ export async function createSepaPaymentIntent({
     
     // ✅ Vérifier que le payment method a bien le mandate associé
     if (finalPaymentMethod.sepa_debit?.mandate !== finalMandateId) {
-      console.warn(`⚠️ [SEPA] Payment method mandate (${finalPaymentMethod.sepa_debit?.mandate}) differs from expected mandate (${finalMandateId})`);
-      // Ce n'est pas forcément une erreur fatale, mais on log pour debug
+      console.error(`❌ [SEPA] Payment method mandate (${finalPaymentMethod.sepa_debit?.mandate || 'undefined'}) differs from expected mandate (${finalMandateId})`);
+      console.error(`❌ [SEPA] This will cause Stripe to block the payment. Using payment method from getSepaMandate instead.`);
+      
+      // ✅ CRUCIAL : Si le payment_method n'a pas le bon mandate, utiliser celui retourné par getSepaMandate
+      if (sepaMandate.paymentMethodId && sepaMandate.paymentMethodId !== finalPaymentMethodId) {
+        console.log(`🔄 [SEPA] Switching to payment method with correct mandate: ${sepaMandate.paymentMethodId}`);
+        finalPaymentMethodId = sepaMandate.paymentMethodId;
+        
+        // Re-récupérer le payment method avec le bon mandate
+        const correctPaymentMethod = await stripe.paymentMethods.retrieve(finalPaymentMethodId);
+        
+        // Vérifier que le nouveau payment method a le bon mandate
+        if (correctPaymentMethod.sepa_debit?.mandate !== finalMandateId) {
+          console.error(`❌ [SEPA] Payment method ${finalPaymentMethodId} from getSepaMandate also does not have the expected mandate ${finalMandateId}`);
+          console.error(`❌ [SEPA] Payment method mandate: ${correctPaymentMethod.sepa_debit?.mandate || 'undefined'}`);
+          throw new Error(`Payment method ${finalPaymentMethodId} from getSepaMandate does not have the expected mandate ${finalMandateId}. The SEPA mandate may not be properly associated. Please set up a new SEPA Direct Debit.`);
+        }
+        
+        console.log(`✅ [SEPA] Payment method ${finalPaymentMethodId} has correct mandate ${finalMandateId}`);
+        
+        // ✅ Vérifier que le nouveau payment method est attaché au customer
+        if (!correctPaymentMethod.customer || correctPaymentMethod.customer !== customerId) {
+          console.log(`⚠️ [SEPA] Correct payment method not attached to customer. Attaching now...`);
+          await stripe.paymentMethods.attach(finalPaymentMethodId, {
+            customer: customerId,
+          });
+          console.log(`✅ [SEPA] Correct payment method attached to customer ${customerId}`);
+        }
+      } else {
+        // Le payment_method fourni n'a pas le bon mandate et on n'a pas d'alternative
+        throw new Error(`Payment method ${finalPaymentMethodId} does not have the expected mandate ${finalMandateId}. Please set up a new SEPA Direct Debit.`);
+      }
+    } else {
+      console.log(`✅ [SEPA] Payment method has correct mandate: ${finalMandateId}`);
     }
     
   } catch (err) {

@@ -176,6 +176,24 @@ export async function createDayOnePayments(missionAgreementId) {
 
   } catch (error) {
     console.error(`❌ [DAY ONE PAYMENTS] Error creating day one payments:`, error);
+    
+    // ✅ Améliorer le message d'erreur pour les erreurs Stripe
+    if (error.type === "StripeInvalidRequestError" || error.statusCode === 402) {
+      const stripeError = error.raw?.message || error.message;
+      
+      // Si c'est une erreur "too high-risk" ou similaire
+      if (stripeError.includes("unexpected error") || error.statusCode === 402) {
+        throw new Error(
+          `SEPA payment was blocked by Stripe (likely due to risk assessment). ` +
+          `This can happen with high amounts or first-time SEPA payments. ` +
+          `Please try with a smaller amount or contact support. ` +
+          `Error: ${stripeError}`
+        );
+      }
+      
+      throw new Error(`Stripe payment error: ${stripeError}`);
+    }
+    
     throw error;
   }
 }

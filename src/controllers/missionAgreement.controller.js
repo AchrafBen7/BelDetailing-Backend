@@ -457,8 +457,34 @@ export async function createMissionPaymentsController(req, res) {
     });
   } catch (err) {
     console.error("[MISSION AGREEMENT] create payments error:", err);
-    const statusCode = err.statusCode || 500;
-    return res.status(statusCode).json({ error: err.message || "Could not create payment schedule" });
+    
+    // ✅ Améliorer le message d'erreur pour les erreurs Stripe
+    let errorMessage = err.message || "Could not create payment schedule";
+    let statusCode = err.statusCode || 500;
+    
+    // Si c'est une erreur Stripe (402 = Payment Required / Blocked)
+    if (err.statusCode === 402 || err.type === "StripeInvalidRequestError") {
+      statusCode = 402; // Payment Required
+      
+      // Message plus clair pour l'utilisateur
+      if (err.message?.includes("blocked") || err.message?.includes("high-risk")) {
+        errorMessage = "Le paiement SEPA a été bloqué par Stripe pour des raisons de sécurité. " +
+          "Cela peut arriver avec des montants élevés ou lors du premier paiement SEPA. " +
+          "Veuillez réessayer avec un montant plus petit ou contacter le support.";
+      } else {
+        errorMessage = "Erreur lors du traitement du paiement SEPA. " +
+          "Veuillez vérifier votre mandat SEPA ou contacter le support.";
+      }
+    }
+    
+    return res.status(statusCode).json({ 
+      error: errorMessage,
+      stripeError: err.type === "StripeInvalidRequestError" ? {
+        code: err.code,
+        requestId: err.requestId,
+        statusCode: err.statusCode,
+      } : undefined,
+    });
   }
 }
 
