@@ -103,10 +103,19 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
 
   // Créer les paiements mensuels
   for (let month = 1; month <= monthlyInstallments; month++) {
-    const monthlyDate = new Date(startDate);
-    monthlyDate.setMonth(monthlyDate.getMonth() + month);
-    monthlyDate.setDate(1); // Premier jour du mois
-    monthlyDate.setHours(23, 59, 59, 999);
+    let scheduledDate;
+    
+    if (month === monthlyInstallments) {
+      // ✅ Dernier paiement : dernier jour de la mission (endDate à 23:59)
+      scheduledDate = new Date(endDate);
+      scheduledDate.setHours(23, 59, 59, 999);
+    } else {
+      // Paiements intermédiaires : premier jour du mois suivant
+      scheduledDate = new Date(startDate);
+      scheduledDate.setMonth(scheduledDate.getMonth() + month);
+      scheduledDate.setDate(1); // Premier jour du mois
+      scheduledDate.setHours(23, 59, 59, 999);
+    }
 
     // Ajuster le dernier paiement pour éviter les arrondis
     const installmentAmount = month === monthlyInstallments
@@ -115,10 +124,10 @@ export async function createIntelligentPaymentSchedule(missionAgreementId, autho
 
     const monthlyPayment = await createMissionPayment({
       missionAgreementId,
-      type: "monthly",
+      type: month === monthlyInstallments ? "final" : "monthly", // ✅ Dernier paiement = type "final"
       amount: Math.round(installmentAmount * 100) / 100,
-      scheduledDate: monthlyDate.toISOString(),
-      monthNumber: month,
+      scheduledDate: scheduledDate.toISOString(),
+      monthNumber: month === monthlyInstallments ? null : month, // ✅ Pas de monthNumber pour le paiement final
     });
     payments.push(monthlyPayment);
   }

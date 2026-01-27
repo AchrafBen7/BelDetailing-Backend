@@ -27,8 +27,9 @@ export async function createDayOnePayments(missionAgreementId) {
     throw new Error("Mission Agreement not found");
   }
 
-  if (agreement.status !== "active") {
-    throw new Error(`Mission Agreement is not active. Current status: ${agreement.status}`);
+  // ✅ Accepter aussi agreement_fully_confirmed (on va créer les paiements et passer à active)
+  if (agreement.status !== "active" && agreement.status !== "agreement_fully_confirmed") {
+    throw new Error(`Mission Agreement is not in a valid status. Current status: ${agreement.status}`);
   }
 
   // 2) Vérifier que les paiements du jour 1 n'ont pas déjà été créés
@@ -90,13 +91,15 @@ export async function createDayOnePayments(missionAgreementId) {
       scheduledDate: new Date(agreement.startDate).toISOString(), // Jour 1 (startDate)
     });
 
+    // ✅ Pour SEPA, on crée avec confirm: true (automatique dans createSepaPaymentIntent)
+    // Le PaymentIntent sera en "processing" puis "succeeded" via webhook (2-5 jours)
     const commissionPaymentIntent = await createSepaPaymentIntent({
       companyUserId: agreement.companyId,
       amount: commissionAmount,
       currency: "eur",
       paymentMethodId: null, // Utilise le payment method par défaut
       applicationFeeAmount: 0, // Pas de commission sur la commission
-      captureMethod: "manual", // ✅ Capture manuelle au Jour 1
+      captureMethod: "automatic", // ✅ SEPA est automatique et asynchrone
       metadata: {
         missionAgreementId: agreement.id,
         paymentId: commissionPayment.id,
@@ -106,16 +109,21 @@ export async function createDayOnePayments(missionAgreementId) {
       },
     });
 
-    // Mettre à jour le paiement avec le Payment Intent ID
-    await updateMissionPaymentStatus(commissionPayment.id, "authorized", {
+    // ✅ Pour SEPA, le PaymentIntent est créé avec confirm: true, donc il est en "processing"
+    // Le statut sera mis à jour à "succeeded" via webhook (2-5 jours)
+    // On met le statut à "processing" immédiatement
+    const commissionStatus = commissionPaymentIntent.status === "succeeded" ? "captured" : 
+                            commissionPaymentIntent.status === "processing" ? "processing" : "authorized";
+    
+    await updateMissionPaymentStatus(commissionPayment.id, commissionStatus, {
       stripePaymentIntentId: commissionPaymentIntent.id,
-      authorizedAt: new Date().toISOString(),
+      authorizedAt: commissionStatus === "authorized" ? new Date().toISOString() : null,
     });
 
     results.commissionPaymentId = commissionPayment.id;
     results.commissionPaymentIntentId = commissionPaymentIntent.id;
 
-    console.log(`✅ [DAY ONE PAYMENTS] Commission payment intent created: ${commissionPaymentIntent.id} (will be captured on Day 1)`);
+    console.log(`✅ [DAY ONE PAYMENTS] Commission payment intent created: ${commissionPaymentIntent.id} (status: ${commissionPaymentIntent.status})`);
 
     // 7) Créer l'acompte detailer (600€) - PaymentIntent avec capture_method: "manual"
     console.log(`🔄 [DAY ONE PAYMENTS] Creating deposit payment intent (${depositAmount}€)`);
@@ -129,13 +137,14 @@ export async function createDayOnePayments(missionAgreementId) {
 
     // Pour l'acompte, utiliser Stripe Connect pour transférer directement au detailer
     // Pas de commission supplémentaire (déjà capturée séparément)
+    // ✅ Pour SEPA, on crée avec confirm: true (automatique dans createSepaPaymentIntent)
     const depositPaymentIntent = await createSepaPaymentIntent({
       companyUserId: agreement.companyId,
       amount: depositAmount,
       currency: "eur",
       paymentMethodId: null,
       applicationFeeAmount: 0, // Pas de commission sur l'acompte (déjà capturée)
-      captureMethod: "manual", // ✅ Capture manuelle au Jour 1
+      captureMethod: "automatic", // ✅ SEPA est automatique et asynchrone
       metadata: {
         missionAgreementId: agreement.id,
         paymentId: depositPayment.id,
@@ -146,17 +155,22 @@ export async function createDayOnePayments(missionAgreementId) {
       },
     });
 
-    // Mettre à jour le paiement avec le Payment Intent ID
-    await updateMissionPaymentStatus(depositPayment.id, "authorized", {
+    // ✅ Pour SEPA, le PaymentIntent est créé avec confirm: true, donc il est en "processing"
+    // Le statut sera mis à jour à "succeeded" via webhook (2-5 jours)
+    // On met le statut à "processing" immédiatement
+    const depositStatus = depositPaymentIntent.status === "succeeded" ? "captured" : 
+                         depositPaymentIntent.status === "processing" ? "processing" : "authorized";
+    
+    await updateMissionPaymentStatus(depositPayment.id, depositStatus, {
       stripePaymentIntentId: depositPaymentIntent.id,
-      authorizedAt: new Date().toISOString(),
+      authorizedAt: depositStatus === "authorized" ? new Date().toISOString() : null,
     });
 
     results.depositPaymentId = depositPayment.id;
     results.depositPaymentIntentId = depositPaymentIntent.id;
 
-    console.log(`✅ [DAY ONE PAYMENTS] Deposit payment intent created: ${depositPaymentIntent.id} (will be captured on Day 1)`);
-    console.log(`✅ [DAY ONE PAYMENTS] Day one payments created successfully (Jour 0 activation)`);
+    console.log(`✅ [DAY ONE PAYMENTS] Deposit payment intent created: ${depositPaymentIntent.id} (status: ${depositPaymentIntent.status})`);
+    console.log(`✅ [DAY ONE PAYMENTS] Day one payments created and confirmed successfully (SEPA processing - will be succeeded via webhook)`);
 
     return results;
 
@@ -185,17 +199,19 @@ export async function captureDayOnePayments(missionAgreementId) {
     throw new Error("Mission Agreement not found");
   }
 
-  if (agreement.status !== "active") {
-    throw new Error(`Mission Agreement is not active. Current status: ${agreement.status}`);
+  // ✅ Accepter aussi agreement_fully_confirmed (on va capturer les paiements et passer à active)
+  if (agreement.status !== "active" && agreement.status !== "agreement_fully_confirmed") {
+    throw new Error(`Mission Agreement is not in a valid status. Current status: ${agreement.status}`);
   }
 
-  // 2) Récupérer les paiements du jour 1 (commission + deposit) qui sont en statut "authorized"
+  // 2) Récupérer les paiements du jour 1 (commission + deposit) qui sont en statut "authorized" ou "processing"
+  // ✅ Pour SEPA, les paiements peuvent être en "processing" (créés avec confirm: true)
   const { data: dayOnePayments, error: fetchError } = await supabase
     .from("mission_payments")
     .select("*")
     .eq("mission_agreement_id", missionAgreementId)
     .in("type", ["commission", "deposit"])
-    .eq("status", "authorized");
+    .in("status", ["authorized", "processing"]); // ✅ Accepter aussi "processing" pour SEPA
 
   if (fetchError) {
     console.error("❌ [DAY ONE PAYMENTS] Error fetching day one payments:", fetchError);
@@ -251,7 +267,8 @@ export async function captureDayOnePayments(missionAgreementId) {
       throw new Error("Commission payment missing PaymentIntent ID");
     }
 
-    // Vérifier le statut du PaymentIntent avant capture
+    // ✅ Pour SEPA, vérifier le statut du PaymentIntent
+    // SEPA est asynchrone : processing → succeeded (via webhook)
     const Stripe = (await import("stripe")).default;
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
       apiVersion: "2025-11-17.clover",
@@ -260,14 +277,20 @@ export async function captureDayOnePayments(missionAgreementId) {
     const commissionPI = await stripe.paymentIntents.retrieve(commissionPayment.stripe_payment_intent_id);
     
     if (commissionPI.status === "succeeded") {
-      // Déjà capturé
+      // ✅ Déjà succeeded (via webhook ou confirmation immédiate)
       await updateMissionPaymentStatus(commissionPayment.id, "captured", {
-        stripeChargeId: commissionPI.id,
+        stripeChargeId: commissionPI.latest_charge || commissionPI.id,
         capturedAt: new Date().toISOString(),
       });
-      console.log(`✅ [DAY ONE PAYMENTS] Commission already captured: ${commissionPayment.amount}€`);
+      console.log(`✅ [DAY ONE PAYMENTS] Commission already succeeded: ${commissionPayment.amount}€`);
+    } else if (commissionPI.status === "processing") {
+      // ✅ SEPA en cours de traitement (normal pour SEPA - 2-5 jours)
+      await updateMissionPaymentStatus(commissionPayment.id, "processing", {
+        stripePaymentIntentId: commissionPI.id,
+      });
+      console.log(`⏳ [DAY ONE PAYMENTS] Commission payment processing (SEPA - will be succeeded via webhook): ${commissionPayment.amount}€`);
     } else if (commissionPI.status === "requires_capture") {
-      // Capturer maintenant
+      // Capturer maintenant (si possible)
       await captureSepaPayment(commissionPayment.stripe_payment_intent_id);
       await updateMissionPaymentStatus(commissionPayment.id, "captured", {
         stripeChargeId: commissionPayment.stripe_payment_intent_id,
@@ -275,10 +298,19 @@ export async function captureDayOnePayments(missionAgreementId) {
       });
       console.log(`✅ [DAY ONE PAYMENTS] Commission captured: ${commissionPayment.amount}€`);
     } else {
-      throw new Error(`Commission PaymentIntent is in invalid status: ${commissionPI.status}`);
+      // Autres statuts : on met à jour le statut du paiement pour refléter le statut Stripe
+      await updateMissionPaymentStatus(commissionPayment.id, "processing", {
+        stripePaymentIntentId: commissionPI.id,
+      });
+      console.log(`⏳ [DAY ONE PAYMENTS] Commission payment in status: ${commissionPI.status} - will be updated via webhook`);
     }
 
-    results.commissionCaptured = commissionPayment.amount;
+    // ✅ Ne compter que si réellement capturé (succeeded)
+    if (commissionPI.status === "succeeded") {
+      results.commissionCaptured = commissionPayment.amount;
+    } else {
+      results.commissionCaptured = 0; // En processing, pas encore capturé
+    }
 
     // 5) Capturer l'acompte detailer (600€)
     console.log(`🔄 [DAY ONE PAYMENTS] Capturing deposit payment (${depositPayment.amount}€)`);
@@ -290,14 +322,20 @@ export async function captureDayOnePayments(missionAgreementId) {
     const depositPI = await stripe.paymentIntents.retrieve(depositPayment.stripe_payment_intent_id);
     
     if (depositPI.status === "succeeded") {
-      // Déjà capturé
+      // ✅ Déjà succeeded (via webhook ou confirmation immédiate)
       await updateMissionPaymentStatus(depositPayment.id, "captured", {
-        stripeChargeId: depositPI.id,
+        stripeChargeId: depositPI.latest_charge || depositPI.id,
         capturedAt: new Date().toISOString(),
       });
-      console.log(`✅ [DAY ONE PAYMENTS] Deposit already captured: ${depositPayment.amount}€`);
+      console.log(`✅ [DAY ONE PAYMENTS] Deposit already succeeded: ${depositPayment.amount}€`);
+    } else if (depositPI.status === "processing") {
+      // ✅ SEPA en cours de traitement (normal pour SEPA - 2-5 jours)
+      await updateMissionPaymentStatus(depositPayment.id, "processing", {
+        stripePaymentIntentId: depositPI.id,
+      });
+      console.log(`⏳ [DAY ONE PAYMENTS] Deposit payment processing (SEPA - will be succeeded via webhook): ${depositPayment.amount}€`);
     } else if (depositPI.status === "requires_capture") {
-      // Capturer maintenant
+      // Capturer maintenant (si possible)
       await captureSepaPayment(depositPayment.stripe_payment_intent_id);
       await updateMissionPaymentStatus(depositPayment.id, "captured", {
         stripeChargeId: depositPayment.stripe_payment_intent_id,
@@ -305,7 +343,11 @@ export async function captureDayOnePayments(missionAgreementId) {
       });
       console.log(`✅ [DAY ONE PAYMENTS] Deposit captured: ${depositPayment.amount}€`);
     } else {
-      throw new Error(`Deposit PaymentIntent is in invalid status: ${depositPI.status}`);
+      // Autres statuts : on met à jour le statut du paiement pour refléter le statut Stripe
+      await updateMissionPaymentStatus(depositPayment.id, "processing", {
+        stripePaymentIntentId: depositPI.id,
+      });
+      console.log(`⏳ [DAY ONE PAYMENTS] Deposit payment in status: ${depositPI.status} - will be updated via webhook`);
     }
 
     // ✅ Le transfert vers le detailer est automatique via Stripe Connect
@@ -313,8 +355,14 @@ export async function captureDayOnePayments(missionAgreementId) {
     // Le montant complet de l'acompte (600€) est automatiquement transféré au detailer
     console.log(`✅ [DAY ONE PAYMENTS] Deposit will be automatically transferred to detailer via Stripe Connect: ${depositPayment.amount}€`);
 
-    results.depositCaptured = depositPayment.amount;
-    results.totalCaptured = commissionPayment.amount + depositPayment.amount;
+    // ✅ Ne compter que si réellement capturé (succeeded)
+    if (depositPI.status === "succeeded") {
+      results.depositCaptured = depositPayment.amount;
+    } else {
+      results.depositCaptured = 0; // En processing, pas encore capturé
+    }
+    
+    results.totalCaptured = results.commissionCaptured + results.depositCaptured;
 
     console.log(`✅ [DAY ONE PAYMENTS] Total captured: ${results.totalCaptured}€`);
 

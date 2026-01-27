@@ -405,17 +405,54 @@ export async function createMissionPaymentsController(req, res) {
       });
     }
 
-    // Créer le plan de paiement intelligent
-    const paymentSchedule = await createIntelligentPaymentSchedule(id, true); // authorizeAll = true
+    // 1) Créer le plan de paiement intelligent
+    const paymentSchedule = await createIntelligentPaymentSchedule(id, false); // authorizeAll = false car on va créer les paiements immédiatement
 
-    // Mettre à jour le statut à "active" (premier paiement autorisé)
+    // 2) ✅ CRÉER ET CONFIRMER IMMÉDIATEMENT les paiements du jour 1 (commission + acompte)
+    // Pour SEPA, les PaymentIntents sont créés avec confirm: true et seront en "processing"
+    // Le statut sera mis à jour à "succeeded" via webhook (2-5 jours)
+    const { createDayOnePayments, captureDayOnePayments } = await import("../services/missionPaymentDayOne.service.js");
+    
+    console.log("🔄 [CREATE PAYMENTS] Creating and confirming day one payments (commission + deposit)...");
+    const createResult = await createDayOnePayments(id);
+    
+    let captureResult = { commissionCaptured: 0, depositCaptured: 0, totalCaptured: 0 };
+    
+    if (!createResult.alreadyCreated) {
+      console.log("🔄 [CREATE PAYMENTS] Day one payments created, checking status...");
+      // ✅ Pour SEPA, les PaymentIntents sont déjà confirmés (confirm: true)
+      // On vérifie leur statut et on met à jour les paiements en conséquence
+      captureResult = await captureDayOnePayments(id);
+      console.log(`✅ [CREATE PAYMENTS] Day one payments status updated: commission=${captureResult.commissionCaptured}€, deposit=${captureResult.depositCaptured}€, total=${captureResult.totalCaptured}€`);
+    } else {
+      console.log("ℹ️ [CREATE PAYMENTS] Day one payments already created, checking current status...");
+      // Vérifier le statut actuel des paiements existants
+      try {
+        captureResult = await captureDayOnePayments(id);
+      } catch (err) {
+        console.warn("⚠️ [CREATE PAYMENTS] Could not check payment status:", err.message);
+      }
+    }
+
+    // 3) Mettre à jour le statut à "active" (paiements initiaux créés et confirmés)
     await updateMissionAgreementStatus(id, "active");
+
+    // ✅ Message adapté selon le statut des paiements
+    const message = captureResult.totalCaptured > 0
+      ? "Payment schedule created and initial payments captured successfully"
+      : "Payment schedule created. Initial payments (commission + deposit) are being processed via SEPA Direct Debit (2-5 business days)";
 
     return res.json({
       data: {
         agreementId: id,
         schedule: paymentSchedule,
-        message: "Payment schedule created successfully",
+        message,
+        initialPayments: {
+          commission: captureResult.commissionCaptured || 0,
+          deposit: captureResult.depositCaptured || 0,
+          total: captureResult.totalCaptured || 0,
+          status: captureResult.totalCaptured > 0 ? "captured" : "processing", // ✅ Indiquer si en processing
+        },
       },
     });
   } catch (err) {
