@@ -409,20 +409,31 @@ export async function createSepaPaymentIntent({
 
   // 3) ✅ UTILISER DIRECTEMENT le paymentMethodId et mandateId depuis getSepaMandate
   // getSepaMandate a déjà vérifié que le mandate est actif, donc on peut l'utiliser directement
-  // ⚠️ CRUCIAL : Utiliser le paymentMethodId retourné par getSepaMandate car il est garanti d'avoir le mandate associé
+  // ⚠️ CRUCIAL : TOUJOURS utiliser le paymentMethodId retourné par getSepaMandate car il est garanti d'avoir le mandate associé
+  // Si un paymentMethodId est fourni explicitement, on le vérifie d'abord, sinon on utilise celui de getSepaMandate
   let finalPaymentMethodId = paymentMethodId || sepaMandate.paymentMethodId;
   let finalMandateId = sepaMandate.id; // Le mandate ID retourné par getSepaMandate
   
-  // ✅ Vérifier que le paymentMethodId fourni correspond bien au mandate
+  // ✅ Vérifier que le paymentMethodId fourni a bien le mandate associé
   if (paymentMethodId && paymentMethodId !== sepaMandate.paymentMethodId) {
-    console.warn(`⚠️ [SEPA] Provided paymentMethodId (${paymentMethodId}) differs from mandate paymentMethodId (${sepaMandate.paymentMethodId}). Using mandate paymentMethodId to ensure mandate association.`);
-    finalPaymentMethodId = sepaMandate.paymentMethodId; // ✅ Utiliser celui qui a le mandate
-  }
-
-  // Si paymentMethodId est fourni explicitement, vérifier qu'il correspond au mandate
-  if (paymentMethodId && paymentMethodId !== sepaMandate.paymentMethodId) {
-    console.warn(`[SEPA] Provided paymentMethodId (${paymentMethodId}) differs from mandate paymentMethodId (${sepaMandate.paymentMethodId}). Using mandate paymentMethodId.`);
+    // Vérifier si le payment_method fourni a le bon mandate
+    try {
+      const providedPM = await stripe.paymentMethods.retrieve(paymentMethodId);
+      if (providedPM.sepa_debit?.mandate === finalMandateId) {
+        console.log(`✅ [SEPA] Provided paymentMethodId (${paymentMethodId}) has correct mandate (${finalMandateId})`);
+        finalPaymentMethodId = paymentMethodId;
+      } else {
+        console.warn(`⚠️ [SEPA] Provided paymentMethodId (${paymentMethodId}) does not have the expected mandate (${finalMandateId}). Using mandate paymentMethodId (${sepaMandate.paymentMethodId}) instead.`);
+        finalPaymentMethodId = sepaMandate.paymentMethodId; // ✅ Utiliser celui qui a le mandate
+      }
+    } catch (pmError) {
+      console.warn(`⚠️ [SEPA] Could not verify provided paymentMethodId (${paymentMethodId}): ${pmError.message}. Using mandate paymentMethodId (${sepaMandate.paymentMethodId}) instead.`);
+      finalPaymentMethodId = sepaMandate.paymentMethodId; // ✅ Utiliser celui qui a le mandate
+    }
+  } else {
+    // Pas de paymentMethodId fourni ou c'est celui de getSepaMandate → utiliser celui de getSepaMandate
     finalPaymentMethodId = sepaMandate.paymentMethodId;
+    console.log(`✅ [SEPA] Using paymentMethodId from getSepaMandate: ${finalPaymentMethodId} (guaranteed to have mandate ${finalMandateId})`);
   }
 
   // Vérifier que le payment method existe
@@ -637,12 +648,69 @@ export async function createSepaPaymentIntent({
     throw new Error(`Payment method verification failed: ${checkError.message}`);
   }
   
-  const paymentIntent = await stripe.paymentIntents.create(paymentIntentPayload);
+  let paymentIntent;
+  try {
+    paymentIntent = await stripe.paymentIntents.create(paymentIntentPayload);
+  } catch (createError) {
+    // ✅ Gestion spécifique des erreurs Stripe
+    if (createError.statusCode === 402 || createError.type === "StripeInvalidRequestError") {
+      const errorMessage = createError.raw?.message || createError.message;
+      console.error(`❌ [SEPA] PaymentIntent creation failed (402/InvalidRequest):`, errorMessage);
+      console.error(`❌ [SEPA] PaymentIntent error details:`, {
+        statusCode: createError.statusCode,
+        type: createError.type,
+        code: createError.code,
+        paymentIntentId: createError.raw?.payment_intent?.id,
+        paymentIntentStatus: createError.raw?.payment_intent?.status,
+        lastPaymentError: createError.raw?.payment_intent?.last_payment_error,
+      });
+      
+      // Si le PaymentIntent a été créé mais avec une erreur
+      if (createError.raw?.payment_intent) {
+        const failedPI = createError.raw.payment_intent;
+        if (failedPI.status === "requires_payment_method" && !failedPI.payment_method) {
+          throw new Error(
+            `SEPA payment failed: Payment method was not accepted by Stripe. ` +
+            `This can happen if the payment method does not have a valid mandate or if Stripe's risk system blocks it. ` +
+            `Please verify your SEPA Direct Debit setup or try with a smaller amount. ` +
+            `Stripe error: ${errorMessage}`
+          );
+        }
+      }
+      
+      throw new Error(
+        `SEPA payment was blocked by Stripe: ${errorMessage}. ` +
+        `This can happen with high amounts, first-time SEPA payments, or if the mandate is not properly set up. ` +
+        `Please try with a smaller amount or contact support.`
+      );
+    }
+    
+    // Autres erreurs
+    throw createError;
+  }
   
   // ✅ Vérifier que le PaymentIntent a bien un payment_method (pas null)
   if (!paymentIntent.payment_method) {
     console.error(`❌ [SEPA] PaymentIntent created but payment_method is null! PaymentIntent:`, paymentIntent.id);
-    throw new Error(`PaymentIntent created but payment_method is null. This should not happen.`);
+    console.error(`❌ [SEPA] PaymentIntent status:`, paymentIntent.status);
+    console.error(`❌ [SEPA] PaymentIntent last_payment_error:`, paymentIntent.last_payment_error);
+    
+    throw new Error(
+      `PaymentIntent created but payment_method is null. ` +
+      `This usually means the payment method was not accepted by Stripe. ` +
+      `Please verify your SEPA Direct Debit setup. ` +
+      `PaymentIntent status: ${paymentIntent.status}`
+    );
+  }
+  
+  // ✅ Vérifier le statut du PaymentIntent
+  if (paymentIntent.status === "requires_payment_method") {
+    const errorMsg = paymentIntent.last_payment_error?.message || "Payment method required";
+    console.error(`❌ [SEPA] PaymentIntent requires_payment_method:`, errorMsg);
+    throw new Error(
+      `SEPA payment requires a valid payment method: ${errorMsg}. ` +
+      `Please verify your SEPA Direct Debit setup.`
+    );
   }
   
   console.log(`✅ [SEPA] PaymentIntent created successfully: ${paymentIntent.id}, payment_method: ${paymentIntent.payment_method}, status: ${paymentIntent.status}`);
