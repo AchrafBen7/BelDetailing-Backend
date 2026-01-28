@@ -11,6 +11,7 @@ import {
   cancelSepaPaymentController,
   checkSepaValidationStatusController,
   validateExistingSepaAccountController,
+  confirmValidationPaymentController,
 } from "../controllers/sepaDirectDebit.controller.js";
 
 const router = Router();
@@ -44,5 +45,8 @@ router.get("/validation-status", checkSepaValidationStatusController);
 
 // POST /api/v1/sepa/validate-existing-account
 router.post("/validate-existing-account", validateExistingSepaAccountController);
+
+// POST /api/v1/sepa/confirm-validation-payment
+router.post("/confirm-validation-payment", confirmValidationPaymentController);
 
 export default router;

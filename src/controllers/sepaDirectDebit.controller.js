@@ -11,6 +11,7 @@ import {
 import {
   checkIfSepaValidationNeeded,
   validateExistingSepaAccount,
+  confirmValidationPaymentIntent,
 } from "../services/sepaMandateValidation.service.js";
 
 /**
@@ -263,9 +264,61 @@ export async function validateExistingSepaAccountController(req, res) {
     return res.json({ data: result });
   } catch (err) {
     console.error("[SEPA] validate existing account error:", err);
+    console.error("[SEPA] Error details:", {
+      message: err.message,
+      type: err.type,
+      code: err.code,
+      statusCode: err.statusCode,
+      raw: err.raw,
+    });
+    
+    // ✅ Retourner plus de détails pour les erreurs Stripe
+    if (err.type === "StripeInvalidRequestError") {
+      return res.status(400).json({ 
+        error: err.message || "Stripe payment error",
+        code: err.code || "STRIPE_ERROR",
+        stripeError: {
+          type: err.type,
+          code: err.code,
+          statusCode: err.statusCode,
+          message: err.message,
+        },
+        hint: "If this is a 'requires_payment_method' error, the PaymentIntent requires client confirmation via PaymentSheet.",
+      });
+    }
+    
     return res.status(500).json({ 
       error: err.message || "Could not validate existing SEPA account",
-      code: "SEPA_VALIDATION_ERROR"
+      code: "SEPA_VALIDATION_ERROR",
+      details: err.message,
+    });
+  }
+}
+
+/**
+ * 🔹 POST /api/v1/sepa/confirm-validation-payment
+ * Confirmer un PaymentIntent de validation qui nécessite une confirmation client
+ */
+export async function confirmValidationPaymentController(req, res) {
+  try {
+    if (req.user.role !== "company") {
+      return res.status(403).json({ error: "Only companies can confirm validation payments" });
+    }
+
+    const { paymentIntentId } = req.body;
+
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: "Missing paymentIntentId" });
+    }
+
+    const result = await confirmValidationPaymentIntent(paymentIntentId, req.user.id);
+
+    return res.json({ data: result });
+  } catch (err) {
+    console.error("[SEPA] confirm validation payment error:", err);
+    return res.status(400).json({ 
+      error: err.message || "Could not confirm validation payment",
+      code: "SEPA_VALIDATION_CONFIRM_ERROR"
     });
   }
 }

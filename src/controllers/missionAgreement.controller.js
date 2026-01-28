@@ -311,6 +311,17 @@ export async function confirmMissionPaymentController(req, res) {
   } catch (err) {
     console.error("[MISSION AGREEMENT] confirm payment error:", err);
     const statusCode = err.statusCode || 500;
+    
+    // ✅ Gérer spécifiquement l'erreur de validation SEPA
+    if (err.code === "SEPA_VALIDATION_REQUIRED") {
+      return res.status(400).json({
+        error: "SEPA_VALIDATION_REQUIRED",
+        message: err.message || "Votre compte SEPA nécessite une validation avant de pouvoir créer des paiements.",
+        requiresValidation: true,
+        validationStatus: err.validationStatus,
+      });
+    }
+    
     return res.status(statusCode).json({ error: err.message || "Could not confirm mission payment" });
   }
 }
@@ -391,6 +402,19 @@ export async function createMissionPaymentsController(req, res) {
         error: "SEPA_MANDATE_REQUIRED",
         message: "Un mandat SEPA actif est requis pour créer les paiements. Veuillez configurer votre mandat SEPA.",
         requiresSepaSetup: true,
+      });
+    }
+
+    // ✅ Vérifier si la validation 1€ a été effectuée
+    const { checkIfSepaValidationNeeded } = await import("../services/sepaMandateValidation.service.js");
+    const validationStatus = await checkIfSepaValidationNeeded(req.user.id);
+
+    if (validationStatus.needsValidation) {
+      return res.status(400).json({
+        error: "SEPA_VALIDATION_REQUIRED",
+        message: "Votre compte SEPA nécessite une validation avant de pouvoir créer des paiements. Un paiement test de 1€ sera effectué et immédiatement remboursé.",
+        requiresValidation: true,
+        validationStatus: validationStatus,
       });
     }
 

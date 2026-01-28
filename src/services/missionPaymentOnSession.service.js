@@ -105,6 +105,19 @@ export async function confirmMissionPaymentOnSession(missionAgreementId, company
     throw new Error("SEPA mandate is not active. Please set up SEPA Direct Debit first.");
   }
 
+  // 5.1) ✅ Vérifier si la validation 1€ a été effectuée
+  const { checkIfSepaValidationNeeded } = await import("./sepaMandateValidation.service.js");
+  const validationStatus = await checkIfSepaValidationNeeded(agreement.companyId);
+
+  if (validationStatus.needsValidation) {
+    const err = new Error("SEPA_VALIDATION_REQUIRED: Votre compte SEPA nécessite une validation avant de pouvoir créer des paiements. Un paiement test de 1€ sera effectué et immédiatement remboursé.");
+    err.statusCode = 400;
+    err.code = "SEPA_VALIDATION_REQUIRED";
+    err.requiresValidation = true;
+    err.validationStatus = validationStatus;
+    throw err;
+  }
+
   // 6) Vérifier le Stripe Connected Account du detailer
   if (!agreement.stripeConnectedAccountId) {
     throw new Error("Detailer Stripe Connected Account ID not found. Please complete Stripe Connect onboarding first.");

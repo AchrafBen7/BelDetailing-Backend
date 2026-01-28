@@ -46,29 +46,64 @@ export async function validateSepaMandateWithTestPayment(companyUserId, paymentM
     }
 
     // 3) Créer un PaymentIntent de 1€ pour valider le mandate (ON-SESSION)
-    // ⚠️ IMPORTANT : On utilise confirm: true pour que ce soit un paiement on-session
-    // Cela valide le mandate et permet ensuite les paiements off-session
+    // ⚠️ IMPORTANT : Pour SEPA, on ne peut pas utiliser confirm: true directement
+    // Il faut retourner le client_secret et laisser l'utilisateur confirmer via PaymentSheet
+    // OU utiliser off_session: true avec confirm: true (mais Stripe peut bloquer si le mandate n'a jamais été utilisé)
     console.log(`🔄 [SEPA VALIDATION] Creating test PaymentIntent (1€)...`);
     
-    const testPaymentIntent = await stripe.paymentIntents.create({
-      amount: 100, // 1€ en centimes
-      currency: "eur",
-      customer: customerId,
-      payment_method: paymentMethodId,
-      payment_method_types: ["sepa_debit"],
-      mandate: mandateId,
-      off_session: false, // ✅ ON-SESSION pour valider le mandate
-      confirm: true, // ✅ Confirmer immédiatement
-      description: "Test payment to validate SEPA mandate - will be refunded",
-      metadata: {
-        userId: companyUserId,
-        userRole: "company",
-        source: "beldetailing-app",
-        type: "sepa_mandate_validation",
-        isTestPayment: "true",
-        mandateId: mandateId,
-      },
-    });
+    // ✅ Essayer d'abord avec off_session: true et confirm: true (pour Postman/automatique)
+    // Si ça échoue, on retournera le client_secret pour confirmation manuelle
+    let testPaymentIntent;
+    let requiresClientConfirmation = false;
+    
+    try {
+      testPaymentIntent = await stripe.paymentIntents.create({
+        amount: 100, // 1€ en centimes
+        currency: "eur",
+        customer: customerId,
+        payment_method: paymentMethodId,
+        payment_method_types: ["sepa_debit"],
+        mandate: mandateId,
+        off_session: true, // ✅ Off-session pour permettre confirm: true
+        confirm: true, // ✅ Confirmer immédiatement
+        description: "Test payment to validate SEPA mandate - will be refunded",
+        metadata: {
+          userId: companyUserId,
+          userRole: "company",
+          source: "beldetailing-app",
+          type: "sepa_mandate_validation",
+          isTestPayment: "true",
+          mandateId: mandateId,
+        },
+      });
+      console.log(`✅ [SEPA VALIDATION] PaymentIntent created and confirmed: ${testPaymentIntent.id}`);
+    } catch (stripeError) {
+      // ❌ Si Stripe bloque (mandate jamais utilisé on-session), créer sans confirm
+      console.warn(`⚠️ [SEPA VALIDATION] Direct confirmation failed (${stripeError.message}), creating PaymentIntent without confirm...`);
+      
+      testPaymentIntent = await stripe.paymentIntents.create({
+        amount: 100, // 1€ en centimes
+        currency: "eur",
+        customer: customerId,
+        payment_method: paymentMethodId,
+        payment_method_types: ["sepa_debit"],
+        mandate: mandateId,
+        off_session: false, // ✅ ON-SESSION - nécessite confirmation via PaymentSheet
+        confirm: false, // ❌ Ne pas confirmer automatiquement
+        description: "Test payment to validate SEPA mandate - will be refunded",
+        metadata: {
+          userId: companyUserId,
+          userRole: "company",
+          source: "beldetailing-app",
+          type: "sepa_mandate_validation",
+          isTestPayment: "true",
+          mandateId: mandateId,
+        },
+      });
+      
+      requiresClientConfirmation = true;
+      console.log(`✅ [SEPA VALIDATION] PaymentIntent created (requires client confirmation): ${testPaymentIntent.id}`);
+    }
 
     console.log(`✅ [SEPA VALIDATION] Test PaymentIntent created: ${testPaymentIntent.id}, status: ${testPaymentIntent.status}`);
 
@@ -122,10 +157,22 @@ export async function validateSepaMandateWithTestPayment(companyUserId, paymentM
       console.error(`⚠️ [SEPA VALIDATION] Notification send failed:`, notifError);
     }
 
+    // ✅ Si le PaymentIntent nécessite une confirmation client, retourner le client_secret
+    if (requiresClientConfirmation) {
+      return {
+        paymentIntentId: testPaymentIntent.id,
+        clientSecret: testPaymentIntent.client_secret,
+        requiresClientConfirmation: true,
+        status: testPaymentIntent.status,
+        message: "PaymentIntent created. Please confirm it using PaymentSheet with the provided client_secret to validate your SEPA mandate.",
+      };
+    }
+
     return {
       paymentIntentId: testPaymentIntent.id,
       refundId: refundId,
       status: testPaymentIntent.status,
+      requiresClientConfirmation: false,
       message: testPaymentIntent.status === "succeeded"
         ? "Test payment succeeded and refunded immediately"
         : "Test payment is processing (SEPA - 2-5 days). Refund will be processed automatically when payment succeeds.",
@@ -298,6 +345,51 @@ export async function checkIfSepaValidationNeeded(companyUserId) {
 
   } catch (error) {
     console.error(`❌ [SEPA VALIDATION] Error checking validation status:`, error);
+    throw error;
+  }
+}
+
+/**
+ * 🟦 CONFIRM VALIDATION PAYMENT INTENT – Confirmer un PaymentIntent de validation
+ * 
+ * Cette fonction confirme un PaymentIntent de validation qui nécessite une confirmation client.
+ * 
+ * @param {string} paymentIntentId - ID du PaymentIntent
+ * @param {string} companyUserId - ID de la company (pour vérification)
+ * @returns {Promise<Object>} Résultat de la confirmation
+ */
+export async function confirmValidationPaymentIntent(paymentIntentId, companyUserId) {
+  console.log(`🔄 [SEPA VALIDATION] Confirming validation PaymentIntent: ${paymentIntentId}`);
+
+  try {
+    // 1) Vérifier que le PaymentIntent existe et appartient à cette company
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    
+    if (paymentIntent.metadata?.userId !== companyUserId) {
+      throw new Error("PaymentIntent does not belong to this company");
+    }
+    
+    if (paymentIntent.metadata?.type !== "sepa_mandate_validation") {
+      throw new Error("PaymentIntent is not a validation payment");
+    }
+
+    // 2) Confirmer le PaymentIntent
+    const confirmed = await stripe.paymentIntents.confirm(paymentIntentId);
+
+    console.log(`✅ [SEPA VALIDATION] PaymentIntent confirmed: ${confirmed.id}, status: ${confirmed.status}`);
+
+    return {
+      paymentIntentId: confirmed.id,
+      status: confirmed.status,
+      message: confirmed.status === "succeeded"
+        ? "Validation payment succeeded"
+        : confirmed.status === "processing"
+        ? "Validation payment is processing (SEPA - 2-5 days). Refund will be processed automatically when payment succeeds."
+        : `Validation payment status: ${confirmed.status}`,
+    };
+
+  } catch (error) {
+    console.error(`❌ [SEPA VALIDATION] Error confirming validation PaymentIntent:`, error);
     throw error;
   }
 }
