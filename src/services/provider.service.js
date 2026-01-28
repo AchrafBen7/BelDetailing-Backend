@@ -250,14 +250,45 @@ return mapped;
 
 // 🟦 Services d’un prestataire
 export async function getProviderServices(providerId) {
-  const { data, error } = await supabase
+  // 1) Récupérer les services
+  const { data: services, error: servicesError } = await supabase
     .from("services")
     .select("*")
     .eq("provider_id", providerId)
     .order("price", { ascending: true });
 
-  if (error) throw error;
-  return data;
+  if (servicesError) throw servicesError;
+  if (!services || services.length === 0) return [];
+
+  // 2) 🆕 Calculer le nombre de réservations par service
+  const serviceIds = services.map(s => s.id);
+  
+  // Compter les bookings par service_id (via booking_services si la table existe, sinon via service_id direct)
+  const { data: bookingCounts, error: countsError } = await supabase
+    .from("bookings")
+    .select("service_id")
+    .in("service_id", serviceIds)
+    .in("status", ["confirmed", "started", "in_progress", "completed"]); // Seulement les bookings actifs/terminés
+
+  if (countsError) {
+    console.warn("[PROVIDER SERVICES] Error counting bookings:", countsError);
+    // Si erreur, retourner les services sans reservation_count
+    return services.map(s => ({ ...s, reservation_count: 0 }));
+  }
+
+  // 3) Compter par service_id
+  const countsMap = new Map();
+  (bookingCounts || []).forEach(booking => {
+    if (booking.service_id) {
+      countsMap.set(booking.service_id, (countsMap.get(booking.service_id) || 0) + 1);
+    }
+  });
+
+  // 4) Ajouter reservation_count à chaque service
+  return services.map(service => ({
+    ...service,
+    reservation_count: countsMap.get(service.id) || 0,
+  }));
 }
 
 export async function createProviderService(userId, service) {
@@ -281,20 +312,42 @@ export async function createProviderService(userId, service) {
     throw err;
   }
 
+  // 🆕 Gérer les catégories multiples
+  let categoryValue = service.category;
+  let categoriesArray = [];
+  
+  if (Array.isArray(service.categories) && service.categories.length > 0) {
+    categoryValue = service.categories[0];
+    categoriesArray = service.categories;
+  } else if (service.category) {
+    categoryValue = service.category;
+    categoriesArray = [service.category];
+  } else {
+    categoryValue = "carCleaning";
+    categoriesArray = ["carCleaning"];
+  }
+
   // 1️⃣ Insert dans Supabase
+  const insertPayload = {
+    provider_id: providerProfileId,
+    name: service.name,
+    category: categoryValue, // Première catégorie pour compatibilité
+    price: service.price,
+    duration_minutes: service.duration_minutes,
+    description: service.description,
+    is_available: service.is_available,
+    image_url: service.image_url,
+    currency: service.currency || "eur",
+  };
+  
+  // 🆕 Ajouter categories si fourni
+  if (categoriesArray.length > 0) {
+    insertPayload.categories = categoriesArray;
+  }
+  
   const { data, error } = await supabase
     .from("services")
-    .insert({
-      provider_id: providerProfileId,
-      name: service.name,
-      category: service.category,
-      price: service.price,
-      duration_minutes: service.duration_minutes,
-      description: service.description,
-      is_available: service.is_available,
-      image_url: service.image_url,
-      currency: service.currency || "eur",
-    })
+    .insert(insertPayload)
     .select()
     .single();
 
@@ -321,6 +374,118 @@ export async function createProviderService(userId, service) {
       stripeError: true,
     };
   }
+}
+
+// 🟦 Mettre à jour un service d'un prestataire
+export async function updateProviderService(serviceId, userId, updates) {
+  // 1) Vérifier que le provider existe
+  const { data: provider, error: providerError } = await supabase
+    .from("provider_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (providerError) throw providerError;
+  if (!provider) {
+    const err = new Error("Provider profile not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const providerProfileId = provider.id ?? provider.user_id;
+
+  // 2) Vérifier que le service appartient à ce provider
+  const { data: existingService, error: serviceError } = await supabase
+    .from("services")
+    .select("id, provider_id")
+    .eq("id", serviceId)
+    .single();
+
+  if (serviceError) throw serviceError;
+  if (!existingService) {
+    const err = new Error("Service not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // Vérifier que le service appartient à ce provider
+  if (existingService.provider_id !== providerProfileId) {
+    const err = new Error("Forbidden: Service does not belong to this provider");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  // 3) 🆕 Gérer les catégories multiples
+  let categoryValue;
+  let categoriesArray = [];
+  
+  if (Array.isArray(updates.categories) && updates.categories.length > 0) {
+    categoryValue = updates.categories[0];
+    categoriesArray = updates.categories;
+  } else if (updates.category) {
+    categoryValue = updates.category;
+    categoriesArray = [updates.category];
+  } else {
+    // Garder les catégories existantes si non fournies
+    const { data: currentService } = await supabase
+      .from("services")
+      .select("category, categories")
+      .eq("id", serviceId)
+      .single();
+    
+    if (currentService) {
+      categoryValue = currentService.category;
+      categoriesArray = currentService.categories || (currentService.category ? [currentService.category] : []);
+    } else {
+      categoryValue = "carCleaning";
+      categoriesArray = ["carCleaning"];
+    }
+  }
+
+  // 4) Mettre à jour le service
+  const updatePayload = {
+    name: updates.name,
+    category: categoryValue, // Première catégorie pour compatibilité
+    description: updates.description,
+    price: updates.price,
+    duration_minutes: updates.duration_minutes,
+    is_available: updates.is_available,
+    image_url: updates.image_url,
+    currency: updates.currency || "eur",
+  };
+
+  // 🆕 Ajouter categories si fourni
+  if (categoriesArray.length > 0) {
+    updatePayload.categories = categoriesArray;
+  }
+
+  // Enlever les undefined
+  Object.keys(updatePayload).forEach((key) => {
+    if (updatePayload[key] === undefined) {
+      delete updatePayload[key];
+    }
+  });
+
+  const { data, error } = await supabase
+    .from("services")
+    .update(updatePayload)
+    .eq("id", serviceId)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  // 5) 🆕 Si le prix a changé, mettre à jour le produit Stripe
+  if (updates.price && updates.price !== existingService.price) {
+    try {
+      await ensureStripeProductForService(data.id);
+    } catch (stripeError) {
+      console.warn("[SERVICE] Stripe product update failed:", stripeError);
+      // Ne pas bloquer la mise à jour si Stripe échoue
+    }
+  }
+
+  return data;
 }
 
 // 🟦 Supprimer un service d'un prestataire

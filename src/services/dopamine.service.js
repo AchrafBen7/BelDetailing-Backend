@@ -77,6 +77,7 @@ export async function trackProviderView(providerId, customerId, viewType = "prof
  */
 export async function getProviderViewsStats(providerUserId) {
   try {
+    // 1) Récupérer les stats du profil
     const { data, error } = await supabase
       .from("provider_profiles")
       .select("profile_views_total, profile_views_this_week, profile_views_last_week, profile_views_updated_at")
@@ -88,6 +89,29 @@ export async function getProviderViewsStats(providerUserId) {
     const thisWeek = data.profile_views_this_week || 0;
     const lastWeek = data.profile_views_last_week || 0;
 
+    // 2) 🆕 Calculer les vues du mois (depuis provider_profile_views)
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    
+    const { data: monthViews, error: monthError } = await supabase
+      .from("provider_profile_views")
+      .select("id")
+      .eq("provider_user_id", providerUserId)
+      .gte("viewed_at", startOfMonth.toISOString());
+    
+    const thisMonth = monthViews?.length || 0;
+    
+    // 3) 🆕 Calculer les vues de l'année
+    const { data: yearViews, error: yearError } = await supabase
+      .from("provider_profile_views")
+      .select("id")
+      .eq("provider_user_id", providerUserId)
+      .gte("viewed_at", startOfYear.toISOString());
+    
+    const thisYear = yearViews?.length || 0;
+
+    // 4) Variation (semaine)
     let variationPercent = 0;
     if (lastWeek > 0) {
       variationPercent = ((thisWeek - lastWeek) / lastWeek) * 100;
@@ -98,6 +122,8 @@ export async function getProviderViewsStats(providerUserId) {
     return {
       total: data.profile_views_total || 0,
       thisWeek,
+      thisMonth, // 🆕 Vues du mois
+      thisYear, // 🆕 Vues de l'année
       lastWeek,
       variationPercent: Math.round(variationPercent),
     };

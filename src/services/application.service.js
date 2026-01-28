@@ -372,41 +372,67 @@ export async function refuseApplication(id, user) {
 // 🟦 GET MY APPLICATIONS – GET /api/v1/applications/me (provider)
 // 🆕 Exclut les candidatures refusées (ne doivent plus apparaître dans "Mes candidatures")
 export async function getMyApplications(userId) {
-  const { data, error } = await supabase
-    .from("applications")
-    .select(`
-      *,
-      offers!applications_offer_id_fkey(
-        id,
-        title,
-        description,
-        city,
-        postal_code,
-        price_min,
-        price_max,
-        vehicle_count,
-        category,
-        categories,
-        type,
-        status,
-        company_name,
-        company_logo_url
-      )
-    `)
-    .eq("provider_id", userId)
-    // 🆕 EXCLURE les candidatures refusées
-    .neq("status", "refused")
-    .order("created_at", { ascending: false });
+  // 🆕 Essayer d'abord avec la relation, si ça échoue, récupérer les offres séparément
+  let data, error;
+  
+  try {
+    const result = await supabase
+      .from("applications")
+      .select(`
+        *,
+        offers!applications_offer_id_fkey(
+          id,
+          title,
+          description,
+          city,
+          postal_code,
+          price_min,
+          price_max,
+          vehicle_count,
+          category,
+          categories,
+          type,
+          status,
+          company_name,
+          company_logo_url
+        )
+      `)
+      .eq("provider_id", userId)
+      // 🆕 EXCLURE les candidatures refusées
+      .neq("status", "refused")
+      .order("created_at", { ascending: false });
+    
+    data = result.data;
+    error = result.error;
+  } catch (err) {
+    console.warn("[APPLICATIONS] Error with relation, trying without:", err);
+    // Fallback : récupérer sans la relation
+    const result = await supabase
+      .from("applications")
+      .select("*")
+      .eq("provider_id", userId)
+      .neq("status", "refused")
+      .order("created_at", { ascending: false });
+    
+    data = result.data;
+    error = result.error;
+  }
 
   if (error) {
     console.error("[APPLICATIONS] getMyApplications error:", error);
     throw error;
   }
 
-  return (data || []).map(row => {
-    // Gérer le cas où offers est un tableau (relation Supabase)
-    const offerRow = Array.isArray(row.offers) ? row.offers[0] : row.offers;
+  // 🆕 Si on n'a pas les offres via la relation, les récupérer séparément
+  const applications = (data || []).map(row => {
+    let offerRow = null;
     
+    // Essayer de récupérer l'offre depuis la relation
+    if (row.offers) {
+      offerRow = Array.isArray(row.offers) ? row.offers[0] : row.offers;
+    }
+    
+    // Si pas d'offre via relation, on retourne quand même l'application (sans offer)
     return {
       ...mapApplicationRowToDto(row),
       offer: offerRow ? {
@@ -427,4 +453,6 @@ export async function getMyApplications(userId) {
       } : null,
     };
   });
+  
+  return applications;
 }

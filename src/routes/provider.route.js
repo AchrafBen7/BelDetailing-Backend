@@ -6,6 +6,7 @@ import {
   getProvider,
   updateMyProviderProfile,
   createService,
+  updateService,
   deleteServiceController,
   getProviderServicesController,
   getProviderReviewsController,
@@ -57,6 +58,7 @@ router.patch("/messages/:id/status", requireAuth, updateStatus); // Provider uni
 
 // ⭐ Routes services (doivent être avant /:id pour éviter les conflits)
 router.post("/services", requireAuth, createService);
+router.patch("/services/:id", requireAuth, updateService); // 🆕 Mise à jour de service
 router.delete("/services/:id", requireAuth, deleteServiceController);
 
 // ⭐ Routes paramétrées

@@ -4,6 +4,7 @@ import {
   getProviderById,
   updateProviderProfile,
   createProviderService,
+  updateProviderService,
   deleteProviderService,
   getProviderServices,
   getProviderReviews,
@@ -88,6 +89,23 @@ export async function createService(req, res) {
   } catch (err) {
     console.error("[PROVIDERS] createService error:", err);
     return res.status(500).json({ error: "Could not create service" });
+  }
+}
+
+// 🆕 Update a service
+export async function updateService(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can update services" });
+    }
+
+    const { id } = req.params;
+    const updated = await updateProviderService(id, req.user.id, req.body);
+    return res.json(updated);
+  } catch (err) {
+    console.error("[PROVIDERS] updateService error:", err);
+    const status = err.statusCode || 500;
+    return res.status(status).json({ error: err.message || "Could not update service" });
   }
 }
 
