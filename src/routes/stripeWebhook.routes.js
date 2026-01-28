@@ -145,6 +145,28 @@ router.post(
           const amount = intent.amount / 100;
           const currency = intent.currency;
 
+          // ✅ NOUVEAU : Gérer les paiements de validation SEPA
+          if (intent.metadata?.type === "sepa_mandate_validation" && intent.metadata?.isTestPayment === "true") {
+            console.log(`🔄 [WEBHOOK] SEPA validation payment succeeded: ${intent.id}`);
+            
+            try {
+              const { refundSepaValidationPayment } = await import("../services/sepaMandateValidation.service.js");
+              const refundResult = await refundSepaValidationPayment(intent.id);
+              
+              if (refundResult.refundId) {
+                console.log(`✅ [WEBHOOK] SEPA validation payment refunded: ${refundResult.refundId}`);
+              } else if (refundResult.alreadyRefunded) {
+                console.log(`ℹ️ [WEBHOOK] SEPA validation payment already refunded`);
+              }
+            } catch (refundError) {
+              console.error(`❌ [WEBHOOK] Failed to refund SEPA validation payment:`, refundError);
+              // Ne pas bloquer le webhook, juste logger
+            }
+            
+            // Ne pas traiter ce paiement comme un paiement normal
+            break;
+          }
+
           await supabase.from("payment_transactions").insert({
             user_id: userId,
             stripe_object_id: intent.id,
@@ -889,13 +911,36 @@ case "setup_intent.succeeded": {
             .single();
           
           if (user && user.role === "company") {
-            console.log("✅ [WEBHOOK] Sending notification to company:", user.id);
+            console.log("✅ [WEBHOOK] Company found:", user.id);
+            
+            // ✅ NOUVEAU : Effectuer un paiement test de 1€ pour valider le mandate
+            // Ce paiement sera remboursé automatiquement pour valider le mandate en on-session
+            try {
+              const { validateSepaMandateWithTestPayment } = await import("../services/sepaMandateValidation.service.js");
+              
+              console.log("🔄 [WEBHOOK] Starting SEPA mandate validation with test payment (1€)...");
+              const validationResult = await validateSepaMandateWithTestPayment(
+                user.id,
+                paymentMethodId,
+                mandateId
+              );
+              
+              console.log(`✅ [WEBHOOK] SEPA mandate validation started: ${validationResult.paymentIntentId}`);
+              console.log(`📦 [WEBHOOK] Validation status: ${validationResult.status}`);
+              console.log(`📦 [WEBHOOK] Validation message: ${validationResult.message}`);
+            } catch (validationError) {
+              console.error(`❌ [WEBHOOK] SEPA mandate validation failed:`, validationError);
+              // Ne pas bloquer le webhook si la validation échoue
+              // On envoie quand même la notification
+            }
+            
+            // Envoyer la notification
             await sendNotificationToUser({
               userId: user.id,
               title: "Mandat SEPA configuré",
               message: mandate.status === "active" 
-                ? "Votre mandat SEPA a été activé avec succès. Vous pouvez maintenant créer des offres."
-                : "Votre mandat SEPA est en attente de validation. Vous pouvez créer des offres, mais les paiements seront traités une fois le mandat activé.",
+                ? "Votre mandat SEPA a été activé avec succès. Un paiement test de 1€ a été effectué pour valider votre mandat (sera remboursé automatiquement). Vous pouvez maintenant créer des offres."
+                : "Votre mandat SEPA est en attente de validation. Un paiement test de 1€ a été effectué pour valider votre mandat (sera remboursé automatiquement). Vous pouvez créer des offres, mais les paiements seront traités une fois le mandat activé.",
               data: {
                 type: "sepa_mandate_activated",
                 mandate_id: mandateId,
