@@ -298,25 +298,141 @@ export async function checkIfSepaValidationNeeded(companyUserId) {
 
     const customerId = companyUser.stripe_customer_id;
 
-    // 2) Vérifier si un PaymentIntent de validation existe déjà
+    // 2) Vérifier si un PaymentIntent de validation existe déjà ET son statut
     const validationPaymentIntents = await stripe.paymentIntents.list({
       customer: customerId,
       limit: 100,
     });
 
-    const hasValidationPayment = validationPaymentIntents.data.some(
+    // Filtrer les PaymentIntents de validation
+    let validationPIs = validationPaymentIntents.data.filter(
       (pi) =>
         pi.metadata?.type === "sepa_mandate_validation" &&
         pi.metadata?.isTestPayment === "true"
     );
 
-    if (hasValidationPayment) {
-      console.log(`✅ [SEPA VALIDATION] Validation payment already exists for company: ${companyUserId}`);
+    // ✅ Récupérer les détails complets de chaque PaymentIntent pour mieux détecter les blocages
+    if (validationPIs.length > 0) {
+      console.log(`🔄 [SEPA VALIDATION] Retrieving full details for ${validationPIs.length} validation PaymentIntent(s)...`);
+      validationPIs = await Promise.all(
+        validationPIs.map(async (pi) => {
+          try {
+            const fullPI = await stripe.paymentIntents.retrieve(pi.id, {
+              expand: ['charges.data.outcome', 'last_payment_error'],
+            });
+            return fullPI;
+          } catch (err) {
+            console.warn(`⚠️ [SEPA VALIDATION] Could not retrieve full details for ${pi.id}:`, err.message);
+            return pi; // Utiliser les données partielles
+          }
+        })
+      );
+    }
+
+    if (validationPIs.length > 0) {
+      console.log(`📋 [SEPA VALIDATION] Found ${validationPIs.length} validation PaymentIntent(s) for company: ${companyUserId}`);
+      
+      // ✅ Vérifier le statut de chaque PaymentIntent
+      // Seulement considérer comme validé si au moins un est succeeded ou processing
+      const successfulValidations = validationPIs.filter(
+        (pi) => pi.status === "succeeded" || pi.status === "processing"
+      );
+
+      const failedValidations = validationPIs.filter(
+        (pi) => {
+          // ✅ Statuts d'échec explicites
+          if (pi.status === "canceled") return true;
+          
+          // ✅ PaymentIntent qui nécessite un nouveau payment method (souvent = bloqué)
+          if (pi.status === "requires_payment_method") {
+            // Vérifier si c'est dû à un blocage Stripe
+            const errorMessage = pi.last_payment_error?.message?.toLowerCase() || "";
+            const errorCode = pi.last_payment_error?.code || "";
+            
+            // Détecter les erreurs de blocage Stripe Radar
+            if (
+              errorMessage.includes("high-risk") ||
+              errorMessage.includes("blocked") ||
+              errorMessage.includes("too high-risk") ||
+              errorCode === "card_declined" ||
+              errorCode === "generic_decline"
+            ) {
+              return true; // Bloqué par Stripe
+            }
+            return true; // Par défaut, considérer comme échec
+          }
+          
+          // ✅ Erreurs d'authentification
+          if (pi.status === "requires_action" && pi.last_payment_error?.code === "payment_intent_authentication_failure") {
+            return true;
+          }
+          
+          // ✅ Vérifier les charges pour détecter les blocages
+          if (pi.charges?.data?.length > 0) {
+            const hasBlockedCharge = pi.charges.data.some(charge => 
+              charge.outcome?.type === "issuer_declined" || 
+              charge.outcome?.type === "blocked" ||
+              charge.outcome?.reason === "high_risk" ||
+              charge.status === "failed"
+            );
+            if (hasBlockedCharge) return true;
+          }
+          
+          return false;
+        }
+      );
+
+      console.log(`📊 [SEPA VALIDATION] Validation status: ${successfulValidations.length} successful/processing, ${failedValidations.length} failed/blocked`);
+
+      // ✅ Si au moins un PaymentIntent est succeeded ou processing → validation OK
+      if (successfulValidations.length > 0) {
+        console.log(`✅ [SEPA VALIDATION] Validation payment succeeded/processing for company: ${companyUserId}`);
+        return {
+          needsValidation: false,
+          hasActiveMandate: true,
+          mandate: null,
+          reason: "already_validated",
+          validationStatus: "success",
+          paymentIntentIds: successfulValidations.map(pi => pi.id),
+        };
+      }
+
+      // ✅ Si tous les PaymentIntents ont échoué → permettre une nouvelle tentative
+      if (failedValidations.length > 0 && successfulValidations.length === 0) {
+        console.log(`⚠️ [SEPA VALIDATION] Previous validation payment(s) failed/blocked. Allowing retry for company: ${companyUserId}`);
+        console.log(`   Failed PaymentIntent IDs: ${failedValidations.map(pi => `${pi.id} (${pi.status})`).join(", ")}`);
+        
+        // Récupérer le mandate pour permettre une nouvelle tentative
+        const { getSepaMandate } = await import("./sepaDirectDebit.service.js");
+        const mandate = await getSepaMandate(companyUserId);
+        
+        return {
+          needsValidation: true,
+          hasActiveMandate: true,
+          mandate: mandate,
+          reason: "previous_validation_failed",
+          previousFailedPaymentIntents: failedValidations.map(pi => ({
+            id: pi.id,
+            status: pi.status,
+            lastPaymentError: pi.last_payment_error,
+          })),
+        };
+      }
+
+      // ✅ Si statut inconnu ou autre → permettre une nouvelle tentative
+      console.log(`⚠️ [SEPA VALIDATION] Validation PaymentIntent(s) in unknown status. Allowing retry for company: ${companyUserId}`);
+      const { getSepaMandate } = await import("./sepaDirectDebit.service.js");
+      const mandate = await getSepaMandate(companyUserId);
+      
       return {
-        needsValidation: false,
+        needsValidation: true,
         hasActiveMandate: true,
-        mandate: null,
-        reason: "already_validated",
+        mandate: mandate,
+        reason: "validation_status_unknown",
+        existingPaymentIntents: validationPIs.map(pi => ({
+          id: pi.id,
+          status: pi.status,
+        })),
       };
     }
 
