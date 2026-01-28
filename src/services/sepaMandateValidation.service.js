@@ -81,13 +81,15 @@ export async function validateSepaMandateWithTestPayment(companyUserId, paymentM
       // ❌ Si Stripe bloque (mandate jamais utilisé on-session), créer sans confirm
       console.warn(`⚠️ [SEPA VALIDATION] Direct confirmation failed (${stripeError.message}), creating PaymentIntent without confirm...`);
       
+      // ✅ IMPORTANT : Si confirm: false, on ne peut PAS passer mandate
+      // Le mandate sera automatiquement utilisé car il est associé au payment_method
       testPaymentIntent = await stripe.paymentIntents.create({
         amount: 100, // 1€ en centimes
         currency: "eur",
         customer: customerId,
-        payment_method: paymentMethodId,
+        payment_method: paymentMethodId, // ✅ Le mandate est automatiquement associé à ce payment method
         payment_method_types: ["sepa_debit"],
-        mandate: mandateId,
+        // ❌ Ne pas passer mandate si confirm: false
         off_session: false, // ✅ ON-SESSION - nécessite confirmation via PaymentSheet
         confirm: false, // ❌ Ne pas confirmer automatiquement
         description: "Test payment to validate SEPA mandate - will be refunded",
@@ -97,7 +99,7 @@ export async function validateSepaMandateWithTestPayment(companyUserId, paymentM
           source: "beldetailing-app",
           type: "sepa_mandate_validation",
           isTestPayment: "true",
-          mandateId: mandateId,
+          mandateId: mandateId, // ✅ On garde le mandateId dans les metadata pour référence
         },
       });
       
