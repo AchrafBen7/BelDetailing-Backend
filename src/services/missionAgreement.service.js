@@ -229,9 +229,11 @@ export async function createMissionAgreement({
     remaining_amount: remainingAmount,
     payment_schedule: paymentSchedule || { type: "fractionated" }, // Par défaut fractionné
     operational_rules: null, // Sera défini lors de l'édition par la company
-    start_date: null, // Sera défini plus tard
-    end_date: null,
-    estimated_duration_days: null,
+    start_date: offerData.startDate || null, // 🆕 Utiliser les dates de l'offre si définies, sinon null
+    end_date: offerData.endDate || null, // 🆕 Utiliser les dates de l'offre si définies, sinon null
+    estimated_duration_days: offerData.startDate && offerData.endDate 
+      ? Math.ceil((new Date(offerData.endDate) - new Date(offerData.startDate)) / (1000 * 60 * 60 * 24))
+      : null, // 🆕 Calculer la durée si les dates sont définies
     status: "draft", // Sera activé après setup SEPA
     stripe_customer_id: companyUser?.stripe_customer_id || null,
     stripe_connected_account_id: providerProfile?.stripe_account_id || null,

@@ -32,6 +32,9 @@ function mapOfferRowToDto(row) {
     applicationsCount: row.applications_count ?? 0,
     // 🆕 Flag pour indiquer si une candidature est acceptée
     hasAcceptedApplication: row.has_accepted_application ?? false,
+    // 🆕 Dates optionnelles (définies lors de la création de l'offre)
+    startDate: row.start_date || null,
+    endDate: row.end_date || null,
   };
 }
 
@@ -144,6 +147,9 @@ export async function createOffer(payload, user) {
     created_by: user.id,
     company_name: companyProfile?.legal_name ?? null,
     company_logo_url: companyProfile?.logo_url ?? null,
+    // 🆕 Dates optionnelles (si définies lors de la création de l'offre)
+    start_date: payload.startDate || null,
+    end_date: payload.endDate || null,
   };
 
   // 🔥 Ajouter categories seulement si la colonne existe (sinon on ignore silencieusement)
@@ -265,6 +271,9 @@ export async function updateOffer(id, payload, user) {
     lng: payload.lng,
     type: payload.type,
     status: payload.status, // facultatif, sinon laisser comme avant côté client
+    // 🆕 Dates optionnelles (si définies lors de la mise à jour de l'offre)
+    start_date: payload.startDate,
+    end_date: payload.endDate,
   };
 
   // on enlève les undefined

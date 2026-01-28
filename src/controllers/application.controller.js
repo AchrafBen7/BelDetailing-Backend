@@ -161,7 +161,18 @@ export async function acceptApplicationController(req, res) {
     // 1) Accepter la candidature (met à jour le statut, calcule les montants, rejette les autres)
     const acceptResult = await acceptApplication(id, finalPrice, depositPercentage, req.user);
     
-    // 2) Créer le Mission Agreement (PAS de booking pour les missions/offers)
+    // 2) Récupérer les dates de l'offre si elles existent
+    const { data: offer, error: offerError } = await supabase
+      .from("offers")
+      .select("start_date, end_date")
+      .eq("id", acceptResult.offerId)
+      .maybeSingle();
+    
+    if (offerError) {
+      console.warn("[APPLICATIONS] Error fetching offer dates:", offerError);
+    }
+    
+    // 3) Créer le Mission Agreement (PAS de booking pour les missions/offers)
     // ⚠️ IMPORTANT : Les missions (offers) ne créent PAS de booking car :
     // - Les bookings sont pour les services ponctuels avec start_time/end_time précis
     // - Les missions sont gérées via Mission Agreement avec startDate/endDate
@@ -180,6 +191,9 @@ export async function acceptApplicationController(req, res) {
         vehicleCount: acceptResult.vehicleCount,
         city: acceptResult.city,
         postalCode: acceptResult.postalCode,
+        // 🆕 Dates de l'offre (si définies)
+        startDate: offer?.start_date || null,
+        endDate: offer?.end_date || null,
       },
     });
     
