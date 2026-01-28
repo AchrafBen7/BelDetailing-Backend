@@ -491,23 +491,82 @@ export async function confirmValidationPaymentIntent(paymentIntentId, companyUse
       throw new Error("PaymentIntent is not a validation payment");
     }
 
-    // 2) Confirmer le PaymentIntent
-    const confirmed = await stripe.paymentIntents.confirm(paymentIntentId);
+    // 2) Vérifier le statut actuel du PaymentIntent
+    console.log(`📋 [SEPA VALIDATION] Current PaymentIntent status: ${paymentIntent.status}`);
+    
+    if (paymentIntent.status === "succeeded" || paymentIntent.status === "processing") {
+      console.log(`✅ [SEPA VALIDATION] PaymentIntent already succeeded/processing, no confirmation needed`);
+      return {
+        paymentIntentId: paymentIntent.id,
+        status: paymentIntent.status,
+        message: paymentIntent.status === "succeeded"
+          ? "Validation payment succeeded"
+          : "Validation payment is processing (SEPA - 2-5 days). Refund will be processed automatically when payment succeeds.",
+      };
+    }
 
-    console.log(`✅ [SEPA VALIDATION] PaymentIntent confirmed: ${confirmed.id}, status: ${confirmed.status}`);
+    if (paymentIntent.status === "canceled") {
+      throw new Error("PaymentIntent has been canceled. Please create a new validation payment.");
+    }
 
-    return {
-      paymentIntentId: confirmed.id,
-      status: confirmed.status,
-      message: confirmed.status === "succeeded"
-        ? "Validation payment succeeded"
-        : confirmed.status === "processing"
-        ? "Validation payment is processing (SEPA - 2-5 days). Refund will be processed automatically when payment succeeds."
-        : `Validation payment status: ${confirmed.status}`,
-    };
+    // 3) Essayer de confirmer le PaymentIntent
+    console.log(`🔄 [SEPA VALIDATION] Attempting to confirm PaymentIntent...`);
+    
+    try {
+      const confirmed = await stripe.paymentIntents.confirm(paymentIntentId, {
+        return_url: undefined, // Pas de return_url pour SEPA
+      });
+
+      console.log(`✅ [SEPA VALIDATION] PaymentIntent confirmed: ${confirmed.id}, status: ${confirmed.status}`);
+
+      return {
+        paymentIntentId: confirmed.id,
+        status: confirmed.status,
+        message: confirmed.status === "succeeded"
+          ? "Validation payment succeeded"
+          : confirmed.status === "processing"
+          ? "Validation payment is processing (SEPA - 2-5 days). Refund will be processed automatically when payment succeeds."
+          : `Validation payment status: ${confirmed.status}`,
+      };
+    } catch (confirmError) {
+      // ✅ Récupérer le PaymentIntent mis à jour pour voir l'erreur
+      const updatedPI = await stripe.paymentIntents.retrieve(paymentIntentId);
+      
+      console.error(`❌ [SEPA VALIDATION] Confirmation failed. PaymentIntent status: ${updatedPI.status}`);
+      console.error(`❌ [SEPA VALIDATION] Error details:`, {
+        message: confirmError.message,
+        type: confirmError.type,
+        code: confirmError.code,
+        statusCode: confirmError.statusCode,
+        lastPaymentError: updatedPI.last_payment_error,
+      });
+
+      // ✅ Si le PaymentIntent est bloqué par Stripe Radar
+      if (
+        updatedPI.status === "requires_payment_method" &&
+        (updatedPI.last_payment_error?.message?.toLowerCase().includes("high-risk") ||
+         updatedPI.last_payment_error?.message?.toLowerCase().includes("blocked") ||
+         updatedPI.last_payment_error?.message?.toLowerCase().includes("too high-risk"))
+      ) {
+        const err = new Error("SEPA_VALIDATION_BLOCKED: Stripe has blocked this payment as too high-risk. Please contact Stripe support to adjust your Radar settings or use a different payment method for validation.");
+        err.statusCode = 400;
+        err.code = "SEPA_VALIDATION_BLOCKED";
+        err.stripeError = {
+          type: confirmError.type,
+          code: confirmError.code,
+          message: confirmError.message,
+          lastPaymentError: updatedPI.last_payment_error,
+        };
+        throw err;
+      }
+
+      // ✅ Autre erreur
+      throw confirmError;
+    }
 
   } catch (error) {
     console.error(`❌ [SEPA VALIDATION] Error confirming validation PaymentIntent:`, error);
+    console.error(`❌ [SEPA VALIDATION] Error stack:`, error.stack);
     throw error;
   }
 }

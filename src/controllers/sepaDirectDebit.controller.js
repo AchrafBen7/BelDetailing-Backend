@@ -316,9 +316,45 @@ export async function confirmValidationPaymentController(req, res) {
     return res.json({ data: result });
   } catch (err) {
     console.error("[SEPA] confirm validation payment error:", err);
+    console.error("[SEPA] Error details:", {
+      message: err.message,
+      type: err.type,
+      code: err.code,
+      statusCode: err.statusCode,
+      stripeError: err.stripeError,
+    });
+    
+    // ✅ Gérer spécifiquement le blocage Stripe Radar
+    if (err.code === "SEPA_VALIDATION_BLOCKED") {
+      return res.status(400).json({
+        error: "SEPA_VALIDATION_BLOCKED",
+        message: err.message,
+        code: err.code,
+        stripeError: err.stripeError,
+        hint: "Stripe has blocked this SEPA payment as too high-risk. This is likely due to Stripe Radar settings. Please contact Stripe support to adjust your account settings or try using PaymentSheet in the iOS app instead of API confirmation.",
+      });
+    }
+    
+    // ✅ Autres erreurs Stripe
+    if (err.type === "StripeInvalidRequestError" || err.type === "StripeAPIError") {
+      return res.status(400).json({
+        error: err.message || "Stripe payment error",
+        code: err.code || "STRIPE_ERROR",
+        stripeError: {
+          type: err.type,
+          code: err.code,
+          statusCode: err.statusCode,
+          message: err.message,
+          lastPaymentError: err.stripeError?.lastPaymentError,
+        },
+        hint: "If this is a 'requires_payment_method' error, the payment was likely blocked by Stripe Radar. Please contact Stripe support or use PaymentSheet in the iOS app.",
+      });
+    }
+    
     return res.status(400).json({ 
       error: err.message || "Could not confirm validation payment",
-      code: "SEPA_VALIDATION_CONFIRM_ERROR"
+      code: "SEPA_VALIDATION_CONFIRM_ERROR",
+      details: err.message,
     });
   }
 }
