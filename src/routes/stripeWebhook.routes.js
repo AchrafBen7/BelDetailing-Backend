@@ -890,20 +890,28 @@ case "setup_intent.succeeded": {
           
           if (user && user.role === "company") {
             console.log("✅ [WEBHOOK] Company found, checking if validation needed:", user.id);
+            console.log("📋 [WEBHOOK] Company email:", user.email);
             
             // ✅ Vérifier si la validation 1€ a déjà été faite
             const { checkIfSepaValidationNeeded, validateSepaMandateWithTestPayment } = await import("../services/sepaMandateValidation.service.js");
+            console.log("🔄 [WEBHOOK] Checking validation status for company:", user.id);
             const validationStatus = await checkIfSepaValidationNeeded(user.id);
+            console.log("📋 [WEBHOOK] Validation status result:", JSON.stringify(validationStatus, null, 2));
             
             if (validationStatus.needsValidation) {
               console.log("🔄 [WEBHOOK] Validation needed, triggering 1€ test payment...");
+              console.log("📋 [WEBHOOK] PaymentMethod ID:", paymentMethodId);
+              console.log("📋 [WEBHOOK] Mandate ID:", mandateId);
               try {
                 const validationResult = await validateSepaMandateWithTestPayment(
                   user.id,
                   paymentMethodId,
                   mandateId
                 );
-                console.log("✅ [WEBHOOK] Validation payment created:", validationResult.paymentIntentId);
+                console.log("✅ [WEBHOOK] Validation payment created successfully");
+                console.log("📋 [WEBHOOK] PaymentIntent ID:", validationResult.paymentIntentId);
+                console.log("📋 [WEBHOOK] Status:", validationResult.status);
+                console.log("📋 [WEBHOOK] Requires client confirmation:", validationResult.requiresClientConfirmation);
                 
                 // Notification avec info sur la validation
                 await sendNotificationToUser({
@@ -920,6 +928,13 @@ case "setup_intent.succeeded": {
                 });
               } catch (validationError) {
                 console.error("❌ [WEBHOOK] Error triggering validation payment:", validationError);
+                console.error("❌ [WEBHOOK] Error details:", {
+                  message: validationError.message,
+                  type: validationError.type,
+                  code: validationError.code,
+                  statusCode: validationError.statusCode,
+                  stack: validationError.stack,
+                });
                 // Ne pas bloquer le webhook, juste logger l'erreur
                 // L'utilisateur pourra déclencher la validation manuellement via l'endpoint
                 
