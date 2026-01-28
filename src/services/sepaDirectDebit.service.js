@@ -503,38 +503,53 @@ export async function createSepaPaymentIntent({
     console.log(`✅ [SEPA] Mandate ${finalMandateId} is active`);
     
     // ✅ Vérifier que le payment method a bien le mandate associé
-    if (finalPaymentMethod.sepa_debit?.mandate !== finalMandateId) {
-      console.error(`❌ [SEPA] Payment method mandate (${finalPaymentMethod.sepa_debit?.mandate || 'undefined'}) differs from expected mandate (${finalMandateId})`);
-      console.error(`❌ [SEPA] This will cause Stripe to block the payment. Using payment method from getSepaMandate instead.`);
+    // ⚠️ IMPORTANT : Pour SEPA, le mandate peut être associé via le SetupIntent plutôt que directement dans sepa_debit.mandate
+    // Si le payment method vient de getSepaMandate et que le mandate est actif, on peut l'utiliser même si sepa_debit.mandate est undefined
+    const paymentMethodHasMandate = finalPaymentMethod.sepa_debit?.mandate === finalMandateId;
+    const paymentMethodFromGetSepaMandate = sepaMandate.paymentMethodId === finalPaymentMethodId;
+    
+    if (!paymentMethodHasMandate) {
+      console.warn(`⚠️ [SEPA] Payment method mandate (${finalPaymentMethod.sepa_debit?.mandate || 'undefined'}) differs from expected mandate (${finalMandateId})`);
       
-      // ✅ CRUCIAL : Si le payment_method n'a pas le bon mandate, utiliser celui retourné par getSepaMandate
-      if (sepaMandate.paymentMethodId && sepaMandate.paymentMethodId !== finalPaymentMethodId) {
-        console.log(`🔄 [SEPA] Switching to payment method with correct mandate: ${sepaMandate.paymentMethodId}`);
+      // ✅ Si le payment method vient de getSepaMandate et que le mandate est actif, on accepte quand même
+      // Le mandate sera passé directement dans le PaymentIntent et Stripe l'utilisera
+      if (paymentMethodFromGetSepaMandate && mandateCheck.status === "active") {
+        console.log(`✅ [SEPA] Payment method from getSepaMandate - mandate will be passed directly in PaymentIntent`);
+        console.log(`✅ [SEPA] Mandate ${finalMandateId} is active, payment method ${finalPaymentMethodId} can be used`);
+      } else if (sepaMandate.paymentMethodId && sepaMandate.paymentMethodId !== finalPaymentMethodId) {
+        // ✅ Essayer avec le payment method retourné par getSepaMandate
+        console.log(`🔄 [SEPA] Switching to payment method from getSepaMandate: ${sepaMandate.paymentMethodId}`);
         finalPaymentMethodId = sepaMandate.paymentMethodId;
         
-        // Re-récupérer le payment method avec le bon mandate
+        // Re-récupérer le payment method
         const correctPaymentMethod = await stripe.paymentMethods.retrieve(finalPaymentMethodId);
+        finalPaymentMethod = correctPaymentMethod;
         
-        // Vérifier que le nouveau payment method a le bon mandate
-        if (correctPaymentMethod.sepa_debit?.mandate !== finalMandateId) {
-          console.error(`❌ [SEPA] Payment method ${finalPaymentMethodId} from getSepaMandate also does not have the expected mandate ${finalMandateId}`);
-          console.error(`❌ [SEPA] Payment method mandate: ${correctPaymentMethod.sepa_debit?.mandate || 'undefined'}`);
-          throw new Error(`Payment method ${finalPaymentMethodId} from getSepaMandate does not have the expected mandate ${finalMandateId}. The SEPA mandate may not be properly associated. Please set up a new SEPA Direct Debit.`);
-        }
-        
-        console.log(`✅ [SEPA] Payment method ${finalPaymentMethodId} has correct mandate ${finalMandateId}`);
-        
-        // ✅ Vérifier que le nouveau payment method est attaché au customer
+        // Vérifier que le nouveau payment method est attaché au customer
         if (!correctPaymentMethod.customer || correctPaymentMethod.customer !== customerId) {
-          console.log(`⚠️ [SEPA] Correct payment method not attached to customer. Attaching now...`);
+          console.log(`⚠️ [SEPA] Payment method not attached to customer. Attaching now...`);
           await stripe.paymentMethods.attach(finalPaymentMethodId, {
             customer: customerId,
           });
-          console.log(`✅ [SEPA] Correct payment method attached to customer ${customerId}`);
+          console.log(`✅ [SEPA] Payment method attached to customer ${customerId}`);
+        }
+        
+        // Si ce payment method a le mandate, c'est parfait
+        if (correctPaymentMethod.sepa_debit?.mandate === finalMandateId) {
+          console.log(`✅ [SEPA] Payment method ${finalPaymentMethodId} has correct mandate ${finalMandateId}`);
+        } else {
+          // Même si pas de mandate dans sepa_debit.mandate, si le mandate est actif, on peut l'utiliser
+          console.log(`✅ [SEPA] Payment method ${finalPaymentMethodId} from getSepaMandate - mandate will be passed in PaymentIntent`);
         }
       } else {
-        // Le payment_method fourni n'a pas le bon mandate et on n'a pas d'alternative
-        throw new Error(`Payment method ${finalPaymentMethodId} does not have the expected mandate ${finalMandateId}. Please set up a new SEPA Direct Debit.`);
+        // Le payment_method n'a pas le bon mandate et on n'a pas d'alternative
+        // Mais si le mandate est actif, on peut quand même essayer (le mandate sera passé dans le PaymentIntent)
+        if (mandateCheck.status === "active") {
+          console.log(`⚠️ [SEPA] Payment method ${finalPaymentMethodId} doesn't have mandate in sepa_debit.mandate, but mandate ${finalMandateId} is active`);
+          console.log(`✅ [SEPA] Will pass mandate directly in PaymentIntent - this should work for SEPA`);
+        } else {
+          throw new Error(`Payment method ${finalPaymentMethodId} does not have the expected mandate ${finalMandateId} and mandate is not active. Please set up a new SEPA Direct Debit.`);
+        }
       }
     } else {
       console.log(`✅ [SEPA] Payment method has correct mandate: ${finalMandateId}`);
