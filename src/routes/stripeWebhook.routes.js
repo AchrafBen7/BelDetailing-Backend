@@ -154,6 +154,33 @@ router.post(
             type: "payment",
           });
 
+          // ✅ Gérer les PAIEMENTS DE VALIDATION SEPA (1€ test)
+          if (type === "sepa_mandate_validation" && intent.metadata?.isTestPayment === "true") {
+            console.log(`🔄 [WEBHOOK] PaymentIntent succeeded for SEPA validation: ${intent.id}`);
+            console.log(`📋 [WEBHOOK] Amount: ${amount}€, User: ${userId}`);
+            
+            try {
+              const { refundSepaValidationPayment } = await import("../services/sepaMandateValidation.service.js");
+              const refundResult = await refundSepaValidationPayment(intent.id);
+              
+              if (refundResult.alreadyRefunded) {
+                console.log(`ℹ️ [WEBHOOK] Validation payment already refunded: ${refundResult.refundId}`);
+              } else if (refundResult.notValidationPayment) {
+                console.log(`ℹ️ [WEBHOOK] Payment is not a validation payment`);
+              } else {
+                console.log(`✅ [WEBHOOK] Validation payment refunded successfully: ${refundResult.refundId}`);
+                console.log(`📋 [WEBHOOK] Refund amount: ${refundResult.amount}€`);
+              }
+            } catch (refundError) {
+              console.error(`❌ [WEBHOOK] Error refunding validation payment:`, refundError);
+              // Ne pas bloquer le webhook, juste logger l'erreur
+              // Le remboursement pourra être fait manuellement si nécessaire
+            }
+            
+            // Ne pas continuer avec les autres handlers pour les paiements de validation
+            break;
+          }
+
           // ✅ Gérer les MISSION PAYMENTS
           if (missionAgreementId && paymentId) {
             console.log(`✅ [WEBHOOK] PI succeeded for mission payment ${paymentId} (agreement: ${missionAgreementId})`);
