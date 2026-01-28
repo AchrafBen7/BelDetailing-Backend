@@ -145,28 +145,6 @@ router.post(
           const amount = intent.amount / 100;
           const currency = intent.currency;
 
-          // ✅ NOUVEAU : Gérer les paiements de validation SEPA
-          if (intent.metadata?.type === "sepa_mandate_validation" && intent.metadata?.isTestPayment === "true") {
-            console.log(`🔄 [WEBHOOK] SEPA validation payment succeeded: ${intent.id}`);
-            
-            try {
-              const { refundSepaValidationPayment } = await import("../services/sepaMandateValidation.service.js");
-              const refundResult = await refundSepaValidationPayment(intent.id);
-              
-              if (refundResult.refundId) {
-                console.log(`✅ [WEBHOOK] SEPA validation payment refunded: ${refundResult.refundId}`);
-              } else if (refundResult.alreadyRefunded) {
-                console.log(`ℹ️ [WEBHOOK] SEPA validation payment already refunded`);
-              }
-            } catch (refundError) {
-              console.error(`❌ [WEBHOOK] Failed to refund SEPA validation payment:`, refundError);
-              // Ne pas bloquer le webhook, juste logger
-            }
-            
-            // Ne pas traiter ce paiement comme un paiement normal
-            break;
-          }
-
           await supabase.from("payment_transactions").insert({
             user_id: userId,
             stripe_object_id: intent.id,
@@ -452,15 +430,15 @@ router.post(
 
           // ✅ Gérer les BOOKINGS
           if (bookingId || type === "booking") {
-            console.log(`✅ PI succeeded for booking ${bookingId}`);
+          console.log(`✅ PI succeeded for booking ${bookingId}`);
 
-            await supabase
-              .from("bookings")
-              .update({
-                payment_status: "paid",
-                payment_intent_id: intent.id,
-              })
-              .eq("id", bookingId);
+          await supabase
+            .from("bookings")
+            .update({
+              payment_status: "paid",
+              payment_intent_id: intent.id,
+            })
+            .eq("id", bookingId);
 
             // ✅ Mettre à jour le revenu annuel pour les provider_passionate
             try {
@@ -507,23 +485,23 @@ router.post(
               // Ne pas faire échouer le webhook, juste logger
             }
 
-            // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement réussi)
-            try {
-              if (userId) {
-                await sendNotificationToUser({
+          // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement réussi)
+          try {
+            if (userId) {
+              await sendNotificationToUser({
                   userId: userId,
-                  title: "Paiement confirmé",
-                  message: `Votre paiement de ${amount.toFixed(2)}${currency === "eur" ? "€" : currency.toUpperCase()} a été confirmé`,
-                  data: {
-                    type: "payment_succeeded",
-                    booking_id: bookingId,
-                    transaction_id: intent.id,
-                    amount: amount,
-                  },
-                });
-              }
-            } catch (notifError) {
-              console.error("[WEBHOOK] Notification send failed:", notifError);
+                title: "Paiement confirmé",
+                message: `Votre paiement de ${amount.toFixed(2)}${currency === "eur" ? "€" : currency.toUpperCase()} a été confirmé`,
+                data: {
+                  type: "payment_succeeded",
+                  booking_id: bookingId,
+                  transaction_id: intent.id,
+                  amount: amount,
+                },
+              });
+            }
+          } catch (notifError) {
+            console.error("[WEBHOOK] Notification send failed:", notifError);
             }
           }
           
@@ -762,31 +740,31 @@ router.post(
 
           // ✅ Gérer les BOOKINGS
           if (bookingId || type === "booking") {
-            console.log(`❌ PI failed for booking ${bookingId}`);
+          console.log(`❌ PI failed for booking ${bookingId}`);
 
-            await supabase
-              .from("bookings")
-              .update({
-                payment_status: "failed",
-              })
-              .eq("id", bookingId);
+          await supabase
+            .from("bookings")
+            .update({
+              payment_status: "failed",
+            })
+            .eq("id", bookingId);
 
-            // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement échoué)
-            try {
-              if (userId) {
-                await sendNotificationToUser({
+          // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement échoué)
+          try {
+            if (userId) {
+              await sendNotificationToUser({
                   userId: userId,
-                  title: "Paiement échoué",
-                  message: "Votre paiement a échoué. Veuillez réessayer.",
-                  data: {
-                    type: "payment_failed",
-                    booking_id: bookingId,
-                    transaction_id: intent.id,
-                  },
-                });
-              }
-            } catch (notifError) {
-              console.error("[WEBHOOK] Notification send failed:", notifError);
+                title: "Paiement échoué",
+                message: "Votre paiement a échoué. Veuillez réessayer.",
+                data: {
+                  type: "payment_failed",
+                  booking_id: bookingId,
+                  transaction_id: intent.id,
+                },
+              });
+            }
+          } catch (notifError) {
+            console.error("[WEBHOOK] Notification send failed:", notifError);
             }
           }
           
@@ -911,43 +889,72 @@ case "setup_intent.succeeded": {
             .single();
           
           if (user && user.role === "company") {
-            console.log("✅ [WEBHOOK] Company found:", user.id);
+            console.log("✅ [WEBHOOK] Company found, checking if validation needed:", user.id);
             
-            // ✅ NOUVEAU : Effectuer un paiement test de 1€ pour valider le mandate
-            // Ce paiement sera remboursé automatiquement pour valider le mandate en on-session
-            try {
-              const { validateSepaMandateWithTestPayment } = await import("../services/sepaMandateValidation.service.js");
-              
-              console.log("🔄 [WEBHOOK] Starting SEPA mandate validation with test payment (1€)...");
-              const validationResult = await validateSepaMandateWithTestPayment(
-                user.id,
-                paymentMethodId,
-                mandateId
-              );
-              
-              console.log(`✅ [WEBHOOK] SEPA mandate validation started: ${validationResult.paymentIntentId}`);
-              console.log(`📦 [WEBHOOK] Validation status: ${validationResult.status}`);
-              console.log(`📦 [WEBHOOK] Validation message: ${validationResult.message}`);
-            } catch (validationError) {
-              console.error(`❌ [WEBHOOK] SEPA mandate validation failed:`, validationError);
-              // Ne pas bloquer le webhook si la validation échoue
-              // On envoie quand même la notification
+            // ✅ Vérifier si la validation 1€ a déjà été faite
+            const { checkIfSepaValidationNeeded, validateSepaMandateWithTestPayment } = await import("../services/sepaMandateValidation.service.js");
+            const validationStatus = await checkIfSepaValidationNeeded(user.id);
+            
+            if (validationStatus.needsValidation) {
+              console.log("🔄 [WEBHOOK] Validation needed, triggering 1€ test payment...");
+              try {
+                const validationResult = await validateSepaMandateWithTestPayment(
+                  user.id,
+                  paymentMethodId,
+                  mandateId
+                );
+                console.log("✅ [WEBHOOK] Validation payment created:", validationResult.paymentIntentId);
+                
+                // Notification avec info sur la validation
+                await sendNotificationToUser({
+                  userId: user.id,
+                  title: "Mandat SEPA configuré",
+                  message: "Votre mandat SEPA a été configuré. Un paiement test de 1€ sera effectué pour valider le mandat (ce montant sera remboursé automatiquement).",
+                  data: {
+                    type: "sepa_mandate_activated",
+                    mandate_id: mandateId,
+                    payment_method_id: paymentMethodId,
+                    mandate_status: mandate.status,
+                    validation_payment_intent_id: validationResult.paymentIntentId,
+                  },
+                });
+              } catch (validationError) {
+                console.error("❌ [WEBHOOK] Error triggering validation payment:", validationError);
+                // Ne pas bloquer le webhook, juste logger l'erreur
+                // L'utilisateur pourra déclencher la validation manuellement via l'endpoint
+                
+                // Notification standard sans validation
+                await sendNotificationToUser({
+                  userId: user.id,
+                  title: "Mandat SEPA configuré",
+                  message: mandate.status === "active" 
+                    ? "Votre mandat SEPA a été activé avec succès. Vous pouvez maintenant créer des offres."
+                    : "Votre mandat SEPA est en attente de validation. Vous pouvez créer des offres, mais les paiements seront traités une fois le mandat activé.",
+                  data: {
+                    type: "sepa_mandate_activated",
+                    mandate_id: mandateId,
+                    payment_method_id: paymentMethodId,
+                    mandate_status: mandate.status,
+                  },
+                });
+              }
+            } else {
+              console.log("ℹ️ [WEBHOOK] Validation not needed (reason:", validationStatus.reason, ")");
+              // Notification standard
+              await sendNotificationToUser({
+                userId: user.id,
+                title: "Mandat SEPA configuré",
+                message: mandate.status === "active" 
+                  ? "Votre mandat SEPA a été activé avec succès. Vous pouvez maintenant créer des offres."
+                  : "Votre mandat SEPA est en attente de validation. Vous pouvez créer des offres, mais les paiements seront traités une fois le mandat activé.",
+                data: {
+                  type: "sepa_mandate_activated",
+                  mandate_id: mandateId,
+                  payment_method_id: paymentMethodId,
+                  mandate_status: mandate.status,
+                },
+              });
             }
-            
-            // Envoyer la notification
-            await sendNotificationToUser({
-              userId: user.id,
-              title: "Mandat SEPA configuré",
-              message: mandate.status === "active" 
-                ? "Votre mandat SEPA a été activé avec succès. Un paiement test de 1€ a été effectué pour valider votre mandat (sera remboursé automatiquement). Vous pouvez maintenant créer des offres."
-                : "Votre mandat SEPA est en attente de validation. Un paiement test de 1€ a été effectué pour valider votre mandat (sera remboursé automatiquement). Vous pouvez créer des offres, mais les paiements seront traités une fois le mandat activé.",
-              data: {
-                type: "sepa_mandate_activated",
-                mandate_id: mandateId,
-                payment_method_id: paymentMethodId,
-                mandate_status: mandate.status,
-              },
-            });
           }
         } else {
           console.warn(`⚠️ [WEBHOOK] SEPA mandate status is not active/pending: ${mandate.status}`);
@@ -957,12 +964,12 @@ case "setup_intent.succeeded": {
       }
     } else if (paymentMethod.type === "card") {
       // ✅ GESTION CARTE (comportement existant)
-      // Juste définir comme carte par défaut
-      await stripe.customers.update(customerId, {
-        invoice_settings: {
-          default_payment_method: paymentMethodId,
-        },
-      });
+  // Juste définir comme carte par défaut
+  await stripe.customers.update(customerId, {
+    invoice_settings: {
+      default_payment_method: paymentMethodId,
+    },
+  });
       console.log("✅ [WEBHOOK] Card set as default payment method");
     }
   } catch (error) {

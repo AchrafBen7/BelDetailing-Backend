@@ -8,6 +8,10 @@ import {
   captureSepaPayment,
   cancelSepaPayment,
 } from "../services/sepaDirectDebit.service.js";
+import {
+  checkIfSepaValidationNeeded,
+  validateExistingSepaAccount,
+} from "../services/sepaMandateValidation.service.js";
 
 /**
  * 🔹 POST /api/v1/sepa/setup-intent
@@ -212,5 +216,56 @@ export async function cancelSepaPaymentController(req, res) {
   } catch (err) {
     console.error("[SEPA] cancel error:", err);
     return res.status(400).json({ error: err.message || "Could not cancel SEPA payment" });
+  }
+}
+
+/**
+ * 🔹 GET /api/v1/sepa/validation-status
+ * Vérifier si un compte a besoin de validation 1€
+ */
+export async function checkSepaValidationStatusController(req, res) {
+  try {
+    if (req.user.role !== "company") {
+      return res.status(403).json({ error: "Only companies can check SEPA validation status" });
+    }
+
+    const status = await checkIfSepaValidationNeeded(req.user.id);
+
+    return res.json({ data: status });
+  } catch (err) {
+    console.error("[SEPA] validation status check error:", err);
+    return res.status(500).json({ 
+      error: err.message || "Could not check SEPA validation status",
+      code: "SEPA_VALIDATION_CHECK_ERROR"
+    });
+  }
+}
+
+/**
+ * 🔹 POST /api/v1/sepa/validate-existing-account
+ * Déclencher la validation 1€ pour un compte existant
+ */
+export async function validateExistingSepaAccountController(req, res) {
+  try {
+    if (req.user.role !== "company") {
+      return res.status(403).json({ error: "Only companies can validate SEPA accounts" });
+    }
+
+    const result = await validateExistingSepaAccount(req.user.id);
+
+    if (!result.success) {
+      return res.status(400).json({ 
+        error: result.message,
+        code: result.reason || "VALIDATION_NOT_NEEDED"
+      });
+    }
+
+    return res.json({ data: result });
+  } catch (err) {
+    console.error("[SEPA] validate existing account error:", err);
+    return res.status(500).json({ 
+      error: err.message || "Could not validate existing SEPA account",
+      code: "SEPA_VALIDATION_ERROR"
+    });
   }
 }

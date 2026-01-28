@@ -218,3 +218,137 @@ export async function refundSepaValidationPayment(paymentIntentId) {
     throw error;
   }
 }
+
+/**
+ * 🟦 CHECK IF VALIDATION NEEDED – Vérifier si un compte a besoin de validation 1€
+ * 
+ * Cette fonction vérifie si un compte company avec SEPA setup a déjà fait la validation 1€.
+ * Elle cherche dans Stripe si un PaymentIntent de validation existe pour ce customer.
+ * 
+ * @param {string} companyUserId - ID de la company
+ * @returns {Promise<Object>} { needsValidation: boolean, hasActiveMandate: boolean, mandate: object|null }
+ */
+export async function checkIfSepaValidationNeeded(companyUserId) {
+  console.log(`🔄 [SEPA VALIDATION] Checking if validation needed for company: ${companyUserId}`);
+
+  try {
+    // 1) Récupérer le Stripe Customer ID
+    const { data: companyUser, error: userError } = await supabase
+      .from("users")
+      .select("stripe_customer_id, email")
+      .eq("id", companyUserId)
+      .single();
+
+    if (userError || !companyUser?.stripe_customer_id) {
+      console.log(`ℹ️ [SEPA VALIDATION] No Stripe customer found for company: ${companyUserId}`);
+      return {
+        needsValidation: false,
+        hasActiveMandate: false,
+        mandate: null,
+        reason: "no_stripe_customer",
+      };
+    }
+
+    const customerId = companyUser.stripe_customer_id;
+
+    // 2) Vérifier si un PaymentIntent de validation existe déjà
+    const validationPaymentIntents = await stripe.paymentIntents.list({
+      customer: customerId,
+      limit: 100,
+    });
+
+    const hasValidationPayment = validationPaymentIntents.data.some(
+      (pi) =>
+        pi.metadata?.type === "sepa_mandate_validation" &&
+        pi.metadata?.isTestPayment === "true"
+    );
+
+    if (hasValidationPayment) {
+      console.log(`✅ [SEPA VALIDATION] Validation payment already exists for company: ${companyUserId}`);
+      return {
+        needsValidation: false,
+        hasActiveMandate: true,
+        mandate: null,
+        reason: "already_validated",
+      };
+    }
+
+    // 3) Vérifier si un mandate SEPA actif existe
+    const { getSepaMandate } = await import("./sepaDirectDebit.service.js");
+    const mandate = await getSepaMandate(companyUserId);
+
+    if (!mandate || (mandate.status !== "active" && mandate.status !== "pending")) {
+      console.log(`ℹ️ [SEPA VALIDATION] No active SEPA mandate found for company: ${companyUserId}`);
+      return {
+        needsValidation: false,
+        hasActiveMandate: false,
+        mandate: null,
+        reason: "no_active_mandate",
+      };
+    }
+
+    // 4) Si un mandate actif existe mais pas de validation → besoin de validation
+    console.log(`⚠️ [SEPA VALIDATION] Active mandate found but no validation payment. Validation needed for company: ${companyUserId}`);
+    return {
+      needsValidation: true,
+      hasActiveMandate: true,
+      mandate: mandate,
+      reason: "mandate_exists_but_not_validated",
+    };
+
+  } catch (error) {
+    console.error(`❌ [SEPA VALIDATION] Error checking validation status:`, error);
+    throw error;
+  }
+}
+
+/**
+ * 🟦 VALIDATE EXISTING ACCOUNT – Valider un compte existant qui n'a pas fait la validation 1€
+ * 
+ * Cette fonction déclenche la validation 1€ pour un compte existant qui a déjà un SEPA setup
+ * mais qui n'a pas encore fait la validation.
+ * 
+ * @param {string} companyUserId - ID de la company
+ * @returns {Promise<Object>} Résultat de la validation
+ */
+export async function validateExistingSepaAccount(companyUserId) {
+  console.log(`🔄 [SEPA VALIDATION] Validating existing account for company: ${companyUserId}`);
+
+  try {
+    // 1) Vérifier si la validation est nécessaire
+    const checkResult = await checkIfSepaValidationNeeded(companyUserId);
+
+    if (!checkResult.needsValidation) {
+      return {
+        success: false,
+        message: checkResult.reason === "already_validated"
+          ? "Account already validated"
+          : checkResult.reason === "no_active_mandate"
+          ? "No active SEPA mandate found. Please set up SEPA first."
+          : "Validation not needed",
+        reason: checkResult.reason,
+      };
+    }
+
+    if (!checkResult.mandate) {
+      throw new Error("No active mandate found for validation");
+    }
+
+    // 2) Déclencher la validation avec le mandate existant
+    const validationResult = await validateSepaMandateWithTestPayment(
+      companyUserId,
+      checkResult.mandate.paymentMethodId,
+      checkResult.mandate.id
+    );
+
+    return {
+      success: true,
+      message: "Validation payment created successfully",
+      ...validationResult,
+    };
+
+  } catch (error) {
+    console.error(`❌ [SEPA VALIDATION] Error validating existing account:`, error);
+    throw error;
+  }
+}
