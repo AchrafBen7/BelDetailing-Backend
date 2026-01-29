@@ -93,7 +93,7 @@ async function fetchProviderServicesMap(providerIds) {
 }
 
 export async function searchProviders(filters) {
-  const { q, city } = filters;
+  const { q, city, lat, lng, radius } = filters;
 
   let query = supabase
     .from("provider_profiles")
@@ -111,6 +111,20 @@ export async function searchProviders(filters) {
     );
   }
 
+  // 🔍 Filtre périmètre (lat, lng, radius en km)
+  if (lat != null && lng != null && radius != null) {
+    const radiusDeg = Number(radius) / 111;
+    const minLat = Number(lat) - radiusDeg;
+    const maxLat = Number(lat) + radiusDeg;
+    const minLng = Number(lng) - radiusDeg;
+    const maxLng = Number(lng) + radiusDeg;
+    query = query
+      .gte("lat", minLat)
+      .lte("lat", maxLat)
+      .gte("lng", minLng)
+      .lte("lng", maxLng);
+  }
+
   const { data, error } = await query;
 
   if (error) {
@@ -118,22 +132,33 @@ export async function searchProviders(filters) {
     throw error;
   }
 
-  const providerIdSet = new Set();
-  if (Array.isArray(data)) {
-    data.forEach(row => {
-      getProviderIdentityKeys(row).forEach(idVal => providerIdSet.add(idVal));
+  let rows = data ?? [];
+  // Filtrage strict par distance si lat/lng/radius fournis
+  if (lat != null && lng != null && radius != null) {
+    const lat0 = Number(lat);
+    const lng0 = Number(lng);
+    const rKm = Number(radius);
+    rows = rows.filter(row => {
+      const pLat = row.lat ?? 0;
+      const pLng = row.lng ?? 0;
+      const dLatKm = (pLat - lat0) * 111;
+      const dLngKm = (pLng - lng0) * 75;
+      const approxKm = Math.sqrt(dLatKm * dLatKm + dLngKm * dLngKm);
+      return approxKm <= rKm;
     });
   }
+
+  const providerIdSet = new Set();
+  rows.forEach(row => {
+    getProviderIdentityKeys(row).forEach(idVal => providerIdSet.add(idVal));
+  });
   const servicesMap = await fetchProviderServicesMap([...providerIdSet]);
-  const withServices = data.map(row => ({
+  const withServices = rows.map(row => ({
     ...row,
     providerServices: pickServicesForRow(row, servicesMap),
   }));
 
-  console.log("🧪 SEARCH PROVIDER:", withServices[0]);
-
- return withServices.map(mapProviderRow);
-
+  return withServices.map(mapProviderRow);
 }
 
 

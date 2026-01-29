@@ -463,6 +463,30 @@ export async function createBooking(req, res) {
     const paymentMethod = payment_method || "card";
     const serviceNames = services.map(service => service.name).join(", ");
 
+    // ✅ VÉRIFIER CRÉNEAU UNIQUE (provider + date + start_time)
+    const conflictingStatuses = ["pending", "confirmed", "started", "in_progress", "preauthorized"];
+    const { data: existingSlot, error: slotError } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("provider_id", provider_id)
+      .eq("date", date)
+      .eq("start_time", start_time)
+      .in("status", conflictingStatuses)
+      .limit(1)
+      .maybeSingle();
+
+    if (slotError) {
+      console.error("❌ [BOOKINGS] createBooking - Slot check error:", slotError);
+      return res.status(500).json({ error: "Could not check availability", details: slotError.message });
+    }
+
+    if (existingSlot) {
+      return res.status(409).json({
+        error: "This time slot is no longer available. Please choose another date or time.",
+        code: "SLOT_TAKEN",
+      });
+    }
+
     // 3) Create booking (WITHOUT payment yet)
     console.log("🔵 [BOOKINGS] createBooking - Creating booking record...");
     // 1) Insert booking

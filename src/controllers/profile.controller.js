@@ -104,6 +104,7 @@ export async function updateProfile(req, res) {
     role,
     vatNumber,
     isVatValid,
+    dismissedFirstBookingOffer,
     customerProfile,
     companyProfile,
     providerProfile,
@@ -152,6 +153,7 @@ export async function updateProfile(req, res) {
   if (role !== undefined) userUpdate.role = role;
   if (vatNumber !== undefined) userUpdate.vat_number = vatNumber;
   if (isVatValid !== undefined) userUpdate.is_vat_valid = isVatValid;
+  if (dismissedFirstBookingOffer !== undefined) userUpdate.dismissed_first_booking_offer = dismissedFirstBookingOffer === true;
 
   if (Object.keys(userUpdate).length > 0) {
     const { error: userError } = await supabase
