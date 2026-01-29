@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facture BelDetailing</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            color: #333;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+        .info-section {
+            margin-bottom: 30px;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .info-label {
+            font-weight: bold;
+        }
+        .total {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #333;
+            font-size: 18px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BelDetailing</h1>
+        <p>Facture mensuelle</p>
+    </div>
+    
+    <div class="info-section">
+        <div class="info-row">
+            <span class="info-label">Période:</span>
+            <span>{{MONTH}}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Nombre de services:</span>
+            <span>{{COUNT}}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Revenus totaux:</span>
+            <span>{{REVENUE}} €</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Commission BelDetailing:</span>
+            <span>{{COMMISSION}} €</span>
+        </div>
+    </div>
+    
+    <div class="total">
+        <div class="info-row">
+            <span>Net à recevoir:</span>
+            <span>{{NET}} €</span>
+        </div>
+    </div>
+</body>
+</html>

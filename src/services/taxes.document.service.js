@@ -13,13 +13,35 @@ export async function generateDocumentPDF(providerUserId, documentId) {
 
   // chemin solide vers le template
   const templatePath = path.join(process.cwd(), "src", "templates", "taxes", "taxes-invoice.html");
-  let html = fs.readFileSync(templatePath, "utf8");
+  
+  // ✅ Utiliser readFile avec try-catch pour éviter les timeouts
+  let html;
+  try {
+    html = fs.readFileSync(templatePath, "utf8");
+  } catch (err) {
+    console.error("[TAXES] Error reading template:", err);
+    // Fallback: générer un HTML minimal
+    html = `
+      <html>
+        <body>
+          <h1>Facture BelDetailing</h1>
+          <p>Période: ${month}</p>
+          <p>Services: ${summary.servicesCount}</p>
+          <p>Revenus: ${summary.revenue}€</p>
+          <p>Commission: ${summary.commissions}€</p>
+        </body>
+      </html>
+    `;
+  }
 
+  const netAmount = summary.revenue - summary.commissions;
+  
   html = html
     .replaceAll("{{MONTH}}", month)
     .replaceAll("{{COUNT}}", String(summary.servicesCount))
     .replaceAll("{{REVENUE}}", String(summary.revenue))
-    .replaceAll("{{COMMISSION}}", String(summary.commissions));
+    .replaceAll("{{COMMISSION}}", String(summary.commissions))
+    .replaceAll("{{NET}}", String(netAmount.toFixed(2)));
 
   return await htmlToPdf(html);
 }
