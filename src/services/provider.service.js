@@ -345,13 +345,26 @@ export async function createProviderService(userId, service) {
     insertPayload.categories = categoriesArray;
   }
   
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("services")
     .insert(insertPayload)
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (error.code === "42703" && error.message?.includes("categories")) {
+      delete insertPayload.categories;
+      const retry = await supabase
+        .from("services")
+        .insert(insertPayload)
+        .select()
+        .single();
+      if (retry.error) throw retry.error;
+      data = retry.data;
+    } else {
+      throw error;
+    }
+  }
 
   // 2️⃣ Création auto du produit Stripe (Marketplace)
   try {
@@ -426,16 +439,16 @@ export async function updateProviderService(serviceId, userId, updates) {
     categoryValue = updates.category;
     categoriesArray = [updates.category];
   } else {
-    // Garder les catégories existantes si non fournies
+    // Garder les catégories existantes si non fournies (select category only pour éviter 42703 si colonne categories absente)
     const { data: currentService } = await supabase
       .from("services")
-      .select("category, categories")
+      .select("category")
       .eq("id", serviceId)
       .single();
     
     if (currentService) {
       categoryValue = currentService.category;
-      categoriesArray = currentService.categories || (currentService.category ? [currentService.category] : []);
+      categoriesArray = Array.isArray(currentService.categories) ? currentService.categories : (currentService.category ? [currentService.category] : []);
     } else {
       categoryValue = "carCleaning";
       categoriesArray = ["carCleaning"];
@@ -466,14 +479,28 @@ export async function updateProviderService(serviceId, userId, updates) {
     }
   });
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("services")
     .update(updatePayload)
     .eq("id", serviceId)
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (error.code === "42703" && error.message?.includes("categories")) {
+      delete updatePayload.categories;
+      const retry = await supabase
+        .from("services")
+        .update(updatePayload)
+        .eq("id", serviceId)
+        .select()
+        .single();
+      if (retry.error) throw retry.error;
+      data = retry.data;
+    } else {
+      throw error;
+    }
+  }
 
   // 5) 🆕 Si le prix a changé, mettre à jour le produit Stripe
   if (updates.price && updates.price !== existingService.price) {
