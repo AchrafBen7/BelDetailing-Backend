@@ -1,5 +1,5 @@
 // src/services/missionAgreementPdfPdfKit.service.js
-// Alternative utilisant pdfkit (pas de Chrome nécessaire)
+// Génération du PDF : CONVENTION DE COLLABORATION INDÉPENDANTE (structure juridique, non facture)
 
 import PDFDocument from "pdfkit";
 import { getMissionAgreementById } from "./missionAgreement.service.js";
@@ -8,21 +8,176 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { MISSION_COMMISSION_RATE } from "../config/commission.js";
 
 /**
- * 🟦 GENERATE MISSION AGREEMENT PDF WITH PDFKIT – Générer le PDF avec pdfkit
- * 
- * Design professionnel avec structure claire et tableaux.
- * 
+ * Convertit les règles opérationnelles (JSON) en texte explicite pour l'Article 5.
+ * Chaque règle ajoutée par la company est écrite en clair dans le contrat.
+ */
+function operationalRulesToArticle5Paragraphs(rules) {
+  if (!rules || typeof rules !== "object") return [];
+
+  const paragraphs = [];
+  const labels = {
+    locationType: "Type de mission",
+    on_site: "Sur site (chez la company)",
+    mobile: "Mobile (le prestataire se déplace)",
+    workshop: "Dans l'atelier du prestataire",
+    fixedAddress: "Adresse fixe d'intervention",
+    variableAddresses: "Adresses variables",
+    siteAccess: "Accès au site",
+    guaranteed: "Accès au site garanti par le donneur d'ordre",
+    parkingAvailable: "Parking disponible",
+    secureZoneRequired: "Zone sécurisée requise",
+    workingHours: "Horaires",
+    fixed: "Horaires imposés",
+    flexible: "Horaires flexibles",
+    startTime: "Heure de début",
+    endTime: "Heure de fin",
+    allowedDays: "Jours autorisés",
+    weekdays: "Jours de semaine",
+    weekend: "Week-end",
+    holidays: "Jours fériés",
+    maxDelayMinutes: "Délai maximum de retard autorisé (minutes)",
+    delayNotificationRequired: "Notification obligatoire en cas de retard",
+    equipmentProvider: "Fournisseur de matériel",
+    company: "Le donneur d'ordre",
+    detailer: "Le prestataire",
+    mixed: "Mixte (donneur d'ordre et prestataire)",
+    productsPolicy: "Politique produits",
+    imposed: "Produits imposés par le donneur d'ordre",
+    free: "Produits libres (au choix du prestataire)",
+    waterProvided: "Eau fournie par le donneur d'ordre",
+    electricityProvided: "Électricité fournie par le donneur d'ordre",
+    vehicleTolerance: "Tolérance sur le volume (%)",
+    vehicleTypes: "Types de véhicules concernés",
+    city: "Citadine",
+    suv: "SUV",
+    utility: "Utilitaire",
+    premium: "Premium",
+    extremeConditionNotification: "État extrême des véhicules à signaler à l'avance",
+    photosRequired: "Preuves photographiques",
+    before: "Photos AVANT obligatoires",
+    after: "Photos APRÈS obligatoires",
+    validationRequired: "Validation",
+    daily: "Validation quotidienne requise",
+    final: "Validation finale requise",
+    validationBy: "Validation effectuée par",
+    on_site_manager: "Responsable sur place",
+    remote_manager: "Manager à distance",
+    nios: "NIOS (en cas de litige)",
+    missionReportRequired: "Rapport de mission requis",
+    damageReporting: "Signalement de dommage",
+    required: "Signalement obligatoire en cas de dommage",
+    deadlineHours: "Déclaration sous X heures",
+    insuranceRequired: "Assurance professionnelle requise",
+    companyResponsibility: "Responsabilités du donneur d'ordre",
+    disputeProcedureAccepted: "Procédure de litige NIOS acceptée",
+    depositRelease: "Déblocage de l'acompte",
+    mission_start: "Au début de la mission",
+    first_validation: "Après première validation",
+    specific_date: "À une date précise",
+    finalPaymentTrigger: "Déclenchement du paiement final",
+    final_validation: "À validation finale",
+    fixed_date: "À date fixe",
+    auto_if_no_objection: "Automatiquement en l'absence d'objection",
+    autoSuspendOnPaymentFailure: "Suspension automatique en cas d'échec de paiement",
+    autoInvoice: "Facture générée automatiquement",
+    monthlyInvoice: "Facture mensuelle (mission longue)",
+    uniqueOrderNumber: "Numéro de commande unique",
+    legalArchive: "Archivage légal des documents",
+    cancellationPolicy: "Conditions d'annulation",
+    dateModificationAllowed: "Modification des dates possible avant validation",
+    dateModificationAfterStart: "Modification des dates interdite après le début",
+    earlyTerminationPolicy: "Rupture anticipée",
+  };
+
+  const formatVal = (v) => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === "boolean") return v ? "Oui" : "Non";
+    if (typeof v === "string" && labels[v]) return labels[v];
+    if (typeof v === "object" && v !== null) {
+      if (Array.isArray(v)) return v.map((item) => labels[item] || formatVal(item)).join(", ");
+      return Object.entries(v)
+        .filter(([, val]) => val !== null && val !== undefined)
+        .map(([k, val]) => `${labels[k] || k} : ${typeof val === "boolean" ? (val ? "Oui" : "Non") : labels[val] || formatVal(val)}`)
+        .join(" ; ");
+    }
+    return String(v);
+  };
+
+  const sections = [
+    {
+      title: "A. Présence et lieu",
+      keys: ["locationType", "fixedAddress", "variableAddresses", "siteAccess"],
+    },
+    {
+      title: "B. Dates et horaires",
+      keys: ["workingHours", "allowedDays", "maxDelayMinutes", "delayNotificationRequired"],
+    },
+    {
+      title: "C. Matériel et produits",
+      keys: ["equipmentProvider", "productsPolicy", "waterProvided", "electricityProvided"],
+    },
+    {
+      title: "D. Véhicules et volume",
+      keys: ["vehicleTolerance", "vehicleTypes", "extremeConditionNotification"],
+    },
+    {
+      title: "E. Preuves et validation",
+      keys: ["photosRequired", "validationRequired", "validationBy", "missionReportRequired"],
+    },
+    {
+      title: "G. Incidents et responsabilités",
+      keys: ["damageReporting", "insuranceRequired", "companyResponsibility", "disputeProcedureAccepted"],
+    },
+    {
+      title: "H. Paiement et déclenchement",
+      keys: ["depositRelease", "finalPaymentTrigger", "autoSuspendOnPaymentFailure"],
+    },
+    {
+      title: "I. Facturation et administration",
+      keys: ["autoInvoice", "monthlyInvoice", "uniqueOrderNumber", "legalArchive"],
+    },
+    {
+      title: "J. Annulation et modification",
+      keys: ["cancellationPolicy", "dateModificationAllowed", "dateModificationAfterStart", "earlyTerminationPolicy"],
+    },
+  ];
+
+  for (const section of sections) {
+    const lines = [];
+    for (const key of section.keys) {
+      const raw = rules[key];
+      if (raw === null || raw === undefined) continue;
+      const label = labels[key] || key;
+      const text = formatVal(raw);
+      if (text) lines.push(`• ${label} : ${text}`);
+    }
+    if (lines.length > 0) {
+      paragraphs.push({ title: section.title, lines });
+    }
+  }
+
+  // Règles libres (clés non mappées)
+  const knownKeys = new Set(sections.flatMap((s) => s.keys));
+  for (const [key, value] of Object.entries(rules)) {
+    if (knownKeys.has(key)) continue;
+    const text = formatVal(value);
+    if (text) paragraphs.push({ title: null, lines: [`• ${key} : ${text}`] });
+  }
+
+  return paragraphs;
+}
+
+/**
+ * Génère le PDF de la CONVENTION DE COLLABORATION INDÉPENDANTE.
+ * Structure juridique conventionnelle (pas une facture).
+ *
  * @param {string} missionAgreementId - ID du Mission Agreement
  * @returns {Promise<Buffer>} Buffer du PDF généré
  */
 export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) {
-  // 1) Récupérer le Mission Agreement
   const agreement = await getMissionAgreementById(missionAgreementId);
-  if (!agreement) {
-    throw new Error("Mission Agreement not found");
-  }
+  if (!agreement) throw new Error("Mission Agreement not found");
 
-  // 2) Récupérer les informations de la company
   const { data: companyUser } = await supabase
     .from("users")
     .select("email, phone")
@@ -35,7 +190,6 @@ export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) 
     .eq("user_id", agreement.companyId)
     .maybeSingle();
 
-  // 3) Récupérer les informations du detailer
   const { data: detailerUser } = await supabase
     .from("users")
     .select("email, phone")
@@ -48,539 +202,260 @@ export async function generateMissionAgreementPdfWithPdfKit(missionAgreementId) 
     .eq("user_id", agreement.detailerId)
     .maybeSingle();
 
-  // 4) Récupérer les paiements
   const payments = await getMissionPaymentsForAgreement(missionAgreementId);
 
-  // 5) Calculer les montants
   const totalAmount = agreement.finalPrice || 0;
   const depositAmount = agreement.depositAmount || 0;
   const remainingAmount = agreement.remainingAmount || 0;
   const commissionAmount = Math.round(totalAmount * MISSION_COMMISSION_RATE * 100) / 100;
   const netAmount = Math.round((totalAmount - commissionAmount) * 100) / 100;
 
-  // 6) Formater les dates
   const formatDate = (dateString) => {
     if (!dateString) return "Non défini";
-    const date = new Date(dateString);
-    return date.toLocaleDateString("fr-BE", {
+    return new Date(dateString).toLocaleDateString("fr-BE", {
       year: "numeric",
       month: "long",
       day: "numeric",
     });
   };
 
-  // 7) Générer le PDF avec pdfkit
+  const companyName = agreement.companyLegalName || companyProfile?.legal_name || companyUser?.email || "—";
+  const companyAddress = agreement.companyAddress || [companyProfile?.city, companyProfile?.postal_code].filter(Boolean).join(" ") || "—";
+  const companyRep = agreement.companyLegalRepresentative || companyProfile?.contact_name || "—";
+  const companyVat = agreement.companyVatNumber || "—";
+  const companyEmail = agreement.companyEmail || companyUser?.email || "—";
+
+  const detailerName = agreement.detailerLegalName || detailerProfile?.display_name || detailerUser?.email || "—";
+  const detailerAddress = agreement.detailerAddress || [detailerProfile?.base_city, detailerProfile?.postal_code].filter(Boolean).join(" ") || "—";
+  const detailerVat = agreement.detailerVatNumber || "—";
+  const detailerEmail = agreement.detailerEmail || detailerProfile?.email || detailerUser?.email || "—";
+
+  const operationalParagraphs = operationalRulesToArticle5Paragraphs(agreement.operationalRules);
+
   return new Promise((resolve, reject) => {
     try {
-      // Optimiser pour une page complète A4
-      const doc = new PDFDocument({ 
-        size: "A4", 
-        margin: 40, // Marges réduites pour plus d'espace
-        autoFirstPage: true
-      });
+      const doc = new PDFDocument({ size: "A4", margin: 50, autoFirstPage: true });
       const chunks = [];
-
       doc.on("data", (chunk) => chunks.push(chunk));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
-      // Fonction helper pour vérifier et créer une nouvelle page si nécessaire
-      // A4: 842 points de hauteur, marges 40 = zone utilisable ~762 points
-      const checkPageBreak = (requiredHeight = 50) => {
-        if (doc.y + requiredHeight > 762) {
+      const pageMargin = 50;
+      const pageWidth = 595 - pageMargin * 2;
+      const maxY = 842 - pageMargin;
+
+      const checkPageBreak = (required = 60) => {
+        if (doc.y + required > maxY) {
           doc.addPage();
-          return true;
+          doc.y = pageMargin;
         }
-        return false;
       };
 
-      // Fonction helper pour dessiner un rectangle avec bordure
-      const drawBox = (x, y, width, height, fillColor, strokeColor, lineWidth = 1) => {
-        doc.rect(x, y, width, height)
-          .fill(fillColor)
-          .strokeColor(strokeColor)
-          .lineWidth(lineWidth)
-          .stroke();
+      const drawHr = (y, w = pageWidth) => {
+        doc.moveTo(pageMargin, y).lineTo(pageMargin + w, y).strokeColor("#000").lineWidth(0.5).stroke();
       };
 
-      // Fonction helper pour dessiner une ligne de séparation
-      const drawSeparator = (y, color = "#000000", width = 2) => {
-        doc.moveTo(40, y)
-          .lineTo(555, y)
-          .strokeColor(color)
-          .lineWidth(width)
-          .stroke();
-      };
+      const small = () => doc.fontSize(9).font("Helvetica");
+      const normal = () => doc.fontSize(10).font("Helvetica");
+      const bold = () => doc.fontSize(10).font("Helvetica-Bold");
+      const title = () => doc.fontSize(14).font("Helvetica-Bold");
 
-      // ============================================
-      // HEADER PROFESSIONNEL
-      // ============================================
-      const headerY = 40;
-      const headerHeight = 70; // Réduit de 80 à 70
-      drawBox(40, headerY, 515, headerHeight, "#000000", "#000000", 0);
-      
-      doc.fillColor("#FFFFFF")
-        .fontSize(22) // Réduit de 24 à 22
-        .font("Helvetica-Bold")
-        .text("MISSION AGREEMENT", 40, headerY + 18, { width: 515, align: "center" });
-      
-      doc.fontSize(11) // Réduit de 12 à 11
-        .font("Helvetica")
-        .text("Contrat de mission NIOS", 40, headerY + 42, { width: 515, align: "center" });
-      
-      doc.fillColor("#000000");
-      
-      // Référence du contrat
-      doc.fontSize(8) // Réduit de 9 à 8
-        .fillColor("#666666")
-        .text(`Référence: ${agreement.id.substring(0, 36)}...`, 40, headerY + 62, { width: 515, align: "right" });
-      
-      doc.fillColor("#000000");
-      doc.y = headerY + headerHeight + 10;
-      doc.moveDown(1.5); // Réduit de 2 à 1.5
+      // ——— TITRE ———
+      doc.fontSize(16).font("Helvetica-Bold").fillColor("#000");
+      doc.text("CONVENTION DE COLLABORATION INDÉPENDANTE", pageMargin, 50, { width: pageWidth, align: "center" });
+      doc.moveDown(0.5);
+      small().fillColor("#333");
+      doc.text(`Référence contrat : ${agreement.id}`, pageMargin, doc.y, { width: pageWidth, align: "center" });
+      doc.y += 24;
+      drawHr(doc.y);
+      doc.moveDown(1);
 
-      // ============================================
-      // SECTION 1: PARTIES AU CONTRAT
-      // ============================================
-      checkPageBreak(180);
-      
-      // Titre de section
-      doc.fontSize(14) // Réduit de 16 à 14
-        .font("Helvetica-Bold")
-        .fillColor("#000000")
-        .text("PARTIES AU CONTRAT");
-      
-      // Ligne de séparation
-      drawSeparator(doc.y + 4, "#000000", 2);
-      
-      doc.moveDown(1.5); // Réduit de 2 à 1.5
-      
-      const partiesStartY = doc.y;
-      const leftColX = 40;
-      const rightColX = 307;
-      const colWidth = 247;
-      const boxHeight = 110; // Réduit de 130 à 110
-      
-      // Colonne gauche - Company
-      drawBox(leftColX, partiesStartY, colWidth, boxHeight, "#F5F5F5", "#CCCCCC", 1);
-      
-      doc.fontSize(11) // Réduit de 12 à 11
-        .font("Helvetica-Bold")
-        .fillColor("#000000")
-        .text("ENTREPRISE (CLIENT)", leftColX + 8, partiesStartY + 8, { width: colWidth - 16 });
-      
-      doc.fontSize(9) // Réduit de 10 à 9
-        .font("Helvetica")
-        .fillColor("#333333");
-      
-      const companyName = agreement.companyLegalName || companyProfile?.legal_name || companyUser?.email || "Non défini";
-      let textY = partiesStartY + 24; // Réduit de 30 à 24
-      doc.text(companyName, leftColX + 8, textY, { width: colWidth - 16 });
-      
-      textY += 16; // Réduit de 20 à 16
-      if (agreement.companyVatNumber) {
-        doc.text(`TVA: ${agreement.companyVatNumber}`, leftColX + 8, textY, { width: colWidth - 16 });
-        textY += 13; // Réduit de 15 à 13
-      }
-      if (agreement.companyRepresentative) {
-        doc.text(`Représentant: ${agreement.companyRepresentative}`, leftColX + 8, textY, { width: colWidth - 16 });
-        textY += 13;
-      }
-      if (agreement.companyAddress) {
-        doc.text(`Adresse: ${agreement.companyAddress}`, leftColX + 8, textY, { width: colWidth - 16 });
-        textY += 13;
-      }
-      if (agreement.companyEmail) {
-        doc.text(`Email: ${agreement.companyEmail}`, leftColX + 8, textY, { width: colWidth - 16 });
-      }
-      
-      // Colonne droite - Detailer
-      drawBox(rightColX, partiesStartY, colWidth, boxHeight, "#F5F5F5", "#CCCCCC", 1);
-      
-      doc.fontSize(11) // Réduit de 12 à 11
-        .font("Helvetica-Bold")
-        .fillColor("#000000")
-        .text("DETAILER (PRESTATAIRE)", rightColX + 8, partiesStartY + 8, { width: colWidth - 16 });
-      
-      doc.fontSize(9) // Réduit de 10 à 9
-        .font("Helvetica")
-        .fillColor("#333333");
-      
-      const detailerName = agreement.detailerLegalName || detailerProfile?.display_name || detailerUser?.email || "Non défini";
-      textY = partiesStartY + 24; // Réduit de 30 à 24
-      doc.text(detailerName, rightColX + 8, textY, { width: colWidth - 16 });
-      
-      textY += 16; // Réduit de 20 à 16
-      if (agreement.detailerVatNumber) {
-        doc.text(`TVA: ${agreement.detailerVatNumber}`, rightColX + 8, textY, { width: colWidth - 16 });
-        textY += 13; // Réduit de 15 à 13
-      }
-      if (agreement.detailerAddress) {
-        doc.text(`Adresse: ${agreement.detailerAddress}`, rightColX + 8, textY, { width: colWidth - 16 });
-        textY += 13;
-      }
-      if (agreement.detailerEmail) {
-        doc.text(`Email: ${agreement.detailerEmail}`, rightColX + 8, textY, { width: colWidth - 16 });
-        textY += 13;
-      }
-      if (agreement.detailerIban) {
-        const maskedIban = `****${agreement.detailerIban.slice(-4)}`;
-        doc.text(`IBAN: ${maskedIban}`, rightColX + 8, textY, { width: colWidth - 16 });
-      }
-      
-      doc.y = partiesStartY + boxHeight + 8;
-      doc.moveDown(1.5); // Réduit de 2 à 1.5
+      // ——— PRÉAMBULE : ENTRE LES SOUSSIGNÉS ———
+      title().fillColor("#000");
+      doc.text("Entre les soussignés :", pageMargin, doc.y);
+      doc.moveDown(0.8);
 
-      // ============================================
-      // SECTION 2: DÉTAILS DE LA MISSION
-      // ============================================
-      checkPageBreak(200);
-      
-      doc.fontSize(14) // Réduit de 16 à 14
-        .font("Helvetica-Bold")
-        .fillColor("#000000")
-        .text("DÉTAILS DE LA MISSION");
-      
-      drawSeparator(doc.y + 4, "#000000", 2);
-      
-      doc.moveDown(1.5); // Réduit de 2 à 1.5
-      
-      const missionBoxY = doc.y;
-      const leftMargin = 50;
-      const labelWidth = 140;
-      const valueWidth = 325;
-      let missionY = missionBoxY + 12; // Réduit de 15 à 12
-      const lineHeight = 15; // Réduit de 18 à 15
-      
-      // Calculer la hauteur nécessaire (optimisé)
-      let contentHeight = 12; // Padding top réduit
-      contentHeight += lineHeight; // Titre
-      if (agreement.description) contentHeight += lineHeight * 1.5; // Description optimisée
-      if (agreement.categories && agreement.categories.length > 0) contentHeight += lineHeight;
-      if (agreement.missionType) contentHeight += lineHeight;
-      if (agreement.locationCity || agreement.locationPostalCode) contentHeight += lineHeight;
-      contentHeight += lineHeight; // Nombre de véhicules
-      if (agreement.startDate) contentHeight += lineHeight;
-      if (agreement.endDate) contentHeight += lineHeight;
-      if (agreement.estimatedDurationDays) contentHeight += lineHeight;
-      contentHeight += lineHeight; // Statut
-      contentHeight += 12; // Padding bottom réduit
-      
-      // Boîte pour les détails de la mission
-      drawBox(40, missionBoxY, 515, contentHeight, "#FAFAFA", "#DDDDDD", 1);
-      
-      doc.fontSize(9) // Réduit de 10 à 9
-        .font("Helvetica")
-        .fillColor("#333333");
-      
-      // Titre
-      doc.font("Helvetica-Bold")
-        .text("Titre:", leftMargin, missionY, { width: labelWidth });
-      doc.font("Helvetica")
-        .text(agreement.title || "Mission", leftMargin + labelWidth, missionY, { width: valueWidth });
-      missionY += lineHeight;
-      
-      // Description
+      bold().text("D’une part, le DONNEUR D’ORDRE :", pageMargin, doc.y);
+      doc.moveDown(0.4);
+      normal();
+      doc.text(`${companyName}`, pageMargin, doc.y);
+      doc.text(`Représenté par : ${companyRep}`, pageMargin, doc.y + 14);
+      doc.text(`Siège : ${companyAddress}`, pageMargin, doc.y + 28);
+      doc.text(`N° TVA : ${companyVat}`, pageMargin, doc.y + 42);
+      doc.text(`Courriel : ${companyEmail}`, pageMargin, doc.y + 56);
+      doc.y += 70;
+      checkPageBreak(80);
+
+      bold().text("D’autre part, le PRESTATAIRE INDÉPENDANT :", pageMargin, doc.y);
+      doc.moveDown(0.4);
+      normal();
+      doc.text(`${detailerName}`, pageMargin, doc.y);
+      doc.text(`Adresse : ${detailerAddress}`, pageMargin, doc.y + 14);
+      doc.text(`N° TVA : ${detailerVat}`, pageMargin, doc.y + 28);
+      doc.text(`Courriel : ${detailerEmail}`, pageMargin, doc.y + 42);
+      doc.y += 58;
+      doc.moveDown(0.5);
+
+      doc.text("Il a été convenu ce qui suit :", pageMargin, doc.y);
+      doc.moveDown(1.2);
+
+      // ——— ARTICLE 1 – OBJET ———
+      checkPageBreak(120);
+      title().text("Article 1 – Objet", pageMargin, doc.y);
+      doc.moveDown(0.4);
+      drawHr(doc.y);
+      doc.moveDown(0.5);
+      normal();
+      doc.text("La présente convention a pour objet de définir les conditions dans lesquelles le Prestataire s’engage à exécuter, à titre indépendant, la mission décrite ci-après pour le compte du Donneur d’ordre.", pageMargin, doc.y, { width: pageWidth });
+      doc.moveDown(0.6);
+      bold().text("Mission :", pageMargin, doc.y);
+      doc.moveDown(0.2);
+      normal().text(agreement.title || "Mission", pageMargin, doc.y, { width: pageWidth });
+      doc.moveDown(0.4);
       if (agreement.description) {
-        doc.font("Helvetica-Bold")
-          .text("Description:", leftMargin, missionY, { width: labelWidth });
-        doc.font("Helvetica")
-          .text(agreement.description, leftMargin + labelWidth, missionY, { 
-            width: valueWidth,
-            lineGap: 2
-          });
-        missionY += lineHeight * 2;
+        doc.text(agreement.description, pageMargin, doc.y, { width: pageWidth });
+        doc.moveDown(0.4);
       }
-      
-      // Catégories
-      if (agreement.categories && agreement.categories.length > 0) {
-        doc.font("Helvetica-Bold")
-          .text("Catégories:", leftMargin, missionY, { width: labelWidth });
-        doc.font("Helvetica")
-          .text(agreement.categories.join(", "), leftMargin + labelWidth, missionY, { width: valueWidth });
-        missionY += lineHeight;
+      doc.text(`Type de mission : ${agreement.missionType === "one-time" ? "Ponctuelle" : agreement.missionType === "recurring" ? "Récurrente" : "Long terme"}.`, pageMargin, doc.y, { width: pageWidth });
+      doc.text(`Nombre de véhicules concernés : ${agreement.vehicleCount ?? 0}.`, pageMargin, doc.y + 14, { width: pageWidth });
+      if (agreement.categories && agreement.categories.length) {
+        doc.text(`Catégories : ${agreement.categories.join(", ")}.`, pageMargin, doc.y + 28, { width: pageWidth });
+        doc.y += 14;
       }
-      
-      // Type de mission
-      if (agreement.missionType) {
-        const typeLabel = agreement.missionType === "one-time" ? "Ponctuelle" : 
-                         agreement.missionType === "recurring" ? "Récurrente" : "Long terme";
-        doc.font("Helvetica-Bold")
-          .text("Type:", leftMargin, missionY, { width: labelWidth });
-        doc.font("Helvetica")
-          .text(typeLabel, leftMargin + labelWidth, missionY, { width: valueWidth });
-        missionY += lineHeight;
-      }
-      
-      // Localisation
-      if (agreement.locationCity || agreement.locationPostalCode) {
-        doc.font("Helvetica-Bold")
-          .text("Localisation:", leftMargin, missionY, { width: labelWidth });
-        doc.font("Helvetica")
-          .text(`${agreement.locationCity || ""} ${agreement.locationPostalCode || ""}`.trim(), leftMargin + labelWidth, missionY, { width: valueWidth });
-        missionY += lineHeight;
-      }
-      
-      // Nombre de véhicules
-      doc.font("Helvetica-Bold")
-        .text("Nombre de véhicules:", leftMargin, missionY, { width: labelWidth });
-      doc.font("Helvetica")
-        .text(`${agreement.vehicleCount || 0}`, leftMargin + labelWidth, missionY, { width: valueWidth });
-      missionY += lineHeight;
-      
-      // Dates
-      if (agreement.startDate) {
-        doc.font("Helvetica-Bold")
-          .text("Date de début:", leftMargin, missionY, { width: labelWidth });
-        doc.font("Helvetica")
-          .text(formatDate(agreement.startDate), leftMargin + labelWidth, missionY, { width: valueWidth });
-        missionY += lineHeight;
-      }
-      
-      if (agreement.endDate) {
-        doc.font("Helvetica-Bold")
-          .text("Date de fin:", leftMargin, missionY, { width: labelWidth });
-        doc.font("Helvetica")
-          .text(formatDate(agreement.endDate), leftMargin + labelWidth, missionY, { width: valueWidth });
-        missionY += lineHeight;
-      }
-      
+      doc.y += 36;
+      doc.moveDown(0.5);
+
+      // ——— ARTICLE 2 – DURÉE ———
+      checkPageBreak(80);
+      title().text("Article 2 – Durée", pageMargin, doc.y);
+      doc.moveDown(0.4);
+      drawHr(doc.y);
+      doc.moveDown(0.5);
+      normal();
+      doc.text(`La mission s’étend du ${agreement.startDate ? formatDate(agreement.startDate) : "à définir"} au ${agreement.endDate ? formatDate(agreement.endDate) : "à définir"}.`, pageMargin, doc.y, { width: pageWidth });
       if (agreement.estimatedDurationDays) {
-        doc.font("Helvetica-Bold")
-          .text("Durée estimée:", leftMargin, missionY, { width: labelWidth });
-        doc.font("Helvetica")
-          .text(`${agreement.estimatedDurationDays} jours`, leftMargin + labelWidth, missionY, { width: valueWidth });
-        missionY += lineHeight;
+        doc.text(`Durée estimée : ${agreement.estimatedDurationDays} jours.`, pageMargin, doc.y + 14, { width: pageWidth });
+        doc.y += 14;
       }
-      
-      // Statut
-      doc.font("Helvetica-Bold")
-        .text("Statut:", leftMargin, missionY, { width: labelWidth });
-      doc.font("Helvetica")
-        .text(agreement.status || "draft", leftMargin + labelWidth, missionY, { width: valueWidth });
-      
-      doc.y = missionBoxY + contentHeight + 10;
-      doc.moveDown(2);
+      doc.y += 28;
+      doc.moveDown(0.5);
 
-      // ============================================
-      // SECTION 3: MONTANTS ET PAIEMENTS
-      // ============================================
-      checkPageBreak(200);
-      
-      doc.fontSize(14) // Réduit de 16 à 14
-        .font("Helvetica-Bold")
-        .fillColor("#000000")
-        .text("MONTANTS ET PAIEMENTS");
-      
-      drawSeparator(doc.y + 4, "#000000", 2);
-      
-      doc.moveDown(1.5); // Réduit de 2 à 1.5
-      
-      // Tableau des montants
-      const tableStartY = doc.y;
-      const tableRowHeight = 24; // Réduit de 28 à 24
-      const col1Width = 310;
-      const col2Width = 205;
-      
-      // En-tête du tableau
-      drawBox(40, tableStartY, col1Width, tableRowHeight, "#000000", "#000000", 0);
-      drawBox(350, tableStartY, col2Width, tableRowHeight, "#000000", "#000000", 0);
-      
-      doc.fontSize(10) // Réduit de 11 à 10
-        .font("Helvetica-Bold")
-        .fillColor("#FFFFFF")
-        .text("Description", 45, tableStartY + 7, { width: col1Width - 10 });
-      doc.text("Montant (€)", 355, tableStartY + 7, { width: col2Width - 10, align: "right" });
-      
-      doc.fillColor("#000000");
-      let currentTableY = tableStartY + tableRowHeight;
-      
-      // Ligne 1: Montant total
-      drawBox(40, currentTableY, col1Width, tableRowHeight, "#FFFFFF", "#DDDDDD", 1);
-      drawBox(350, currentTableY, col2Width, tableRowHeight, "#FFFFFF", "#DDDDDD", 1);
-      doc.fontSize(9) // Réduit de 10 à 9
-        .font("Helvetica")
-        .fillColor("#333333")
-        .text("Montant total de la mission", 45, currentTableY + 7, { width: col1Width - 10 });
-      doc.font("Helvetica-Bold")
-        .fillColor("#000000")
-        .text(`${totalAmount.toFixed(2)}`, 355, currentTableY + 7, { width: col2Width - 10, align: "right" });
-      currentTableY += tableRowHeight;
-      
-      // Ligne 2: Acompte
-      drawBox(40, currentTableY, col1Width, tableRowHeight, "#F9F9F9", "#DDDDDD", 1);
-      drawBox(350, currentTableY, col2Width, tableRowHeight, "#F9F9F9", "#DDDDDD", 1);
-      doc.font("Helvetica")
-        .fillColor("#333333")
-        .text(`Acompte (${agreement.depositPercentage || 0}%)`, 45, currentTableY + 7, { width: col1Width - 10 });
-      doc.text(`${depositAmount.toFixed(2)}`, 355, currentTableY + 7, { width: col2Width - 10, align: "right" });
-      currentTableY += tableRowHeight;
-      
-      // Ligne 3: Solde restant
-      drawBox(40, currentTableY, col1Width, tableRowHeight, "#FFFFFF", "#DDDDDD", 1);
-      drawBox(350, currentTableY, col2Width, tableRowHeight, "#FFFFFF", "#DDDDDD", 1);
-      doc.text("Solde restant", 45, currentTableY + 7, { width: col1Width - 10 });
-      doc.text(`${remainingAmount.toFixed(2)}`, 355, currentTableY + 7, { width: col2Width - 10, align: "right" });
-      currentTableY += tableRowHeight;
-      
-      // Ligne totale (bordure épaisse)
-      drawBox(40, currentTableY, col1Width, tableRowHeight, "#000000", "#000000", 0);
-      drawBox(350, currentTableY, col2Width, tableRowHeight, "#000000", "#000000", 0);
-      doc.fontSize(10) // Réduit de 11 à 10
-        .font("Helvetica-Bold")
-        .fillColor("#FFFFFF")
-        .text("TOTAL", 45, currentTableY + 7, { width: col1Width - 10 });
-      doc.text(`${totalAmount.toFixed(2)}`, 355, currentTableY + 7, { width: col2Width - 10, align: "right" });
-      currentTableY += tableRowHeight + 10; // Réduit de 15 à 10
-      
-      // Commission NIOS (boîte séparée)
-      doc.fillColor("#000000");
-      const commissionBoxY = currentTableY;
-      const commissionBoxHeight = 70; // Réduit de 85 à 70
-      drawBox(40, commissionBoxY, 515, commissionBoxHeight, "#FFF9E6", "#FFA500", 2);
-      
-      doc.fontSize(11) // Réduit de 12 à 11
-        .font("Helvetica-Bold")
-        .text("COMMISSION NIOS", 50, commissionBoxY + 10);
-      
-      doc.fontSize(9) // Réduit de 10 à 9
-        .font("Helvetica")
-        .fillColor("#333333");
-      
-      const commissionY = commissionBoxY + 26; // Réduit de 32 à 26
-      doc.text(`Montant brut: ${totalAmount.toFixed(2)} €`, 50, commissionY);
-      doc.text(`Commission (${(MISSION_COMMISSION_RATE * 100).toFixed(0)}%): ${commissionAmount.toFixed(2)} €`, 50, commissionY + 14); // Réduit de 18 à 14
-      doc.fontSize(10) // Réduit de 11 à 10
-        .font("Helvetica-Bold")
-        .fillColor("#000000")
-        .text(`Montant net pour le detailer: ${netAmount.toFixed(2)} €`, 50, commissionY + 28); // Réduit de 36 à 28
-      
-      doc.y = commissionBoxY + commissionBoxHeight + 8;
-      doc.moveDown(1.5); // Réduit de 2 à 1.5
+      // ——— ARTICLE 3 – LIEU D'EXÉCUTION ———
+      checkPageBreak(70);
+      title().text("Article 3 – Lieu d’exécution", pageMargin, doc.y);
+      doc.moveDown(0.4);
+      drawHr(doc.y);
+      doc.moveDown(0.5);
+      normal();
+      const lieu = agreement.exactAddress || `${agreement.locationCity || ""} ${agreement.locationPostalCode || ""}`.trim() || "À préciser";
+      doc.text(`Lieu d’exécution : ${lieu}.`, pageMargin, doc.y, { width: pageWidth });
+      if (agreement.specificConstraints) {
+        doc.moveDown(0.4);
+        doc.text(`Contraintes particulières : ${agreement.specificConstraints}`, pageMargin, doc.y, { width: pageWidth });
+        doc.y += 14;
+      }
+      doc.y += 28;
+      doc.moveDown(0.5);
 
-      // ============================================
-      // SECTION 4: PLANNING DE PAIEMENT
-      // ============================================
+      // ——— ARTICLE 4 – PRIX ET CONDITIONS FINANCIÈRES ———
+      checkPageBreak(180);
+      title().text("Article 4 – Prix et conditions financières", pageMargin, doc.y);
+      doc.moveDown(0.4);
+      drawHr(doc.y);
+      doc.moveDown(0.5);
+      normal();
+      doc.text(`Le montant total de la mission est fixé à ${totalAmount.toFixed(2)} € (HT ou TVA selon applicabilité).`, pageMargin, doc.y, { width: pageWidth });
+      doc.moveDown(0.4);
+      doc.text(`Un acompte de ${agreement.depositPercentage ?? 0} %, soit ${depositAmount.toFixed(2)} €, est dû au début de la mission. Le solde restant, soit ${remainingAmount.toFixed(2)} €, est réglé selon l’échéancier convenu et détaillé en annexe ou via la plateforme NIOS.`, pageMargin, doc.y, { width: pageWidth });
+      doc.moveDown(0.6);
+      bold().text("Échéancier des paiements :", pageMargin, doc.y);
+      doc.moveDown(0.3);
       if (payments && payments.length > 0) {
-        checkPageBreak(80 + (payments.length * 28)); // Optimisé
-        
-        doc.fontSize(14) // Réduit de 16 à 14
-          .font("Helvetica-Bold")
-          .fillColor("#000000")
-          .text("PLANNING DE PAIEMENT");
-        
-        drawSeparator(doc.y + 4, "#000000", 2);
-        
-        doc.moveDown(1.5); // Réduit de 2 à 1.5
-        
-        // Tableau des paiements
-        const paymentTableY = doc.y;
-        const paymentRowHeight = 26; // Réduit de 32 à 26
-        const pCol1Width = 200;
-        const pCol2Width = 120;
-        const pCol3Width = 100;
-        const pCol4Width = 95;
-        
-        // En-tête
-        drawBox(40, paymentTableY, pCol1Width, paymentRowHeight, "#000000", "#000000", 0);
-        drawBox(240, paymentTableY, pCol2Width, paymentRowHeight, "#000000", "#000000", 0);
-        drawBox(360, paymentTableY, pCol3Width, paymentRowHeight, "#000000", "#000000", 0);
-        drawBox(460, paymentTableY, pCol4Width, paymentRowHeight, "#000000", "#000000", 0);
-        
-        doc.fontSize(9) // Réduit de 10 à 9
-          .font("Helvetica-Bold")
-          .fillColor("#FFFFFF")
-          .text("Type", 45, paymentTableY + 8, { width: pCol1Width - 10 });
-        doc.text("Date", 245, paymentTableY + 8, { width: pCol2Width - 10 });
-        doc.text("Montant", 365, paymentTableY + 8, { width: pCol3Width - 10, align: "right" });
-        doc.text("Statut", 465, paymentTableY + 8, { width: pCol4Width - 10 });
-        
-        doc.fillColor("#000000");
-        let currentPaymentY = paymentTableY + paymentRowHeight;
-        
-        payments.forEach((payment, index) => {
-          const typeLabels = {
-            deposit: "Acompte",
-            installment: "Échéance",
-            final: "Solde final",
-            monthly: "Paiement mensuel",
-          };
-          const statusLabels = {
-            pending: "En attente",
-            authorized: "Autorisé",
-            captured: "Capturé",
-            failed: "Échoué",
-            refunded: "Remboursé",
-            cancelled: "Annulé",
-          };
-          
-          const typeLabel = typeLabels[payment.type] || payment.type;
-          const statusLabel = statusLabels[payment.status] || payment.status;
-          const amount = payment.amount ? payment.amount.toFixed(2) : "0.00";
-          const scheduledDate = payment.scheduledDate ? formatDate(payment.scheduledDate) : "Non défini";
-          
-          let title = typeLabel;
-          if (payment.type === "installment" && payment.installmentNumber) {
-            title = `${typeLabel} ${payment.installmentNumber}`;
-          } else if (payment.type === "monthly" && payment.monthNumber) {
-            title = `${typeLabel} - Mois ${payment.monthNumber}`;
-          }
-          
-          // Alterner les couleurs de fond
-          const bgColor = index % 2 === 0 ? "#FFFFFF" : "#F9F9F9";
-          
-          drawBox(40, currentPaymentY, pCol1Width, paymentRowHeight, bgColor, "#DDDDDD", 1);
-          drawBox(240, currentPaymentY, pCol2Width, paymentRowHeight, bgColor, "#DDDDDD", 1);
-          drawBox(360, currentPaymentY, pCol3Width, paymentRowHeight, bgColor, "#DDDDDD", 1);
-          drawBox(460, currentPaymentY, pCol4Width, paymentRowHeight, bgColor, "#DDDDDD", 1);
-          
-          doc.fontSize(8) // Réduit de 9 à 8
-            .font("Helvetica")
-            .fillColor("#333333")
-            .text(title, 45, currentPaymentY + 8, { width: pCol1Width - 10 });
-          doc.text(scheduledDate, 245, currentPaymentY + 8, { width: pCol2Width - 10 });
-          doc.font("Helvetica-Bold")
-            .fillColor("#000000")
-            .text(`${amount} €`, 365, currentPaymentY + 8, { width: pCol3Width - 10, align: "right" });
-          doc.font("Helvetica")
-            .fontSize(7) // Réduit de 8 à 7
-            .fillColor("#666666")
-            .text(statusLabel, 465, currentPaymentY + 8, { width: pCol4Width - 10 });
-          
-          currentPaymentY += paymentRowHeight;
+        const typeLabels = { deposit: "Acompte", installment: "Échéance", final: "Solde final", monthly: "Mensuel" };
+        payments.forEach((p) => {
+          const label = typeLabels[p.type] || p.type;
+          const date = p.scheduledDate ? formatDate(p.scheduledDate) : "—";
+          doc.text(`• ${label} : ${(p.amount || 0).toFixed(2)} € — ${date}`, pageMargin, doc.y, { width: pageWidth });
+          doc.y += 14;
         });
-        
-        doc.y = currentPaymentY + 8; // Réduit de 10 à 8
-        doc.moveDown(1.5); // Réduit de 2 à 1.5
+      } else {
+        doc.text("Acompte à la date de début ; solde à la fin de la mission ou selon plan de paiement NIOS.", pageMargin, doc.y, { width: pageWidth });
+        doc.y += 14;
       }
+      doc.y += 14;
+      doc.moveDown(0.5);
 
-      // ============================================
-      // FOOTER PROFESSIONNEL
-      // ============================================
-      checkPageBreak(40);
-      
-      const footerY = Math.min(doc.y, 762);
-      drawSeparator(footerY, "#CCCCCC", 1);
-      
-      doc.fontSize(7) // Réduit de 8 à 7
-        .font("Helvetica")
-        .fillColor("#666666")
-        .text(
-          `Document généré automatiquement par NIOS le ${formatDate(new Date().toISOString())}`,
-          40,
-          footerY + 8, // Réduit de 10 à 8
-          { width: 515, align: "center" }
-        );
-      doc.text(
-        "Ce document constitue un accord contractuel entre les parties mentionnées ci-dessus.",
-        40,
-        footerY + 20, // Réduit de 25 à 20
-        { width: 515, align: "center" }
-      );
+      // ——— ARTICLE 5 – RÈGLES CONVENTIONNELLES ———
+      checkPageBreak(100);
+      title().text("Article 5 – Règles conventionnelles", pageMargin, doc.y);
+      doc.moveDown(0.4);
+      drawHr(doc.y);
+      doc.moveDown(0.5);
+      normal();
+      doc.text("Les règles suivantes, définies par le Donneur d’ordre et acceptées par le Prestataire, s’appliquent à l’exécution de la mission :", pageMargin, doc.y, { width: pageWidth });
+      doc.moveDown(0.6);
+
+      if (operationalParagraphs.length > 0) {
+        operationalParagraphs.forEach((block) => {
+          checkPageBreak(30);
+          if (block.title) {
+            bold().text(block.title, pageMargin, doc.y);
+            doc.y += 14;
+          }
+          block.lines.forEach((line) => {
+            checkPageBreak(18);
+            normal().text(line, pageMargin + 8, doc.y, { width: pageWidth - 8 });
+            doc.y += 14;
+          });
+          doc.y += 8;
+        });
+      } else {
+        doc.text("Aucune règle opérationnelle supplémentaire n’a été ajoutée pour la présente mission.", pageMargin, doc.y, { width: pageWidth });
+        doc.y += 20;
+      }
+      doc.moveDown(0.5);
+
+      // ——— ARTICLE 6 – COMMISSION PLATEFORME ———
+      checkPageBreak(90);
+      title().text("Article 6 – Commission plateforme NIOS", pageMargin, doc.y);
+      doc.moveDown(0.4);
+      drawHr(doc.y);
+      doc.moveDown(0.5);
+      normal();
+      doc.text(`La plateforme NIOS prélève une commission de ${(MISSION_COMMISSION_RATE * 100).toFixed(0)} % sur le montant de la mission, soit ${commissionAmount.toFixed(2)} €. Le montant net revenant au Prestataire s’élève à ${netAmount.toFixed(2)} €. Les modalités de paiement au Prestataire sont gérées via NIOS (Stripe Connect).`, pageMargin, doc.y, { width: pageWidth });
+      doc.y += 50;
+      doc.moveDown(0.5);
+
+      // ——— ARTICLE 7 – ACCEPTATION, OPPOSABILITÉ, DROIT APPLICABLE ———
+      checkPageBreak(120);
+      title().text("Article 7 – Acceptation, opposabilité et droit applicable", pageMargin, doc.y);
+      doc.moveDown(0.4);
+      drawHr(doc.y);
+      doc.moveDown(0.5);
+      normal();
+      doc.text("La présente convention est opposable aux parties dès lors qu’elle a été acceptée par le Donneur d’ordre puis par le Prestataire (acceptation électronique via la plateforme NIOS). Elle est régie par le droit belge. En cas de litige, les tribunaux du siège du Donneur d’ordre seront compétents, sauf disposition impérative contraire.", pageMargin, doc.y, { width: pageWidth });
+      doc.moveDown(0.6);
+      if (agreement.companyAcceptedAt) {
+        doc.text(`Acceptée par le Donneur d’ordre le : ${formatDate(agreement.companyAcceptedAt)}.`, pageMargin, doc.y, { width: pageWidth });
+        doc.y += 14;
+      }
+      if (agreement.detailerAcceptedAt) {
+        doc.text(`Acceptée par le Prestataire le : ${formatDate(agreement.detailerAcceptedAt)}.`, pageMargin, doc.y, { width: pageWidth });
+        doc.y += 14;
+      }
+      doc.y += 20;
+      doc.moveDown(0.5);
+
+      // ——— FAIT EN DEUX EXEMPLAIRES ———
+      checkPageBreak(50);
+      doc.fontSize(10).font("Helvetica-Oblique");
+      doc.text("Fait en deux exemplaires, un pour chaque partie.", pageMargin, doc.y, { width: pageWidth, align: "center" });
+      doc.moveDown(0.5);
+      doc.text(`Document généré par NIOS le ${formatDate(new Date().toISOString())}.`, pageMargin, doc.y, { width: pageWidth, align: "center" });
 
       doc.end();
-    } catch (error) {
-      reject(new Error(`Failed to generate PDF with pdfkit: ${error.message}`));
+    } catch (err) {
+      reject(err);
     }
   });
 }
