@@ -46,7 +46,7 @@ export function mapUserRowToDto(row) {
       : null,
 
     // ===========================
-    // COMPANY PROFILE
+    // COMPANY PROFILE (identité légale, confiance, fiabilité)
     // ===========================
     companyProfile: co
       ? {
@@ -56,6 +56,27 @@ export function mapUserRowToDto(row) {
           postalCode: cleanNull(co.postal_code),
           contactName: cleanNull(co.contact_name),
           logoUrl: cleanNull(co.logo_url),
+          commercialName: cleanNull(co.commercial_name),
+          bceNumber: cleanNull(co.bce_number),
+          country: cleanNull(co.country),
+          registeredAddress: cleanNull(co.registered_address),
+          legalRepresentativeName: cleanNull(co.legal_representative_name),
+          languagesSpoken: cleanNull(co.languages_spoken),
+          currency: cleanNull(co.currency),
+          sector: cleanNull(co.sector),
+          fleetSize: cleanNull(co.fleet_size),
+          mainAddress: cleanNull(co.main_address),
+          missionZones: cleanNull(co.mission_zones),
+          placeTypes: cleanNull(co.place_types),
+          isVerified: co.is_verified ?? false,
+          paymentSuccessRate: co.payment_success_rate != null ? Number(co.payment_success_rate) : null,
+          lateCancellationsCount: co.late_cancellations_count ?? null,
+          openDisputesCount: co.open_disputes_count ?? null,
+          closedDisputesCount: co.closed_disputes_count ?? null,
+          missionsPostedCount: co.missions_posted_count ?? null,
+          missionsCompletedCount: co.missions_completed_count ?? null,
+          detailerSatisfactionRate: co.detailer_satisfaction_rate != null ? Number(co.detailer_satisfaction_rate) : null,
+          detailerRating: co.detailer_rating != null ? Number(co.detailer_rating) : null,
         }
       : null,
 

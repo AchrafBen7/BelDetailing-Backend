@@ -1,6 +1,7 @@
 
 import { mapUserRowToDto } from "../mappers/user.mapper.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { getCompanyReliabilityMetrics } from "../services/companyProfileStats.service.js";
 
 
 // ========= GET PROFILE =========
@@ -37,7 +38,28 @@ export async function getProfile(req, res) {
       city,
       postal_code,
       contact_name,
-      logo_url
+      logo_url,
+      commercial_name,
+      bce_number,
+      country,
+      registered_address,
+      legal_representative_name,
+      languages_spoken,
+      currency,
+      sector,
+      fleet_size,
+      main_address,
+      mission_zones,
+      place_types,
+      is_verified,
+      payment_success_rate,
+      late_cancellations_count,
+      open_disputes_count,
+      closed_disputes_count,
+      missions_posted_count,
+      missions_completed_count,
+      detailer_satisfaction_rate,
+      detailer_rating
     ),
     provider_profiles (
       display_name,
@@ -71,6 +93,23 @@ export async function getProfile(req, res) {
 
 try {
   const userDto = mapUserRowToDto(data);
+
+  // Enrichir le profil Company avec les métriques calculées (fiabilité / historique)
+  if (data.role === "company" && userDto.companyProfile) {
+    try {
+      const metrics = await getCompanyReliabilityMetrics(userId);
+      userDto.companyProfile.missionsPostedCount = metrics.missionsPostedCount;
+      userDto.companyProfile.missionsCompletedCount = metrics.missionsCompletedCount;
+      userDto.companyProfile.paymentSuccessRate = metrics.paymentSuccessRate;
+      userDto.companyProfile.lateCancellationsCount = metrics.lateCancellationsCount;
+      userDto.companyProfile.openDisputesCount = metrics.openDisputesCount;
+      userDto.companyProfile.detailerSatisfactionRate = metrics.detailerSatisfactionRate;
+      userDto.companyProfile.detailerRating = metrics.detailerRating;
+    } catch (metricsErr) {
+      console.warn("[PROFILE] Company metrics error:", metricsErr.message);
+    }
+  }
+
   return res.json({ user: userDto });
 } catch (err) {
   console.error("❌ DTO MAPPING ERROR:", err);
@@ -195,7 +234,7 @@ export async function updateProfile(req, res) {
     }
   }
 
-  // 3) Update / upsert company_profile
+  // 3) Update / upsert company_profile (identité légale, confiance, localisation)
   if (companyProfile) {
     const {
       legalName,
@@ -204,6 +243,18 @@ export async function updateProfile(req, res) {
       postalCode,
       contactName,
       logoUrl,
+      commercialName,
+      bceNumber,
+      country,
+      registeredAddress,
+      legalRepresentativeName,
+      languagesSpoken,
+      currency,
+      sector,
+      fleetSize,
+      mainAddress,
+      missionZones,
+      placeTypes,
     } = companyProfile;
 
     const { error: companyError } = await supabase
@@ -217,6 +268,18 @@ export async function updateProfile(req, res) {
           postal_code: postalCode,
           contact_name: contactName,
           logo_url: logoUrl,
+          commercial_name: commercialName,
+          bce_number: bceNumber,
+          country,
+          registered_address: registeredAddress,
+          legal_representative_name: legalRepresentativeName,
+          languages_spoken: languagesSpoken,
+          currency,
+          sector,
+          fleet_size: fleetSize,
+          main_address: mainAddress,
+          mission_zones: missionZones,
+          place_types: placeTypes,
         },
         { onConflict: "user_id" }
       );

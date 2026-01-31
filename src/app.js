@@ -125,6 +125,8 @@ app.use("/api/v1/mission-payments/schedule", missionPaymentScheduleRoutes);
 console.log("✅ [APP] Mission Payment Schedule routes configured");
 
 app.use("/api/v1/reviews", reviewRoutes);
+import companyReviewRoutes from "./routes/companyReview.routes.js";
+app.use("/api/v1/company-reviews", companyReviewRoutes);
 app.use("/api/v1/cities", cityRoutes);
 app.use("/api/v1/search", searchRoutes);
 app.use("/api/v1/service-categories", serviceCategoryRoutes);
