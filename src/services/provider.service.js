@@ -98,6 +98,7 @@ export function mapProviderRowToDetailer(row) {
     maxRadiusKm: row.max_radius_km ?? null,
     serviceArea: row.service_area ?? null, // ✅ Zone d'intervention (JSON)
     welcomingOfferEnabled: row.welcoming_offer_enabled ?? false, // ✅ Offre de bienvenue
+    availableToday: row.available_today ?? false, // ✅ Disponible cette semaine (effet urgence)
   };
 }
 
@@ -613,8 +614,9 @@ export async function updateProviderProfile(userId, updates) {
     logo_url: updates.logo_url,
     banner_url: updates.banner_url,
     phone: updates.phone,
-  email: updates.email,
-  opening_hours: updates.opening_hours
+    email: updates.email,
+    opening_hours: updates.opening_hours,
+    available_today: updates.availableToday,
   };
 
   const { data, error } = await supabase

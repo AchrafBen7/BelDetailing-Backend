@@ -21,6 +21,9 @@ export async function getProfile(req, res) {
     role,
     vat_number,
     is_vat_valid,
+    referral_code,
+    referred_by,
+    customer_credits_eur,
     welcoming_offer_used,
     dismissed_first_booking_offer,
     created_at,
@@ -30,7 +33,12 @@ export async function getProfile(req, res) {
       last_name,
       default_address,
       preferred_city_id,
-      vehicle_type
+      vehicle_type,
+      service_at_home,
+      home_water,
+      home_electricity,
+      home_space,
+      avatar_url
     ),
     company_profiles (
       legal_name,
@@ -213,6 +221,11 @@ export async function updateProfile(req, res) {
       defaultAddress,
       preferredCityId,
       vehicleType,
+      serviceAtHome,
+      homeWater,
+      homeElectricity,
+      homeSpace,
+      avatarUrl,
     } = customerProfile;
 
     const { error: customerError } = await supabase
@@ -225,6 +238,11 @@ export async function updateProfile(req, res) {
           default_address: defaultAddress,
           preferred_city_id: preferredCityId,
           vehicle_type: vehicleType,
+          service_at_home: serviceAtHome === true,
+          home_water: homeWater === true,
+          home_electricity: homeElectricity === true,
+          home_space: homeSpace === true,
+          avatar_url: avatarUrl ?? null,
         },
         { onConflict: "user_id" }
       );

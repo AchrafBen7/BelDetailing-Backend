@@ -63,6 +63,7 @@ function mapProviderRow(row) {
     yearsOfExperience: row.years_of_experience ?? 0,
     serviceArea: row.service_area ?? null, // ✅ Zone d'intervention (JSON)
     welcomingOfferEnabled: row.welcoming_offer_enabled ?? false, // ✅ Offre de bienvenue
+    availableToday: row.available_today ?? false, // ✅ Disponible cette semaine
   };
 }
 

@@ -49,6 +49,7 @@ import googleReviewRoutes from "./routes/googleReview.routes.js";
 import portfolioRoutes from "./routes/portfolio.routes.js";
 import servicePhotosRoutes from "./routes/servicePhotos.routes.js";
 import noShowRoutes from "./routes/noShow.routes.js";
+import referralRoutes from "./routes/referral.routes.js";
 const routesImportTime = Date.now() - startRoutesImport;
 console.log(`✅ [APP] All routes loaded in ${routesImportTime}ms`);
 
@@ -86,6 +87,9 @@ app.use("/api/v1/auth", authRoutes);
 
 // Profile (même router, mais route "/" dedans)
 app.use("/api/v1/profile", profileRoutes);
+
+// Parrainage (lien d'invitation, stats)
+app.use("/api/v1/referral", referralRoutes);
 
 app.use("/api/v1/providers", providerRoutes);
 app.use("/api/v1/providers", portfolioRoutes);

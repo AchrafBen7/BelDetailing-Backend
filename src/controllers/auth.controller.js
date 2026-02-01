@@ -4,6 +4,12 @@ import {
   resendVerificationEmail,
   sendVerificationEmail,
 } from "../services/email.service.js";
+import {
+  validateReferralCodeForSignup,
+  createPendingReferral,
+  userAlreadyReferred,
+  ensureUserReferralCode,
+} from "../services/referral.service.js";
 
 /* ============================================================
    Helper : Map row SQL → DTO User pour iOS
@@ -120,6 +126,24 @@ export async function register(req, res) {
 
   if (insertError) {
     return res.status(500).json({ error: insertError.message });
+  }
+
+  // 2b) Parrainage: code unique + referred_by si lien d'invitation (Phase 1: Customer→Customer, Detailer→Detailer)
+  try {
+    await ensureUserReferralCode(authUser.id);
+    const refCode = req.body.ref || req.body.referral_code;
+    if (refCode) {
+      const valid = await validateReferralCodeForSignup(refCode, finalRole);
+      if (valid && valid.referrerId !== authUser.id) {
+        const alreadyReferred = await userAlreadyReferred(authUser.id);
+        if (!alreadyReferred) {
+          await supabaseAdmin.from("users").update({ referred_by: valid.referrerId }).eq("id", authUser.id);
+          await createPendingReferral(valid.referrerId, authUser.id, finalRole);
+        }
+      }
+    }
+  } catch (refErr) {
+    console.warn("[AUTH] Referral setup failed (non-blocking):", refErr.message);
   }
 
   // ============================================================

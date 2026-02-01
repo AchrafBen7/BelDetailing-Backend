@@ -3,6 +3,7 @@ import express from "express";
 import Stripe from "stripe";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { sendNotificationToUser } from "../services/onesignal.service.js";
+import { tryValidateReferralCustomerFirstPaidBooking } from "../services/referral.service.js";
 
 const router = express.Router();
 
@@ -510,6 +511,13 @@ router.post(
             } catch (revenueError) {
               console.error("[WEBHOOK] Error updating annual revenue:", revenueError);
               // Ne pas faire échouer le webhook, juste logger
+            }
+
+            // ✅ Parrainage: si c'est la 1ère résa payée du customer, valider le referral
+            try {
+              if (userId) await tryValidateReferralCustomerFirstPaidBooking(userId);
+            } catch (refErr) {
+              console.warn("[WEBHOOK] Referral validation failed (non-blocking):", refErr.message);
             }
 
           // ✅ ENVOYER NOTIFICATION AU CUSTOMER (paiement réussi)

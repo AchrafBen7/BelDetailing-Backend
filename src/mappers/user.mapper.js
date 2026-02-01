@@ -25,7 +25,11 @@ export function mapUserRowToDto(row) {
 
     vatNumber: cleanNull(row.vat_number),
     isVatValid: cleanNull(row.is_vat_valid),
-    
+
+    referralCode: cleanNull(row.referral_code),
+    referredBy: cleanNull(row.referred_by),
+    customerCreditsEur: row.customer_credits_eur != null ? Number(row.customer_credits_eur) : 0,
+
     welcomingOfferUsed: row.welcoming_offer_used ?? false, // ✅ Offre de bienvenue utilisée
     dismissedFirstBookingOffer: row.dismissed_first_booking_offer ?? false, // ✅ Offre de bienvenue fermée définitivement
 
@@ -42,6 +46,11 @@ export function mapUserRowToDto(row) {
           defaultAddress: cleanNull(c.default_address),
           preferredCityId: cleanNull(c.preferred_city_id),
           vehicleType: cleanNull(c.vehicle_type),
+          serviceAtHome: c.service_at_home === true,
+          homeWater: c.home_water === true,
+          homeElectricity: c.home_electricity === true,
+          homeSpace: c.home_space === true,
+          avatarUrl: cleanNull(c.avatar_url),
         }
       : null,
 
@@ -107,6 +116,7 @@ export function mapUserRowToDto(row) {
           transportEnabled: p.transport_enabled ?? false,
           serviceArea: p.service_area ?? null, // ✅ Zone d'intervention (JSON)
           welcomingOfferEnabled: p.welcoming_offer_enabled ?? false, // ✅ Offre de bienvenue
+          availableToday: p.available_today ?? false, // ✅ Disponible cette semaine (effet urgence)
         }
       : null,
   };
