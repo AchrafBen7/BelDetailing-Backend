@@ -1,6 +1,8 @@
 // src/routes/booking.routes.js
 import { Router } from "express";
 import { requireAuth } from "../middlewares/auth.middleware.js";
+import { validateRequest } from "../validators/index.js";
+import { createBookingValidation, patchBookingValidation } from "../validators/booking.validator.js";
 
 import {
   listBookings,
@@ -27,8 +29,8 @@ const router = Router();
 
 router.get("/", requireAuth, listBookings);
 router.get("/:id", requireAuth, getBooking);
-router.post("/", requireAuth, createBooking);
-router.patch("/:id", requireAuth, updateBooking);
+router.post("/", requireAuth, createBookingValidation, validateRequest, createBooking);
+router.patch("/:id", requireAuth, patchBookingValidation, validateRequest, updateBooking);
 
 router.post("/:id/cancel", requireAuth, cancelBooking);
 router.post("/:id/confirm", requireAuth, confirmBooking);

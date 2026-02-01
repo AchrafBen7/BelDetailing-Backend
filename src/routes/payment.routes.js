@@ -11,13 +11,19 @@ import {
   deletePaymentMethodController,
 } from "../controllers/payment.controller.js";
 import { createStripeProductForServiceController } from "../controllers/stripeProduct.controller.js";
+import { validateRequest } from "../validators/index.js";
+import {
+  createPaymentIntentValidation,
+  capturePaymentValidation,
+  refundPaymentValidation,
+} from "../validators/payment.validator.js";
 
 const router = Router();
 
 // Paiements PaymentSheet
-router.post("/intent", requireAuth, createPaymentIntentController);
-router.post("/capture", requireAuth, capturePaymentController);
-router.post("/refund", requireAuth, refundPaymentController);
+router.post("/intent", requireAuth, createPaymentIntentValidation, validateRequest, createPaymentIntentController);
+router.post("/capture", requireAuth, capturePaymentValidation, validateRequest, capturePaymentController);
+router.post("/refund", requireAuth, refundPaymentValidation, validateRequest, refundPaymentController);
 
 // 💳 Cartes (Customer)
 router.post("/setup-intent", requireAuth, createSetupIntentController);

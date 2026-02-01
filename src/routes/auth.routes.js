@@ -13,13 +13,19 @@ import {
   loginWithGoogle,
 } from "../controllers/authSocial.controller.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
+import { validateRequest } from "../validators/index.js";
+import {
+  registerValidation,
+  loginValidation,
+  refreshTokenValidation,
+} from "../validators/auth.validator.js";
 
 const router = Router();
 
 // === AUTH ===
-router.post("/register", register);
-router.post("/login", login);
-router.post("/refresh", refreshToken);
+router.post("/register", registerValidation, validateRequest, register);
+router.post("/login", loginValidation, validateRequest, login);
+router.post("/refresh", refreshTokenValidation, validateRequest, refreshToken);
 router.post("/verify-email", verifyEmail);
 router.post("/resend-verification-email", resendVerificationEmailController);
 

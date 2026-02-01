@@ -24,6 +24,8 @@ import {
   checkFavoriteController,
   listFavoritesController,
 } from "../controllers/offerFavorite.controller.js";
+import { validateRequest } from "../validators/index.js";
+import { createOfferValidation } from "../validators/offer.validator.js";
 
 const router = Router();
 
@@ -45,7 +47,7 @@ router.get("/my", requireAuth, listMyOffersController);
 // GET /api/v1/offers/favorites - Offres favorites de l'utilisateur connecté (provider/company)
 // IMPORTANT: Cette route doit être définie AVANT les routes paramétrées "/:id"
 router.get("/favorites", requireAuth, listFavoritesController);
-router.post("/", requireAuth, createOfferController);
+router.post("/", requireAuth, createOfferValidation, validateRequest, createOfferController);
 
 // DETAIL & UPDATE & DELETE & CLOSE
 // Détail d'une offre (cache 10 min)

@@ -13,7 +13,6 @@ import {
 } from "../services/payment.service.js";
 import { sendNotificationToUser, sendNotificationWithDeepLink } from "../services/onesignal.service.js";
 import { sendPeppolInvoice } from "../services/peppol.service.js";
-import { tryValidateReferralCustomerFirstPaidBooking, tryValidateReferralProviderWhenMissionsCompleted } from "../services/referral.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { BOOKING_COMMISSION_RATE } from "../config/commission.js";
 
@@ -127,44 +126,12 @@ const DEFAULT_SERVICE_STEPS = [
   { id: "step_5", title: "Final check", percentage: 10, is_completed: false, order: 5 },
 ];
 
-const MAX_STEPS_FROM_TEMPLATE = 6;
-
-/**
- * Construit l'objet progress pour un booking en utilisant le steps_template du service si présent.
- * Sinon utilise DEFAULT_SERVICE_STEPS. Max 6 étapes (template).
- */
-async function buildProgressForBooking(bookingId, serviceId) {
-  let steps = DEFAULT_SERVICE_STEPS.map(step => ({ ...step }));
-
-  if (serviceId) {
-    const { data: service, error } = await supabase
-      .from("services")
-      .select("steps_template")
-      .eq("id", serviceId)
-      .maybeSingle();
-
-    if (!error && service?.steps_template && Array.isArray(service.steps_template) && service.steps_template.length > 0) {
-      const raw = service.steps_template.slice(0, MAX_STEPS_FROM_TEMPLATE);
-      const totalPct = raw.reduce((sum, s) => sum + (Number(s.percentage) || 0), 0);
-      const scale = totalPct > 0 ? 100 / totalPct : 1;
-      steps = raw.map((s, i) => ({
-        id: s.id || `step_${i + 1}`,
-        title: s.label ?? s.title ?? `Étape ${i + 1}`,
-        percentage: Math.round((Number(s.percentage) || 100 / raw.length) * scale) || 10,
-        is_completed: false,
-        order: s.order ?? i + 1,
-        completed_at: null,
-      }));
-    }
-  }
-
+function buildDefaultProgress(bookingId) {
   return {
     booking_id: bookingId,
-    steps,
+    steps: DEFAULT_SERVICE_STEPS.map(step => ({ ...step })),
     current_step_index: 0,
     total_progress: 0,
-    started_at: new Date().toISOString(),
-    completed_at: null,
   };
 }
 
@@ -306,8 +273,6 @@ export async function createBooking(req, res) {
       company_vat,
       company_address,
       company_peppol_id,
-      credits_to_use,
-      creditsToUse,
     } = req.body;
 
     console.log("🔵 [BOOKINGS] createBooking - customerId:", customerId);
@@ -495,49 +460,8 @@ export async function createBooking(req, res) {
     // 5) Calculer le prix total avec l'offre
     const totalPriceBeforeOffer = servicesTotalPrice + transportFee;
     const totalPrice = totalPriceBeforeOffer - welcomingOfferAmount;
-
-    // 5b) Crédits parrainage (réduction au checkout, pas de cash direct)
-    const creditsToUseRaw = Math.max(0, Number(credits_to_use ?? creditsToUse ?? 0) || 0);
-    const { data: customerCreditsRow } = await supabase
-      .from("users")
-      .select("customer_credits_eur")
-      .eq("id", customerId)
-      .single();
-    const customerCreditsEur = Number(customerCreditsRow?.customer_credits_eur ?? 0) || 0;
-    const creditsApplied = Math.min(
-      creditsToUseRaw,
-      customerCreditsEur,
-      totalPrice,
-      Math.round(totalPrice * 100) / 100
-    );
-    const totalPriceToCharge = Math.round((totalPrice - creditsApplied) * 100) / 100;
-
     const paymentMethod = payment_method || "card";
     const serviceNames = services.map(service => service.name).join(", ");
-
-    // ✅ VÉRIFIER CRÉNEAU UNIQUE (provider + date + start_time)
-    const conflictingStatuses = ["pending", "confirmed", "ready_soon", "started", "in_progress", "preauthorized"];
-    const { data: existingSlot, error: slotError } = await supabase
-      .from("bookings")
-      .select("id")
-      .eq("provider_id", provider_id)
-      .eq("date", date)
-      .eq("start_time", start_time)
-      .in("status", conflictingStatuses)
-      .limit(1)
-      .maybeSingle();
-
-    if (slotError) {
-      console.error("❌ [BOOKINGS] createBooking - Slot check error:", slotError);
-      return res.status(500).json({ error: "Could not check availability", details: slotError.message });
-    }
-
-    if (existingSlot) {
-      return res.status(409).json({
-        error: "This time slot is no longer available. Please choose another date or time.",
-        code: "SLOT_TAKEN",
-      });
-    }
 
     // 3) Create booking (WITHOUT payment yet)
     console.log("🔵 [BOOKINGS] createBooking - Creating booking record...");
@@ -583,8 +507,6 @@ export async function createBooking(req, res) {
         is_first_booking: isFirstBooking,
         welcoming_offer_applied: welcomingOfferApplied,
         welcoming_offer_amount: welcomingOfferAmount,
-        // Crédits parrainage
-        credits_used: creditsApplied,
       })
       .select(`
         id,
@@ -612,7 +534,6 @@ export async function createBooking(req, res) {
         commission_rate,
         invoice_sent,
         provider_banner_url,
-        credits_used,
         created_at
       `)
       .single();
@@ -703,8 +624,8 @@ export async function createBooking(req, res) {
     
     let intent = null;
     if (paymentMethod === "cash") {
-      const depositAmount = Math.round(totalPriceToCharge * 0.2 * 100) / 100;
-      console.log("🔵 [BOOKINGS] createBooking - Creating deposit payment intent:", depositAmount, "credits_used:", creditsApplied);
+      const depositAmount = Math.round(totalPrice * 0.2 * 100) / 100;
+      console.log("🔵 [BOOKINGS] createBooking - Creating deposit payment intent:", depositAmount);
       intent = await createPaymentIntent({
         amount: depositAmount,
         currency,
@@ -713,9 +634,9 @@ export async function createBooking(req, res) {
         commissionRate, // ✅ Commission NIOS
       });
     } else {
-      console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent:", totalPriceToCharge, "credits_used:", creditsApplied);
+      console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent:", totalPrice);
       intent = await createPaymentIntent({
-        amount: totalPriceToCharge,
+        amount: totalPrice,
         currency,
         user: customer,
         providerStripeAccountId, // ✅ Passer le Stripe Connect account si disponible
@@ -764,7 +685,6 @@ export async function createBooking(req, res) {
         is_first_booking,
         welcoming_offer_applied,
         welcoming_offer_amount,
-        credits_used,
         created_at
       `)
       .single();
@@ -858,11 +778,11 @@ export async function startService(req, res) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    if (booking.status !== "confirmed" && booking.status !== "ready_soon") {
-      return res.status(400).json({ error: "Booking must be confirmed or ready_soon to start" });
+    if (booking.status !== "confirmed") {
+      return res.status(400).json({ error: "Booking must be confirmed to start" });
     }
 
-    const progress = await buildProgressForBooking(bookingId, booking.service_id);
+    const progress = buildDefaultProgress(bookingId);
 
     const updated = await updateBookingService(bookingId, {
       status: "started",
@@ -1089,13 +1009,6 @@ export async function completeService(req, res) {
       }
     }
 
-    // ✅ Parrainage: si le provider filleul atteint X missions complétées, valider le referral
-    try {
-      await tryValidateReferralProviderWhenMissionsCompleted(userId);
-    } catch (refErr) {
-      console.warn("[BOOKINGS] Referral provider validation failed (non-blocking):", refErr.message);
-    }
-
     // ✅ ENVOYER NOTIFICATION AU CUSTOMER (service terminé)
     try {
       await sendNotificationToUser({
@@ -1125,14 +1038,7 @@ export async function completeService(req, res) {
 ----------------------------------------------------- */
 export async function updateBooking(req, res) {
   try {
-    const payload = req.body;
-    // PATCH with empty body or non-object → return current booking (no-op) or 400
-    if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).length === 0) {
-      const booking = await getBookingDetail(req.params.id);
-      if (!booking) return res.status(404).json({ error: "Booking not found" });
-      return res.json(booking);
-    }
-    const booking = await updateBookingService(req.params.id, payload);
+    const booking = await updateBookingService(req.params.id, req.body);
     return res.json(booking);
   } catch (err) {
     console.error("[BOOKINGS] update error:", err);
@@ -1195,15 +1101,6 @@ export async function cancelBooking(req, res) {
     }
 
     const ok = await updateBookingStatus(bookingId, "cancelled");
-
-    // ✅ Crédits parrainage: re-crédit si la résa était déjà payée (crédits avaient été débités à la confirmation)
-    const creditsUsedCancel = Number(booking.credits_used ?? 0) || 0;
-    if (creditsUsedCancel > 0 && booking.payment_status === "paid") {
-      const { data: u } = await supabase.from("users").select("customer_credits_eur").eq("id", booking.customer_id).single();
-      const current = Number(u?.customer_credits_eur ?? 0) || 0;
-      await supabase.from("users").update({ customer_credits_eur: current + creditsUsedCancel }).eq("id", booking.customer_id);
-      console.log(`[BOOKINGS] Re-credited ${creditsUsedCancel}€ referral credit for customer ${booking.customer_id} (cancel)`);
-    }
     
     // ✅ ENVOYER NOTIFICATION À L'AUTRE PARTIE (réservation annulée)
     try {
@@ -1630,22 +1527,6 @@ export async function confirmBooking(req, res) {
 
     if (updateErr) throw updateErr;
 
-    // ✅ Crédits parrainage: débit au moment de la confirmation (capture)
-    const creditsUsed = Number(booking.credits_used ?? 0) || 0;
-    if (creditsUsed > 0) {
-      const { data: u } = await supabase.from("users").select("customer_credits_eur").eq("id", booking.customer_id).single();
-      const current = Number(u?.customer_credits_eur ?? 0) || 0;
-      await supabase.from("users").update({ customer_credits_eur: Math.max(0, current - creditsUsed) }).eq("id", booking.customer_id);
-      console.log(`[BOOKINGS] Debited ${creditsUsed}€ referral credit for customer ${booking.customer_id}`);
-    }
-
-    // ✅ Parrainage: si c'est la 1ère résa payée du customer, valider le referral et attribuer la récompense
-    try {
-      await tryValidateReferralCustomerFirstPaidBooking(booking.customer_id);
-    } catch (refErr) {
-      console.warn("[BOOKINGS] Referral validation failed (non-blocking):", refErr.message);
-    }
-
     // ✅ ENVOYER NOTIFICATION AU CUSTOMER (réservation confirmée)
     try {
       await sendNotificationToUser({
@@ -1791,15 +1672,6 @@ export async function refundBooking(req, res) {
       status: "cancelled",
       payment_status: "refunded"
     });
-
-    // ✅ Crédits parrainage: re-crédit en cas de remboursement
-    const creditsUsedRefund = Number(booking.credits_used ?? 0) || 0;
-    if (creditsUsedRefund > 0) {
-      const { data: u } = await supabase.from("users").select("customer_credits_eur").eq("id", booking.customer_id).single();
-      const current = Number(u?.customer_credits_eur ?? 0) || 0;
-      await supabase.from("users").update({ customer_credits_eur: current + creditsUsedRefund }).eq("id", booking.customer_id);
-      console.log(`[BOOKINGS] Re-credited ${creditsUsedRefund}€ referral credit for customer ${booking.customer_id} (refund)`);
-    }
 
     // ✅ ENVOYER NOTIFICATION AU CUSTOMER (remboursement effectué)
     try {

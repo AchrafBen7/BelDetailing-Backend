@@ -2,6 +2,7 @@
 console.log("🔄 [APP] Loading express and middleware...");
 import express from "express";
 import helmet from "helmet";
+import cors from "cors";
 import rateLimit from "express-rate-limit";
 import cron from "node-cron";
 console.log("✅ [APP] Express and middleware loaded");
@@ -60,6 +61,14 @@ console.log("✅ [APP] Express app created");
 
 app.use(helmet());
 
+const corsOrigin = process.env.CORS_ORIGIN;
+app.use(
+  cors({
+    origin: corsOrigin ? corsOrigin.split(",").map((o) => o.trim()) : true,
+    credentials: true,
+  })
+);
+
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -80,8 +89,8 @@ app.use(metricsMiddleware);
 // ⚠️ 1) D’abord le webhook Stripe (il utilise express.raw dans le router)
 app.use("/api/v1/stripe", stripeWebhookRoutes);
 
-// ⚠️ 2) Ensuite seulement, le parser JSON pour le reste de l’API
-app.use(express.json());
+// ⚠️ 2) Ensuite seulement, le parser JSON pour le reste de l’API (limite 500kb)
+app.use(express.json({ limit: "500kb" }));
 
 // Auth
 app.use("/api/v1/auth", authRoutes);

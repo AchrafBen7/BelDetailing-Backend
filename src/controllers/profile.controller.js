@@ -148,14 +148,19 @@ export async function updateProfile(req, res) {
 
   const {
     phone,
-    role,
     vatNumber,
     isVatValid,
     dismissedFirstBookingOffer,
     customerProfile,
     companyProfile,
     providerProfile,
+    role: bodyRole,
   } = req.body;
+
+  // Sécurité : rejet explicite si le client envoie "role" (sauf transition provider_passionate → provider ci-dessous)
+  if (bodyRole !== undefined && currentUser?.role !== "provider_passionate") {
+    return res.status(400).json({ error: "Cannot change role via profile update" });
+  }
 
   // ✅ TRANSITION : Si un provider_passionate ajoute une TVA, passer en Pro
   if (currentUser?.role === "provider_passionate" && vatNumber && vatNumber.trim() !== "") {
@@ -194,10 +199,9 @@ export async function updateProfile(req, res) {
     return await getProfile(req, res);
   }
 
-  // 1) Update table users
+  // 1) Update table users (role non modifiable ici – uniquement via transition provider_passionate → provider ci-dessus)
   const userUpdate = {};
   if (phone !== undefined) userUpdate.phone = phone;
-  if (role !== undefined) userUpdate.role = role;
   if (vatNumber !== undefined) userUpdate.vat_number = vatNumber;
   if (isVatValid !== undefined) userUpdate.is_vat_valid = isVatValid;
   if (dismissedFirstBookingOffer !== undefined) userUpdate.dismissed_first_booking_offer = dismissedFirstBookingOffer === true;
