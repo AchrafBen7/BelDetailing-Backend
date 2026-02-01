@@ -7,6 +7,27 @@ const REFERRAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sans 0/O, 
 /** Nombre de missions complétées par le detailer filleul pour valider le parrainage (Phase 1) */
 const REFERRAL_PROVIDER_MISSIONS_REQUIRED = 3;
 
+/** Filleul reçoit toujours le niveau 1 (3€ crédit à l'inscription) */
+const REFERRAL_FILLEUL_CREDIT_EUR = 3;
+
+/**
+ * Système de parrainage NIOS — Niveaux 1 → 10
+ * Le parrain progresse niveau par niveau ; déblocage = 1 filleul validé (1ère résa payée).
+ * rewardType: "credit" = cash crédit, "advantage" = Service Boost / option, "status" = Badge, "jackpot" = Service gratuit
+ */
+const REFERRAL_LEVELS = [
+  { level: 1, invitesRequired: 1, rewardType: "credit", rewardValue: 3, rewardDescription: "+3€ crédit" },
+  { level: 2, invitesRequired: 2, rewardType: "credit", rewardValue: 3, rewardDescription: "+3€ crédit" },
+  { level: 3, invitesRequired: 3, rewardType: "credit", rewardValue: 5, rewardDescription: "+5€ crédit" },
+  { level: 4, invitesRequired: 4, rewardType: "advantage", rewardValue: 0, rewardDescription: "🎁 Service Boost" },
+  { level: 5, invitesRequired: 5, rewardType: "credit", rewardValue: 10, rewardDescription: "+10€ crédit" },
+  { level: 6, invitesRequired: 6, rewardType: "advantage", rewardValue: 0, rewardDescription: "🎁 Service Boost x2" },
+  { level: 7, invitesRequired: 7, rewardType: "status", rewardValue: 0, rewardDescription: "⭐ Badge Ambassadeur NIOS" },
+  { level: 8, invitesRequired: 8, rewardType: "credit", rewardValue: 15, rewardDescription: "+15€ crédit" },
+  { level: 9, invitesRequired: 9, rewardType: "advantage", rewardValue: 0, rewardDescription: "🎁 Option premium offerte" },
+  { level: 10, invitesRequired: 10, rewardType: "jackpot", rewardValue: 85, rewardDescription: "🎉 Service gratuit (max 85€)" },
+];
+
 /**
  * Génère un code de parrainage (ex: ABC123XY)
  */
@@ -75,10 +96,38 @@ export async function validateReferralCodeForSignup(referralCode, newUserRole) {
   return { referrerId: referrer.id, referrerRole: referrer.role };
 }
 
+const MAX_PENDING_REFERRALS_PER_24H = 20;
+
 /**
- * Crée l'entrée referral (pending) après inscription
+ * Nombre de referrals pending créés par ce parrain dans les dernières 24h (anti-fraude)
+ */
+export async function getPendingReferralsCountLast24h(referrerId) {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count, error } = await supabase
+    .from("referrals")
+    .select("*", { count: "exact", head: true })
+    .eq("referrer_id", referrerId)
+    .eq("status", "pending")
+    .gte("created_at", since);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
+ * Crée l'entrée referral (pending) après inscription (avec limite anti-fraude)
  */
 export async function createPendingReferral(referrerId, referredId, roleType) {
+  try {
+    const count = await getPendingReferralsCountLast24h(referrerId);
+    if (count >= MAX_PENDING_REFERRALS_PER_24H) {
+      const err = new Error("Referral limit exceeded (too many pending invites in 24h)");
+      err.statusCode = 429;
+      throw err;
+    }
+  } catch (e) {
+    if (e.statusCode === 429) throw e;
+    console.warn("[REFERRAL] getPendingReferralsCountLast24h failed (e.g. no created_at), skipping limit:", e.message);
+  }
   const { error } = await supabase.from("referrals").insert({
     referrer_id: referrerId,
     referred_id: referredId,
@@ -132,15 +181,15 @@ export async function getReferralInfo(userId) {
   const pending = (asReferrer || []).filter((r) => r.status === "pending").length;
   const validated = (asReferrer || []).filter((r) => r.status === "validated").length;
 
-  // Paliers 1 à 10 (amis invités validés) – effet gamification
-  const tierMilestones = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const tiers = tierMilestones.map((invitesRequired) => ({
-    level: invitesRequired,
-    invitesRequired,
-    rewardDescription: invitesRequired === 1 ? "10€ crédit" : `${invitesRequired * 10}€ crédit`,
-    reached: validated >= invitesRequired,
+  // Niveaux 1 à 10 (système parrainage NIOS) – récompense par niveau
+  const tiers = REFERRAL_LEVELS.map((row) => ({
+    level: row.level,
+    invitesRequired: row.invitesRequired,
+    rewardDescription: row.rewardDescription,
+    rewardType: row.rewardType,
+    reached: validated >= row.invitesRequired,
   }));
-  const nextTierAt = tierMilestones.find((t) => t > validated) ?? null; // prochain palier à atteindre
+  const nextTierAt = REFERRAL_LEVELS.find((r) => r.invitesRequired > validated)?.invitesRequired ?? null;
 
   return {
     referralCode: referralCode || null,
@@ -171,7 +220,8 @@ export async function tryValidateReferralCustomerFirstPaidBooking(customerId) {
 }
 
 /**
- * Marque un referral comme validé et enregistre la récompense (Customer: 1ère résa payée)
+ * Marque un referral comme validé et enregistre la récompense (Customer: 1ère résa payée).
+ * Le parrain progresse niveau par niveau ; la récompense dépend du niveau atteint (1→10).
  */
 export async function validateReferralCustomer(referredUserId) {
   const { data: ref, error: fetchError } = await supabase
@@ -182,8 +232,19 @@ export async function validateReferralCustomer(referredUserId) {
     .maybeSingle();
   if (fetchError || !ref) return;
 
-  const rewardType = "credit";
-  const rewardValue = 10; // 10 € crédit (palier 1 MVP)
+  // Nombre de filleuls déjà validés par ce parrain (avant ce referral)
+  const { data: existingValidated } = await supabase
+    .from("referrals")
+    .select("id")
+    .eq("referrer_id", ref.referrer_id)
+    .eq("status", "validated");
+  const validatedCount = (existingValidated || []).length;
+  const newLevel = validatedCount + 1; // 1-based level just reached
+
+  const levelConfig = REFERRAL_LEVELS.find((r) => r.level === newLevel);
+  const rewardType = levelConfig?.rewardType ?? "credit";
+  const rewardValue = levelConfig?.rewardValue ?? 3;
+
   const { error: updateError } = await supabase
     .from("referrals")
     .update({
@@ -197,11 +258,17 @@ export async function validateReferralCustomer(referredUserId) {
     console.error("[REFERRAL] validateReferralCustomer update error:", updateError);
     return;
   }
-  // Crédit parrainage (réduction sur prochaine résa, pas de cash direct)
-  const { data: u } = await supabase.from("users").select("customer_credits_eur").eq("id", ref.referrer_id).single();
-  const current = Number(u?.customer_credits_eur ?? 0) || 0;
-  await supabase.from("users").update({ customer_credits_eur: current + rewardValue }).eq("id", ref.referrer_id);
-  console.log(`[REFERRAL] Validated customer referral ${ref.id}, referrer ${ref.referrer_id} gets ${rewardValue}€ credit`);
+
+  // Crédit parrain : uniquement pour rewardType "credit" ou "jackpot" (valeur en €)
+  const creditToAdd = (rewardType === "credit" || rewardType === "jackpot") ? Number(rewardValue) : 0;
+  if (creditToAdd > 0) {
+    const { data: u } = await supabase.from("users").select("customer_credits_eur").eq("id", ref.referrer_id).single();
+    const current = Number(u?.customer_credits_eur ?? 0) || 0;
+    await supabase.from("users").update({ customer_credits_eur: current + creditToAdd }).eq("id", ref.referrer_id);
+    console.log(`[REFERRAL] Validated customer referral ${ref.id}, referrer ${ref.referrer_id} level ${newLevel} gets ${creditToAdd}€ credit (${levelConfig?.rewardDescription})`);
+  } else {
+    console.log(`[REFERRAL] Validated customer referral ${ref.id}, referrer ${ref.referrer_id} level ${newLevel} gets ${levelConfig?.rewardDescription} (no cash)`);
+  }
 }
 
 /**
@@ -246,4 +313,49 @@ export async function validateReferralProvider(referredUserId) {
     return;
   }
   console.log(`[REFERRAL] Validated provider referral ${ref.id}, referrer ${ref.referrer_id} gets ${rewardValue}% commission reduction`);
+}
+
+/**
+ * Métriques plateforme parrainage (dashboard / analytics)
+ * - totalReferrals, totalPending, totalValidated
+ * - signupsWithReferralLast30Days : inscriptions avec referred_by non nul sur 30j
+ * - conversionRate : validated / total (si total > 0)
+ */
+export async function getReferralPlatformStats() {
+  const { count: totalReferrals, error: errTotal } = await supabase
+    .from("referrals")
+    .select("*", { count: "exact", head: true });
+  if (errTotal) throw errTotal;
+
+  const { count: totalPending, error: errPending } = await supabase
+    .from("referrals")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "pending");
+  if (errPending) throw errPending;
+
+  const { count: totalValidated, error: errValidated } = await supabase
+    .from("referrals")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "validated");
+  if (errValidated) throw errValidated;
+
+  const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { count: signupsWithReferralLast30Days, error: errSignups } = await supabase
+    .from("users")
+    .select("*", { count: "exact", head: true })
+    .not("referred_by", "is", null)
+    .gte("created_at", since30d);
+  if (errSignups) throw errSignups;
+
+  const total = totalReferrals ?? 0;
+  const validated = totalValidated ?? 0;
+  const conversionRate = total > 0 ? Math.round((validated / total) * 100) / 100 : 0;
+
+  return {
+    totalReferrals: total,
+    totalPending: totalPending ?? 0,
+    totalValidated: validated,
+    signupsWithReferralLast30Days: signupsWithReferralLast30Days ?? 0,
+    conversionRate,
+  };
 }

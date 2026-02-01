@@ -1,5 +1,5 @@
 // src/controllers/referral.controller.js
-import { getReferralInfo } from "../services/referral.service.js";
+import { getReferralInfo, getReferralPlatformStats } from "../services/referral.service.js";
 
 /**
  * GET /api/v1/referral/info
@@ -21,5 +21,19 @@ export async function getReferralInfoController(req, res) {
   } catch (err) {
     console.error("[REFERRAL] getReferralInfo error:", err);
     return res.status(500).json({ error: "Could not fetch referral info" });
+  }
+}
+
+/**
+ * GET /api/v1/referral/stats
+ * Métriques plateforme parrainage (total referrals, pending, validated, signups 30j, conversion rate)
+ */
+export async function getReferralStatsController(req, res) {
+  try {
+    const stats = await getReferralPlatformStats();
+    return res.json(stats);
+  } catch (err) {
+    console.error("[REFERRAL] getReferralPlatformStats error:", err);
+    return res.status(500).json({ error: "Could not fetch referral stats" });
   }
 }

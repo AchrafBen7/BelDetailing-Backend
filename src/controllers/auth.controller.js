@@ -128,7 +128,7 @@ export async function register(req, res) {
     return res.status(500).json({ error: insertError.message });
   }
 
-  // 2b) Parrainage: code unique + referred_by si lien d'invitation (Phase 1: Customer→Customer, Detailer→Detailer)
+  // 2b) Parrainage: code unique + referred_by + crédit filleul (double-sided)
   try {
     await ensureUserReferralCode(authUser.id);
     const refCode = req.body.ref || req.body.referral_code;
@@ -137,7 +137,11 @@ export async function register(req, res) {
       if (valid && valid.referrerId !== authUser.id) {
         const alreadyReferred = await userAlreadyReferred(authUser.id);
         if (!alreadyReferred) {
-          await supabaseAdmin.from("users").update({ referred_by: valid.referrerId }).eq("id", authUser.id);
+          const userUpdate = { referred_by: valid.referrerId };
+          if (finalRole === "customer") {
+            userUpdate.customer_credits_eur = 3; // Filleul reçoit toujours le niveau 1 (3€ crédit)
+          }
+          await supabaseAdmin.from("users").update(userUpdate).eq("id", authUser.id);
           await createPendingReferral(valid.referrerId, authUser.id, finalRole);
         }
       }
