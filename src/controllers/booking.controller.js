@@ -127,12 +127,44 @@ const DEFAULT_SERVICE_STEPS = [
   { id: "step_5", title: "Final check", percentage: 10, is_completed: false, order: 5 },
 ];
 
-function buildDefaultProgress(bookingId) {
+const MAX_STEPS_FROM_TEMPLATE = 6;
+
+/**
+ * Construit l'objet progress pour un booking en utilisant le steps_template du service si présent.
+ * Sinon utilise DEFAULT_SERVICE_STEPS. Max 6 étapes (template).
+ */
+async function buildProgressForBooking(bookingId, serviceId) {
+  let steps = DEFAULT_SERVICE_STEPS.map(step => ({ ...step }));
+
+  if (serviceId) {
+    const { data: service, error } = await supabase
+      .from("services")
+      .select("steps_template")
+      .eq("id", serviceId)
+      .maybeSingle();
+
+    if (!error && service?.steps_template && Array.isArray(service.steps_template) && service.steps_template.length > 0) {
+      const raw = service.steps_template.slice(0, MAX_STEPS_FROM_TEMPLATE);
+      const totalPct = raw.reduce((sum, s) => sum + (Number(s.percentage) || 0), 0);
+      const scale = totalPct > 0 ? 100 / totalPct : 1;
+      steps = raw.map((s, i) => ({
+        id: s.id || `step_${i + 1}`,
+        title: s.label ?? s.title ?? `Étape ${i + 1}`,
+        percentage: Math.round((Number(s.percentage) || 100 / raw.length) * scale) || 10,
+        is_completed: false,
+        order: s.order ?? i + 1,
+        completed_at: null,
+      }));
+    }
+  }
+
   return {
     booking_id: bookingId,
-    steps: DEFAULT_SERVICE_STEPS.map(step => ({ ...step })),
+    steps,
     current_step_index: 0,
     total_progress: 0,
+    started_at: new Date().toISOString(),
+    completed_at: null,
   };
 }
 
@@ -484,7 +516,7 @@ export async function createBooking(req, res) {
     const serviceNames = services.map(service => service.name).join(", ");
 
     // ✅ VÉRIFIER CRÉNEAU UNIQUE (provider + date + start_time)
-    const conflictingStatuses = ["pending", "confirmed", "started", "in_progress", "preauthorized"];
+    const conflictingStatuses = ["pending", "confirmed", "ready_soon", "started", "in_progress", "preauthorized"];
     const { data: existingSlot, error: slotError } = await supabase
       .from("bookings")
       .select("id")
@@ -826,11 +858,11 @@ export async function startService(req, res) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    if (booking.status !== "confirmed") {
-      return res.status(400).json({ error: "Booking must be confirmed to start" });
+    if (booking.status !== "confirmed" && booking.status !== "ready_soon") {
+      return res.status(400).json({ error: "Booking must be confirmed or ready_soon to start" });
     }
 
-    const progress = buildDefaultProgress(bookingId);
+    const progress = await buildProgressForBooking(bookingId, booking.service_id);
 
     const updated = await updateBookingService(bookingId, {
       status: "started",

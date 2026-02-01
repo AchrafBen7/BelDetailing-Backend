@@ -90,9 +90,9 @@ export async function startService(bookingId, providerId) {
     throw err;
   }
 
-  // Vérifier que le statut est "confirmed"
-  if (booking.status !== "confirmed") {
-    const err = new Error(`Booking must be confirmed to start. Current status: ${booking.status}`);
+  // Vérifier que le statut est "confirmed" ou "ready_soon"
+  if (booking.status !== "confirmed" && booking.status !== "ready_soon") {
+    const err = new Error(`Booking must be confirmed or ready_soon to start. Current status: ${booking.status}`);
     err.statusCode = 400;
     throw err;
   }

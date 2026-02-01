@@ -277,6 +277,7 @@ export async function createOrGetConversationController(req, res) {
 
       const allowedStatuses = [
         "confirmed",
+        "ready_soon",
         "started",
         "in_progress",
         "completed",
@@ -317,6 +318,7 @@ export async function createOrGetConversationController(req, res) {
 
       const allowedStatuses = [
         "confirmed",
+        "ready_soon",
         "started",
         "in_progress",
         "completed",
@@ -478,6 +480,7 @@ export async function sendMessageController(req, res) {
       if (!bookingError && booking) {
         const allowedStatuses = [
           "confirmed",
+          "ready_soon",
           "started",
           "in_progress",
           "completed",

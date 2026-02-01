@@ -240,7 +240,7 @@ export async function validateChatContext(conversationId) {
     }
 
     // Chat autorisé seulement si booking confirmé, démarré, en cours, ou complété
-    const allowedStatuses = ["confirmed", "started", "in_progress", "completed"];
+    const allowedStatuses = ["confirmed", "ready_soon", "started", "in_progress", "completed"];
     if (!allowedStatuses.includes(booking.status)) {
       return {
         allowed: false,

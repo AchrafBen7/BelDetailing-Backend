@@ -11,6 +11,7 @@ import { autoCaptureBookings } from "./cron/autoCapture.js";
 import { captureScheduledPayments } from "./cron/captureScheduledPayments.js";
 import { retryFailedTransfers } from "./cron/retryFailedTransfers.js";
 import { captureDayOnePaymentsCron } from "./cron/captureDayOnePayments.js";
+import { runBookingStatusTransitions } from "./cron/bookingStatusTransitions.js";
 console.log("✅ [APP] Cron jobs loaded");
 
 console.log("🔄 [APP] Loading config and observability...");
@@ -230,6 +231,16 @@ cron.schedule("0 * * * *", async () => {
     console.log(`✅ CRON releaseDepositsAtJPlusOne completed: ${result.released} released, ${result.failed} failed, ${result.skipped} skipped`);
   } catch (err) {
     console.error("❌ CRON releaseDepositsAtJPlusOne error:", err);
+  }
+});
+
+// Transitions de statut des bookings : confirmed → ready_soon (-15 min), ready_soon → started (à l'heure)
+// S'exécute toutes les 5 minutes
+cron.schedule("*/5 * * * *", async () => {
+  try {
+    await runBookingStatusTransitions();
+  } catch (err) {
+    console.error("❌ CRON bookingStatusTransitions error:", err);
   }
 });
 

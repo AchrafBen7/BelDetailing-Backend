@@ -473,6 +473,21 @@ export async function updateProviderService(serviceId, userId, updates) {
     updatePayload.categories = categoriesArray;
   }
 
+  // Template d'étapes (steps_template / stepsTemplate), max 6
+  const rawSteps = updates.steps_template ?? updates.stepsTemplate;
+  if (rawSteps !== undefined) {
+    if (Array.isArray(rawSteps) && rawSteps.length > 0) {
+      updatePayload.steps_template = rawSteps.slice(0, 6).map((s, i) => ({
+        id: s.id ?? `step_${i + 1}`,
+        label: s.label ?? s.title ?? `Étape ${i + 1}`,
+        order: s.order ?? i + 1,
+        percentage: Number(s.percentage) ?? Math.round(100 / rawSteps.length),
+      }));
+    } else {
+      updatePayload.steps_template = null;
+    }
+  }
+
   // Enlever les undefined
   Object.keys(updatePayload).forEach((key) => {
     if (updatePayload[key] === undefined) {
