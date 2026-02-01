@@ -472,13 +472,13 @@ export async function createBooking(req, res) {
       .eq("id", customerId)
       .single();
     const customerCreditsEur = Number(customerCreditsRow?.customer_credits_eur ?? 0) || 0;
-    const creditsToUse = Math.min(
+    const creditsApplied = Math.min(
       creditsToUseRaw,
       customerCreditsEur,
       totalPrice,
       Math.round(totalPrice * 100) / 100
     );
-    const totalPriceToCharge = Math.round((totalPrice - creditsToUse) * 100) / 100;
+    const totalPriceToCharge = Math.round((totalPrice - creditsApplied) * 100) / 100;
 
     const paymentMethod = payment_method || "card";
     const serviceNames = services.map(service => service.name).join(", ");
@@ -552,7 +552,7 @@ export async function createBooking(req, res) {
         welcoming_offer_applied: welcomingOfferApplied,
         welcoming_offer_amount: welcomingOfferAmount,
         // Crédits parrainage
-        credits_used: creditsToUse,
+        credits_used: creditsApplied,
       })
       .select(`
         id,
@@ -672,7 +672,7 @@ export async function createBooking(req, res) {
     let intent = null;
     if (paymentMethod === "cash") {
       const depositAmount = Math.round(totalPriceToCharge * 0.2 * 100) / 100;
-      console.log("🔵 [BOOKINGS] createBooking - Creating deposit payment intent:", depositAmount, "credits_used:", creditsToUse);
+      console.log("🔵 [BOOKINGS] createBooking - Creating deposit payment intent:", depositAmount, "credits_used:", creditsApplied);
       intent = await createPaymentIntent({
         amount: depositAmount,
         currency,
@@ -681,7 +681,7 @@ export async function createBooking(req, res) {
         commissionRate, // ✅ Commission NIOS
       });
     } else {
-      console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent:", totalPriceToCharge, "credits_used:", creditsToUse);
+      console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent:", totalPriceToCharge, "credits_used:", creditsApplied);
       intent = await createPaymentIntent({
         amount: totalPriceToCharge,
         currency,
