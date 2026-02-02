@@ -90,9 +90,9 @@ export async function getProfile(req, res) {
       transport_enabled,
       welcoming_offer_enabled,
       opening_hours,
-      available_today,
-      curated_badge
+      available_today
     )
+    // curated_badge : ajouter après migration run_migration_provider_curated_badge.sql sur Supabase
   `)
   .eq("id", userId)
   .single();
