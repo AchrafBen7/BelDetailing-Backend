@@ -1,0 +1,169 @@
+// src/services/providerAvailability.service.js
+import { supabaseAdmin as supabase } from "../config/supabase.js";
+
+/** Durée minimale d'un créneau libre pour considérer le prestataire dispo (minutes) */
+const MIN_FREE_SLOT_MINUTES = 30;
+
+/**
+ * Parse opening_hours (JSON). Attendu: tableau ou objet avec day (1-7), startTime, endTime, isClosed.
+ * @returns {Array<{ day: number, startTime: string, endTime: string, isClosed: boolean }>}
+ */
+function parseOpeningHours(openingHours) {
+  if (!openingHours) return [];
+  if (typeof openingHours === "string") {
+    try {
+      openingHours = JSON.parse(openingHours);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(openingHours)) return [];
+  return openingHours.filter((h) => {
+    if (!h || typeof h.day === "undefined") return false;
+    const day = typeof h.day === "number" ? h.day : parseInt(h.day, 10);
+    if (Number.isNaN(day) || day < 1 || day > 7) return false;
+    if (h.isClosed === true) return false;
+    const start = h.startTime || h.start_time;
+    const end = h.endTime || h.end_time;
+    return start && end;
+  });
+}
+
+/** Convert "HH:mm" to minutes since midnight */
+function timeToMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== "string") return 0;
+  const [h, m] = timeStr.split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+/** Day of week 1-7 (1 = Monday, 7 = Sunday) from JS Date (getDay: 0=Sun, 1=Mon, ...) */
+function getDayOfWeek(date) {
+  const d = date.getDay();
+  return d === 0 ? 7 : d;
+}
+
+/**
+ * Merge overlapping intervals and return free gaps in [openStart, openEnd].
+ * intervals = [[startMin, endMin], ...] (booked), openStart/openEnd in minutes.
+ * @returns Array of [start, end] free segments
+ */
+function freeSegments(openStart, openEnd, intervals) {
+  if (openStart >= openEnd) return [];
+  const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
+  const gaps = [];
+  let currentStart = openStart;
+  for (const [start, end] of sorted) {
+    if (end <= currentStart) continue;
+    if (start > currentStart) {
+      gaps.push([currentStart, Math.min(start, openEnd)]);
+    }
+    currentStart = Math.max(currentStart, end);
+    if (currentStart >= openEnd) break;
+  }
+  if (currentStart < openEnd) {
+    gaps.push([currentStart, openEnd]);
+  }
+  return gaps;
+}
+
+/**
+ * Vérifie si le prestataire a au moins un créneau libre cette semaine (basé sur horaires + résas).
+ * @param {Object} providerRow - { id?, user_id?, opening_hours }
+ * @param {Map<string, Array<{ date, start_time, end_time }>>} bookingsByProviderId - résas groupées par provider_id
+ * @param {Array<{ date: Date, dayOfWeek: number }>} weekDays - les 7 jours de la semaine
+ * @returns {boolean}
+ */
+function providerHasFreeSlotThisWeek(providerRow, bookingsByProviderId, weekDays) {
+  // bookings.provider_id est en général le user_id du prestataire
+  const lookupKey = providerRow.user_id ?? providerRow.id;
+  if (!lookupKey) return false;
+
+  const openingHoursList = parseOpeningHours(providerRow.opening_hours);
+  if (openingHoursList.length === 0) return false;
+
+  const byDay = new Map();
+  for (const oh of openingHoursList) {
+    const day = typeof oh.day === "number" ? oh.day : parseInt(oh.day, 10);
+    if (Number.isNaN(day) || day < 1 || day > 7) continue;
+    const startTime = oh.startTime || oh.start_time;
+    const endTime = oh.endTime || oh.end_time;
+    byDay.set(day, { start: timeToMinutes(startTime), end: timeToMinutes(endTime) });
+  }
+
+  const bookings = bookingsByProviderId.get(String(lookupKey)) ?? [];
+
+  for (const { date, dayOfWeek } of weekDays) {
+    const open = byDay.get(dayOfWeek);
+    if (!open || open.start >= open.end) continue;
+
+    const dateStr = date.toISOString().slice(0, 10);
+    const dayBookings = bookings
+      .filter((b) => (b.date || "").toString().slice(0, 10) === dateStr)
+      .map((b) => [timeToMinutes(b.start_time || "00:00"), timeToMinutes(b.end_time || "23:59")]);
+
+    const gaps = freeSegments(open.start, open.end, dayBookings);
+    const hasEnoughGap = gaps.some(([start, end]) => end - start >= MIN_FREE_SLOT_MINUTES);
+    if (hasEnoughGap) return true;
+  }
+  return false;
+}
+
+/**
+ * Retourne les IDs de prestataires qui ont au moins un créneau libre cette semaine (calendrier = horaires - résas).
+ * @param {Array<Object>} providerRows - lignes provider_profiles avec id/user_id et opening_hours
+ * @returns {Promise<Set<string>>} IDs (id ou user_id selon la table)
+ */
+export async function getProviderIdsWithAvailabilityThisWeek(providerRows) {
+  if (!Array.isArray(providerRows) || providerRows.length === 0) {
+    return new Set();
+  }
+
+  // bookings.provider_id = user_id du prestataire (voir booking.service)
+  const providerIds = providerRows.map((r) => r.user_id ?? r.id).filter(Boolean);
+  if (providerIds.length === 0) return new Set();
+
+  const now = new Date();
+  const weekDays = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + i);
+    d.setHours(0, 0, 0, 0);
+    weekDays.push({ date: d, dayOfWeek: getDayOfWeek(d) });
+  }
+
+  const startDate = weekDays[0].date.toISOString().slice(0, 10);
+  const endDate = weekDays[6].date.toISOString().slice(0, 10);
+
+  const { data: bookings, error } = await supabase
+    .from("bookings")
+    .select("provider_id, date, start_time, end_time")
+    .in("provider_id", providerIds)
+    .gte("date", startDate)
+    .lte("date", endDate)
+    .in("status", ["pending", "confirmed", "started", "in_progress", "ready_soon"]);
+
+  if (error) {
+    console.warn("[providerAvailability] bookings fetch error:", error.message);
+    return new Set();
+  }
+
+  const bookingsByProviderId = new Map();
+  for (const b of bookings || []) {
+    const key = String(b.provider_id);
+    if (!bookingsByProviderId.has(key)) bookingsByProviderId.set(key, []);
+    bookingsByProviderId.get(key).push({
+      date: b.date,
+      start_time: b.start_time,
+      end_time: b.end_time,
+    });
+  }
+
+  const availableIds = new Set();
+  for (const row of providerRows) {
+    if (providerHasFreeSlotThisWeek(row, bookingsByProviderId, weekDays)) {
+      const id = row.id ?? row.user_id;
+      if (id) availableIds.add(String(id));
+    }
+  }
+  return availableIds;
+}

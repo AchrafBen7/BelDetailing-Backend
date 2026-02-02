@@ -9,9 +9,18 @@ export const logger = pino({
     remove: true,
   },
   base: undefined,
+  formatters: {
+    level: (label) => ({ level: label }),
+  },
+  timestamp: pino.stdTimeFunctions.isoTime,
 });
 
 export const httpLogger = pinoHttp({
   logger,
-  genReqId: req => req.headers["x-request-id"] || randomUUID(),
+  genReqId: (req) => req.headers["x-request-id"] || randomUUID(),
 });
+
+/** Child logger avec requestId (à utiliser dans les controllers : requestLogger(req).error(...)) */
+export function requestLogger(req) {
+  return logger.child({ requestId: req.id });
+}

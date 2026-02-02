@@ -460,11 +460,22 @@ router.post(
           if (bookingId || type === "booking") {
           console.log(`✅ PI succeeded for booking ${bookingId}`);
 
+          let receiptUrl = null;
+          if (intent.latest_charge) {
+            try {
+              const charge = await stripe.charges.retrieve(intent.latest_charge);
+              receiptUrl = charge.receipt_url || null;
+            } catch (chargeErr) {
+              console.warn("[WEBHOOK] Could not get receipt_url for booking", bookingId, chargeErr?.message);
+            }
+          }
+
           await supabase
             .from("bookings")
             .update({
               payment_status: "paid",
               payment_intent_id: intent.id,
+              ...(receiptUrl && { receipt_url: receiptUrl }),
             })
             .eq("id", bookingId);
 

@@ -1,6 +1,7 @@
 // src/services/provider.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { ensureStripeProductForService } from "./stripeProduct.service.js";
+import { getProviderIdsWithAvailabilityThisWeek } from "./providerAvailability.service.js";
 
 let providerProfilesSupportsIdColumn;
 
@@ -194,9 +195,16 @@ const mapped = data.map(row =>
   })
 );
 
+// Disponibilité cette semaine = au moins un créneau libre (calendrier = horaires - résas)
+const availableIds = await getProviderIdsWithAvailabilityThisWeek(data);
+const mappedWithAvailability = mapped.map((d) => ({
+  ...d,
+  hasAvailabilityThisWeek: availableIds.has(String(d.id)),
+}));
+
 const effectiveSort = requestedSort ?? sort;
 if (effectiveSort === "rating,-priceMin") {
-  mapped.sort((a, b) => {
+  mappedWithAvailability.sort((a, b) => {
     if (a.rating !== b.rating) {
       return b.rating - a.rating;
     }
@@ -217,7 +225,7 @@ const rKm = Number(radius);
 
 // approx: 1° lat = 111 km, 1° lon ≈ 75 km en Belgique
 
-const withDistance = mapped.map(p => {
+const withDistance = mappedWithAvailability.map(p => {
 
   const dLatKm = (p.lat - lat0) * 111;
 
@@ -246,7 +254,7 @@ return filtered.map(({ approxDistanceKm, ...rest }) => rest);
 
 }
 
-return mapped;
+return mappedWithAvailability;
 }
 
 // 🟦 Services d’un prestataire

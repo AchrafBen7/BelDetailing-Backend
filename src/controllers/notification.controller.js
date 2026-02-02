@@ -6,6 +6,7 @@ import {
   registerDeviceToken,
   getUnreadCount,
 } from "../services/notification.service.js";
+import { requestLogger } from "../observability/logger.js";
 
 /**
  * GET /api/v1/notifications
@@ -23,7 +24,7 @@ export async function listNotificationsController(req, res) {
 
     return res.json({ data: notifications });
   } catch (err) {
-    console.error("[NOTIFICATIONS] list error:", err);
+    requestLogger(req).error({ err }, "Notifications list error");
     return res.status(500).json({ error: "Could not fetch notifications" });
   }
 }
@@ -41,7 +42,7 @@ export async function markAsReadController(req, res) {
 
     return res.json({ data: notification });
   } catch (err) {
-    console.error("[NOTIFICATIONS] markAsRead error:", err);
+    requestLogger(req).error({ err }, "Notifications markAsRead error");
     if (err.code === "PGRST116") {
       return res.status(404).json({ error: "Notification not found" });
     }
@@ -62,7 +63,7 @@ export async function deleteNotificationController(req, res) {
 
     return res.json({ success: true });
   } catch (err) {
-    console.error("[NOTIFICATIONS] delete error:", err);
+    requestLogger(req).error({ err }, "Notifications delete error");
     if (err.code === "PGRST116") {
       return res.status(404).json({ error: "Notification not found" });
     }
@@ -72,20 +73,24 @@ export async function deleteNotificationController(req, res) {
 
 /**
  * POST /api/v1/notifications/subscribe
- * S'abonner à un topic de notifications (enregistrer device token)
+ * Enregistrer device token (APNs) ou player_id (OneSignal) pour les push
  */
 export async function subscribeController(req, res) {
   try {
     const userId = req.user.id;
-    const { device_token, platform = "ios" } = req.body;
+    const { device_token, player_id, platform = "ios" } = req.body;
 
-    if (!device_token) {
-      return res.status(400).json({ error: "Missing device_token" });
+    const token = player_id || device_token;
+    if (!token) {
+      return res.status(400).json({ error: "Missing device_token or player_id" });
     }
 
-    const deviceToken = await registerDeviceToken(userId, device_token, platform);
+    const effectivePlatform = player_id ? "onesignal" : platform;
+    const deviceToken = await registerDeviceToken(userId, token, effectivePlatform);
+    const effectivePlatform = player_id ? "onesignal" : platform;
+    const deviceToken = await registerDeviceToken(userId, token, effectivePlatform);
 
-    return res.json({ data: deviceToken });
+    requestLogger(req).error({ err }, "Notifications subscribe error");
   } catch (err) {
     console.error("[NOTIFICATIONS] subscribe error:", err);
     return res.status(500).json({ error: "Could not subscribe to notifications" });
@@ -102,7 +107,7 @@ export async function getUnreadCountController(req, res) {
 
     const count = await getUnreadCount(userId);
 
-    return res.json({ count });
+    requestLogger(req).error({ err }, "Notifications unreadCount error");
   } catch (err) {
     console.error("[NOTIFICATIONS] unreadCount error:", err);
     return res.status(500).json({ error: "Could not get unread count" });

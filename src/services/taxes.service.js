@@ -55,35 +55,128 @@ export async function computeMonthlySummary(providerUserId, month) {
 }
 
 /**
- * Liste des documents (metadata)
+ * Liste des documents (metadata) selon le rôle : provider, customer, company.
+ * - Provider : factures BelDetailing + relevé Stripe + une entrée par résa payée (Stripe receipt)
+ * - Customer : une entrée par résa payée (Stripe receipt)
+ * - Company : une entrée par facture mission (company_invoice)
  */
-export async function buildDocumentsList(providerUserId, month) {
-  const summary = await computeMonthlySummary(providerUserId, month);
-
+export async function buildDocumentsList(userId, month, role = "provider") {
+  const { start, end } = getMonthRange(month);
   const documents = [];
+  const isProvider = role === "provider" || role === "provider_passionate";
 
-  // Facture BelDetailing → seulement si commission > 0
-  if (summary.commissions > 0) {
-    documents.push({
-      id: `${month}-beldetailing`,
-      type: "belDetailingInvoice",
-      title: "Facture BelDetailing",
-      subtitle: `${month} • Commission mensuelle`,
-      amount: summary.commissions,
-      currency: "eur",
+  if (isProvider) {
+    const summary = await computeMonthlySummary(userId, month);
+
+    // Facture BelDetailing → seulement si commission > 0
+    if (summary.commissions > 0) {
+      documents.push({
+        id: `${month}-beldetailing`,
+        type: "belDetailingInvoice",
+        title: "Facture BelDetailing",
+        subtitle: `${month} • Commission mensuelle`,
+        amount: summary.commissions,
+        currency: "eur",
+      });
+    }
+
+    // Relevé Stripe → seulement si revenue > 0
+    if (summary.revenue > 0) {
+      documents.push({
+        id: `${month}-stripe`,
+        type: "stripeStatement",
+        title: "Relevé Stripe",
+        subtitle: `${month} • Récap des paiements`,
+        amount: summary.revenue,
+        currency: "eur",
+      });
+    }
+
+    // Factures Stripe (reçu) par résa payée
+    const { data: providerBookings } = await supabase
+      .from("bookings")
+      .select("id, service_name, price, receipt_url, created_at")
+      .eq("provider_id", userId)
+      .eq("payment_status", "paid")
+      .gte("created_at", start)
+      .lte("created_at", end)
+      .order("created_at", { ascending: false });
+
+    (providerBookings || []).forEach((b) => {
+      const subtitle = b.service_name
+        ? `${b.service_name} • ${month}`
+        : `Réservation • ${month}`;
+      documents.push({
+        id: `booking-${b.id}`,
+        type: "stripeReceipt",
+        title: "Facture réservation",
+        subtitle,
+        amount: Number(b.price) || 0,
+        currency: "eur",
+        openUrl: b.receipt_url || null,
+      });
     });
   }
 
-  // Relevé Stripe → seulement si revenue > 0
-  if (summary.revenue > 0) {
-    documents.push({
-      id: `${month}-stripe`,
-      type: "stripeStatement",
-      title: "Relevé Stripe",
-      subtitle: `${month} • Récap des paiements`,
-      amount: summary.revenue,
-      currency: "eur",
+  if (role === "customer") {
+    const { data: customerBookings } = await supabase
+      .from("bookings")
+      .select("id, service_name, price, receipt_url, created_at")
+      .eq("customer_id", userId)
+      .eq("payment_status", "paid")
+      .gte("created_at", start)
+      .lte("created_at", end)
+      .order("created_at", { ascending: false });
+
+    (customerBookings || []).forEach((b) => {
+      const subtitle = b.service_name
+        ? `${b.service_name} • ${month}`
+        : `Réservation • ${month}`;
+      documents.push({
+        id: `booking-${b.id}`,
+        type: "stripeReceipt",
+        title: "Facture réservation",
+        subtitle,
+        amount: Number(b.price) || 0,
+        currency: "eur",
+        openUrl: b.receipt_url || null,
+      });
     });
+  }
+
+  if (role === "company") {
+    const { data: rows } = await supabase
+      .from("mission_invoices")
+      .select("id, mission_agreement_id, invoice_number, total_amount, invoice_pdf_url, created_at")
+      .eq("type", "company_invoice")
+      .gte("created_at", start)
+      .lte("created_at", end)
+      .order("created_at", { ascending: false });
+
+    if (rows && rows.length > 0) {
+      const agreementIds = [...new Set(rows.map((r) => r.mission_agreement_id).filter(Boolean))];
+      const { data: agreements } = await supabase
+        .from("mission_agreements")
+        .select("id, company_id")
+        .in("id", agreementIds);
+
+      const companyAgreementIds = new Set(
+        (agreements || []).filter((a) => a.company_id === userId).map((a) => a.id)
+      );
+
+      rows.forEach((inv) => {
+        if (!inv.mission_agreement_id || !companyAgreementIds.has(inv.mission_agreement_id)) return;
+        documents.push({
+          id: `mission-invoice-${inv.id}`,
+          type: "companyInvoice",
+          title: inv.invoice_number || `Facture ${inv.id}`,
+          subtitle: `${month} • Facture mission`,
+          amount: Number(inv.total_amount) || 0,
+          currency: "eur",
+          openUrl: inv.invoice_pdf_url || null,
+        });
+      });
+    }
   }
 
   return documents;

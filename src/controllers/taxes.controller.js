@@ -7,7 +7,8 @@ import { generateDocumentPDF } from "../services/taxes.document.service.js";
 
 export async function getMonthlySummary(req, res) {
   try {
-    if (req.user.role !== "provider") {
+    const role = req.user.role || "";
+    if (role !== "provider" && role !== "provider_passionate") {
       return res.status(403).json({ error: "Providers only" });
     }
 
@@ -26,16 +27,13 @@ export async function getMonthlySummary(req, res) {
 
 export async function listDocuments(req, res) {
   try {
-    if (req.user.role !== "provider") {
-      return res.status(403).json({ error: "Providers only" });
-    }
-
     const { month } = req.query;
     if (!month) {
       return res.status(400).json({ error: "Missing month" });
     }
 
-    const docs = await buildDocumentsList(req.user.id, month);
+    const role = req.user.role || "customer";
+    const docs = await buildDocumentsList(req.user.id, month, role);
     return res.json({ data: docs });
   } catch (err) {
     console.error("[TAXES] documents error:", err);
@@ -45,15 +43,21 @@ export async function listDocuments(req, res) {
 
 export async function downloadDocument(req, res) {
   try {
-    if (req.user.role !== "provider") {
+    const role = req.user.role || "";
+    if (role !== "provider" && role !== "provider_passionate") {
       return res.status(403).json({ error: "Providers only" });
     }
 
-const documentId = req.params.id;
-// "2024-12-beldetailing" → ["2024","12","beldetailing"]
-const parts = documentId.split("-");
-const month = `${parts[0]}-${parts[1]}`; // ✅ "2024-12"
+    const documentId = req.params.id;
+    if (documentId.startsWith("booking-") || documentId.startsWith("mission-invoice-")) {
+      return res.status(400).json({ error: "Use openUrl for this document" });
+    }
 
+    const parts = documentId.split("-");
+    const month = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : null;
+    if (!month) {
+      return res.status(400).json({ error: "Invalid document id" });
+    }
 
     if (!(await providerHasActivity(req.user.id, month))) {
       return res.status(404).json({ error: "No document for this period" });
