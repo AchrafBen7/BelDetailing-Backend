@@ -5,6 +5,7 @@ import {
   trackGoogleRedirect,
   dismissReviewPrompt,
   getReviewPromptForBooking,
+  importGoogleReviewsForProvider,
 } from "../services/googleReview.service.js";
 
 export async function createReviewPromptController(req, res) {
@@ -181,5 +182,39 @@ export async function dismissPromptController(req, res) {
   } catch (err) {
     console.error("[REVIEW] dismissPrompt error:", err);
     return res.status(500).json({ error: "Could not dismiss prompt" });
+  }
+}
+
+/**
+ * POST /api/v1/reviews/import
+ * Importe les avis Google d'un lieu pour le prestataire connecté.
+ * Body: { place_id: string } (Google Place ID, ex. ChIJ...)
+ */
+export async function importGoogleReviewsController(req, res) {
+  try {
+    if (req.user.role !== "provider" && req.user.role !== "provider_passionate") {
+      return res.status(403).json({
+        error: "Only providers can import Google reviews",
+      });
+    }
+
+    const placeId = req.body?.place_id ?? req.body?.placeId ?? null;
+    if (!placeId || typeof placeId !== "string" || !placeId.trim()) {
+      return res.status(400).json({
+        error: "Missing or invalid place_id. Provide your Google Place ID (e.g. from your Google Business profile URL).",
+      });
+    }
+
+    const result = await importGoogleReviewsForProvider(req.user.id, placeId.trim());
+    return res.json({
+      success: true,
+      imported: result.imported,
+      total: result.total,
+    });
+  } catch (err) {
+    console.error("[REVIEW] importGoogleReviews error:", err);
+    const status = err.statusCode ?? 500;
+    const message = err.message ?? "Could not import Google reviews";
+    return res.status(status).json({ error: message });
   }
 }

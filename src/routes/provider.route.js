@@ -5,6 +5,7 @@ import {
   listProviders,
   getProvider,
   updateMyProviderProfile,
+  getAvailableSlotsController,
   createService,
   updateService,
   deleteServiceController,
@@ -61,10 +62,11 @@ router.post("/services", requireAuth, createService);
 router.patch("/services/:id", requireAuth, updateService); // 🆕 Mise à jour de service
 router.delete("/services/:id", requireAuth, deleteServiceController);
 
-// ⭐ Routes paramétrées
+// ⭐ Routes paramétrées (/:id/... avant /:id)
 router.get("/:id/services", getProviderServicesController);
 router.get("/:id/reviews", getProviderReviewsController);
 router.get("/:id/stats", requireAuth, getProviderStatsController);
+router.get("/:id/available-slots", getAvailableSlotsController);
 // Détail d'un provider (cache 15 min)
 router.get(
   "/:id",

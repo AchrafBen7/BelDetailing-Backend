@@ -5,6 +5,18 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 const MIN_FREE_SLOT_MINUTES = 30;
 
 /**
+ * Heures par défaut quand le prestataire n'a pas défini opening_hours : Lun-Sam 9h-18h.
+ * @returns {Array<{ day: number, startTime: string, endTime: string }>}
+ */
+function defaultOpeningHours() {
+  const result = [];
+  for (let day = 1; day <= 6; day++) {
+    result.push({ day, startTime: "09:00", endTime: "18:00" });
+  }
+  return result;
+}
+
+/**
  * Parse opening_hours (JSON). Attendu: tableau ou objet avec day (1-7), startTime, endTime, isClosed.
  * @returns {Array<{ day: number, startTime: string, endTime: string, isClosed: boolean }>}
  */
@@ -40,6 +52,13 @@ function timeToMinutes(timeStr) {
 function getDayOfWeek(date) {
   const d = date.getDay();
   return d === 0 ? 7 : d;
+}
+
+/** Minutes since midnight → "HH:mm" */
+function minutesToTime(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 /**
@@ -78,8 +97,11 @@ function providerHasFreeSlotThisWeek(providerRow, bookingsByProviderId, weekDays
   const lookupKey = providerRow.user_id ?? providerRow.id;
   if (!lookupKey) return false;
 
-  const openingHoursList = parseOpeningHours(providerRow.opening_hours);
-  if (openingHoursList.length === 0) return false;
+  // Si pas d'horaires définis → fallback Lun-Sam 9h-18h pour que les detailers apparaissent quand même
+  let openingHoursList = parseOpeningHours(providerRow.opening_hours);
+  if (openingHoursList.length === 0) {
+    openingHoursList = defaultOpeningHours();
+  }
 
   const byDay = new Map();
   for (const oh of openingHoursList) {
@@ -166,4 +188,94 @@ export async function getProviderIdsWithAvailabilityThisWeek(providerRows) {
     }
   }
   return availableIds;
+}
+
+/** Pas des créneaux proposés (minutes) */
+const SLOT_STEP_MINUTES = 30;
+
+/**
+ * Créneaux disponibles pour un prestataire à une date donnée, basés sur :
+ * - horaires d'ouverture du jour (opening_hours),
+ * - réservations déjà prises (pending, confirmed, started, in_progress, ready_soon),
+ * - durée du service : un créneau est proposé seulement si [start, start+duration] tient dans un trou libre.
+ * @param {string} providerId - id ou user_id du prestataire
+ * @param {string} dateStr - "YYYY-MM-DD"
+ * @param {number} durationMinutes - durée estimée du service (ex. 120 pour 2h)
+ * @returns {Promise<string[]>} tableau de "HH:mm" (début de créneau)
+ */
+export async function getAvailableSlotsForDate(providerId, dateStr, durationMinutes) {
+  const duration = Math.max(15, Number(durationMinutes) || 60);
+
+  // 1) Récupérer le profil (opening_hours)
+  let { data: profile, error: profileError } = await supabase
+    .from("provider_profiles")
+    .select("id, user_id, opening_hours")
+    .eq("id", providerId)
+    .maybeSingle();
+
+  if (profileError || !profile) {
+    const { data: byUser } = await supabase
+      .from("provider_profiles")
+      .select("id, user_id, opening_hours")
+      .eq("user_id", providerId)
+      .maybeSingle();
+    profile = byUser;
+  }
+
+  if (!profile) return [];
+
+  let openingHoursList = parseOpeningHours(profile?.opening_hours);
+  if (openingHoursList.length === 0) {
+    openingHoursList = defaultOpeningHours();
+  }
+
+  const date = new Date(dateStr + "T12:00:00");
+  if (Number.isNaN(date.getTime())) return [];
+  const dayOfWeek = getDayOfWeek(date);
+
+  const byDay = new Map();
+  for (const oh of openingHoursList) {
+    const day = typeof oh.day === "number" ? oh.day : parseInt(oh.day, 10);
+    if (Number.isNaN(day) || day < 1 || day > 7) continue;
+    const startTime = oh.startTime || oh.start_time;
+    const endTime = oh.endTime || oh.end_time;
+    byDay.set(day, { start: timeToMinutes(startTime), end: timeToMinutes(endTime) });
+  }
+
+  const open = byDay.get(dayOfWeek);
+  if (!open || open.start >= open.end) return [];
+
+  const lookupKey = profile.user_id ?? profile.id;
+  if (!lookupKey) return [];
+
+  // 2) Réservations ce jour-là
+  const { data: bookings, error: bookingsError } = await supabase
+    .from("bookings")
+    .select("start_time, end_time")
+    .eq("provider_id", lookupKey)
+    .eq("date", dateStr)
+    .in("status", ["pending", "confirmed", "started", "in_progress", "ready_soon"]);
+
+  if (bookingsError) {
+    console.warn("[providerAvailability] getAvailableSlotsForDate bookings error:", bookingsError.message);
+    return [];
+  }
+
+  const bookedIntervals = (bookings || []).map((b) => [
+    timeToMinutes(b.start_time || "00:00"),
+    timeToMinutes(b.end_time || "23:59"),
+  ]);
+
+  const segments = freeSegments(open.start, open.end, bookedIntervals);
+  const slots = [];
+
+  for (const [segStart, segEnd] of segments) {
+    let t = segStart;
+    while (t + duration <= segEnd) {
+      slots.push(minutesToTime(t));
+      t += SLOT_STEP_MINUTES;
+    }
+  }
+
+  return slots;
 }

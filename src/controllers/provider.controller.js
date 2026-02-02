@@ -11,6 +11,7 @@ import {
   getProviderStats,
   getProviderProfileIdForUser,
 } from "../services/provider.service.js";
+import { getAvailableSlotsForDate } from "../services/providerAvailability.service.js";
 import { invalidateProviderCache } from "../middlewares/cache.middleware.js";
 
 export async function listProviders(req, res) {
@@ -52,6 +53,32 @@ export async function getProvider(req, res) {
   } catch (err) {
     console.error("[PROVIDERS] getProvider error:", err);
     return res.status(500).json({ error: "Could not fetch provider" });
+  }
+}
+
+/**
+ * GET /api/v1/providers/:id/available-slots?date=YYYY-MM-DD&duration_minutes=120
+ * Créneaux disponibles pour une date, basés sur horaires d'ouverture et résas déjà prises.
+ */
+export async function getAvailableSlotsController(req, res) {
+  try {
+    const { id: providerId } = req.params;
+    const date = req.query.date;
+    const durationMinutes = req.query.duration_minutes ?? req.query.durationMinutes ?? 60;
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "Query 'date' (YYYY-MM-DD) is required" });
+    }
+
+    const slots = await getAvailableSlotsForDate(
+      providerId,
+      date,
+      Number(durationMinutes) || 60
+    );
+    return res.json({ data: slots });
+  } catch (err) {
+    console.error("[PROVIDERS] getAvailableSlots error:", err);
+    return res.status(500).json({ error: "Could not fetch available slots" });
   }
 }
 

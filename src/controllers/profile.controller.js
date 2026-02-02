@@ -88,7 +88,9 @@ export async function getProfile(req, res) {
       banner_url,
       transport_price_per_km,
       transport_enabled,
-      welcoming_offer_enabled
+      welcoming_offer_enabled,
+      opening_hours,
+      available_today
     )
   `)
   .eq("id", userId)
