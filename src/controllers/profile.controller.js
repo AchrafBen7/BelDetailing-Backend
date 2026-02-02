@@ -90,7 +90,8 @@ export async function getProfile(req, res) {
       transport_enabled,
       welcoming_offer_enabled,
       opening_hours,
-      available_today
+      available_today,
+      curated_badge
     )
   `)
   .eq("id", userId)

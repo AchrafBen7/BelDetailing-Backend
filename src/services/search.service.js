@@ -64,6 +64,7 @@ function mapProviderRow(row) {
     serviceArea: row.service_area ?? null, // ✅ Zone d'intervention (JSON)
     welcomingOfferEnabled: row.welcoming_offer_enabled ?? false, // ✅ Offre de bienvenue
     availableToday: row.available_today ?? false, // ✅ Disponible cette semaine
+    curatedBadge: row.curated_badge ?? null, // Johari 8.1
   };
 }
 

@@ -33,6 +33,9 @@ export async function getApplicationsForOffer(offerId) {
   return data.map(mapApplicationRowToDto);
 }
 
+/** Nombre max de candidatures actives par offre (Johari 3.4 – éviter le spam côté detailers). */
+const MAX_APPLICATIONS_PER_OFFER = 50;
+
 // 🟦 APPLY – POST /offers/:offerId/apply (provider)
 export async function applyToOffer(offerId, payload, user) {
   // 0) Vérifier que l'offre existe et est encore "open"
@@ -51,6 +54,19 @@ export async function applyToOffer(offerId, payload, user) {
 
   if (offerRow.status !== "open") {
     const err = new Error("Offer is not open for applications");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 0.4) Johari 3.4 : limiter le volume de candidatures par offre
+  const { count, error: countError } = await supabase
+    .from("applications")
+    .select("*", { count: "exact", head: true })
+    .eq("offer_id", offerId)
+    .in("status", ["submitted", "underReview", "accepted"]);
+
+  if (!countError && count >= MAX_APPLICATIONS_PER_OFFER) {
+    const err = new Error(`This offer has reached the maximum number of applications (${MAX_APPLICATIONS_PER_OFFER}). Try another offer.`);
     err.statusCode = 400;
     throw err;
   }

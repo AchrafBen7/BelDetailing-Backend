@@ -3,7 +3,22 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { sendNotificationToUser } from "./onesignal.service.js";
 
 /**
- * Crée une notification dans la base de données
+ * Types de notification pour lesquels une PUSH est envoyée (Johari 2.3 : seulement quand action requise).
+ * - booking_created : provider doit confirmer/refuser la résa
+ * - application_received : company doit accepter/refuser la candidature
+ * - payment_failed / mission_payment_requires_method : action paiement requise
+ */
+const NOTIFICATION_TYPES_REQUIRING_PUSH = new Set([
+  "booking_created",
+  "application_received",
+  "payment_failed",
+  "mission_payment_requires_method",
+  "mission_payment_failed",
+]);
+
+/**
+ * Crée une notification dans la base de données.
+ * Push (OneSignal) envoyée uniquement si type est dans NOTIFICATION_TYPES_REQUIRING_PUSH (Johari 2.3).
  * @param {Object} params
  * @param {string} params.userId - ID de l'utilisateur destinataire
  * @param {string} params.title - Titre de la notification
@@ -31,23 +46,22 @@ export async function createNotification({ userId, title, message, type, data = 
     throw error;
   }
 
-  // Envoyer une push notification via OneSignal (si configuré)
-  // Si OneSignal n'est pas configuré, on ignore silencieusement l'erreur
-  try {
-    await sendNotificationToUser({
-      userId,
-      title,
-      message,
-      data: {
-        type,
-        ...data,
-      },
-    });
-  } catch (notifError) {
-    // ⚠️ Si OneSignal n'est pas configuré ou échoue, on log mais on ne throw pas
-    // La notification est déjà enregistrée en DB, donc l'utilisateur la verra dans l'app
-    console.warn("[NOTIFICATIONS] OneSignal push notification failed (notification still saved to DB):", notifError.message);
-    // Ne pas faire échouer la création de notification si la push échoue
+  // Push uniquement quand action requise (résa à confirmer, candidature, paiement) – Johari 2.3
+  const shouldSendPush = NOTIFICATION_TYPES_REQUIRING_PUSH.has(type);
+  if (shouldSendPush) {
+    try {
+      await sendNotificationToUser({
+        userId,
+        title,
+        message,
+        data: {
+          type,
+          ...data,
+        },
+      });
+    } catch (notifError) {
+      console.warn("[NOTIFICATIONS] OneSignal push failed (notification saved to DB):", notifError.message);
+    }
   }
 
   return notification;

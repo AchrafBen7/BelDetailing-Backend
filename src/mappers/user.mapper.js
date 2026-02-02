@@ -117,6 +117,7 @@ export function mapUserRowToDto(row) {
           serviceArea: p.service_area ?? null, // ✅ Zone d'intervention (JSON)
           welcomingOfferEnabled: p.welcoming_offer_enabled ?? false, // ✅ Offre de bienvenue
           availableToday: p.available_today ?? false, // ✅ Disponible cette semaine (effet urgence)
+          curatedBadge: cleanNull(p.curated_badge), // Johari 8.1 : recommended | top_this_month
           openingHours: cleanNull(p.opening_hours), // ✅ Horaires d'ouverture (JSON) pour résa
         }
       : null,
