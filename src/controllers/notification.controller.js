@@ -87,10 +87,8 @@ export async function subscribeController(req, res) {
 
     const effectivePlatform = player_id ? "onesignal" : platform;
     const deviceToken = await registerDeviceToken(userId, token, effectivePlatform);
-    const effectivePlatform = player_id ? "onesignal" : platform;
-    const deviceToken = await registerDeviceToken(userId, token, effectivePlatform);
 
-    requestLogger(req).error({ err }, "Notifications subscribe error");
+    return res.json({ data: deviceToken });
   } catch (err) {
     console.error("[NOTIFICATIONS] subscribe error:", err);
     return res.status(500).json({ error: "Could not subscribe to notifications" });
@@ -107,7 +105,7 @@ export async function getUnreadCountController(req, res) {
 
     const count = await getUnreadCount(userId);
 
-    requestLogger(req).error({ err }, "Notifications unreadCount error");
+    return res.json({ count });
   } catch (err) {
     console.error("[NOTIFICATIONS] unreadCount error:", err);
     return res.status(500).json({ error: "Could not get unread count" });
