@@ -62,20 +62,6 @@ export async function createNotification({ userId, title, message, type, data = 
     } catch (notifError) {
       console.warn("[NOTIFICATIONS] OneSignal push failed (notification saved to DB):", notifError.message);
     }
-  if (shouldSendPush) {
-    try {
-      await sendNotificationToUser({
-        userId,
-        title,
-        message,
-        data: {
-          type,
-          ...data,
-        },
-      });
-    } catch (notifError) {
-      console.warn("[NOTIFICATIONS] OneSignal push failed (notification saved to DB):", notifError.message);
-    }
   }
 
   return notification;
