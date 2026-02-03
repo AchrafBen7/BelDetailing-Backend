@@ -1,6 +1,17 @@
 // src/services/search.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 
+const MIN_REVIEWS_TO_DISPLAY_RATING = Number(process.env.MIN_REVIEWS_TO_DISPLAY_RATING) || 5;
+
+function getRatingDisplayForProvider(row) {
+  const reviewCount = row.review_count ?? 0;
+  const rawRating = row.rating ?? 0;
+  if (reviewCount < MIN_REVIEWS_TO_DISPLAY_RATING) {
+    return { rating: null, ratingDisplayLabel: "Recommandé par NIOS" };
+  }
+  return { rating: rawRating, ratingDisplayLabel: null };
+}
+
 function getProviderIdentity(row) {
   return row?.id ?? row?.user_id ?? null;
 }
@@ -32,6 +43,7 @@ function mapProviderRow(row) {
       : [];
 
   const minPrice = prices.length > 0 ? Math.min(...prices) : null;
+  const { rating, ratingDisplayLabel } = getRatingDisplayForProvider(row);
 
   return {
     id: getProviderIdentity(row),
@@ -43,7 +55,8 @@ function mapProviderRow(row) {
     postalCode: row.postal_code ?? "",
     lat: row.lat ?? 0,
     lng: row.lng ?? 0,
-    rating: row.rating ?? 0,
+    rating,
+    ratingDisplayLabel,
     reviewCount: row.review_count ?? 0,
 
     // 🔥 LE VRAI PRIX

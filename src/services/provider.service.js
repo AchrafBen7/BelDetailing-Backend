@@ -3,6 +3,18 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { ensureStripeProductForService } from "./stripeProduct.service.js";
 import { getProviderIdsWithAvailabilityThisWeek } from "./providerAvailability.service.js";
 
+// Johari 9.4 : en dessous de ce seuil, on ne renvoie pas la note chiffrée (rating: null) et on affiche un label curé
+const MIN_REVIEWS_TO_DISPLAY_RATING = Number(process.env.MIN_REVIEWS_TO_DISPLAY_RATING) || 5;
+
+function getRatingDisplayForProvider(row) {
+  const reviewCount = row.review_count ?? 0;
+  const rawRating = row.rating ?? 0;
+  if (reviewCount < MIN_REVIEWS_TO_DISPLAY_RATING) {
+    return { rating: null, ratingDisplayLabel: "Recommandé par NIOS" };
+  }
+  return { rating: rawRating, ratingDisplayLabel: null };
+}
+
 let providerProfilesSupportsIdColumn;
 
 function getProviderIdentity(row) {
@@ -71,6 +83,8 @@ export function mapProviderRowToDetailer(row) {
   const computedMinPrice =
     prices.length > 0 ? Math.min(...prices) : null;
 
+  const { rating, ratingDisplayLabel } = getRatingDisplayForProvider(row);
+
   return {
     id: getProviderIdentity(row), // provider_profiles.id (fallback user_id)
     userId: row.user_id ?? null, // auth.users.id
@@ -81,7 +95,8 @@ export function mapProviderRowToDetailer(row) {
     postalCode: row.postal_code ?? "",
     lat: row.lat ?? 0,
     lng: row.lng ?? 0,
-    rating: row.rating ?? 0,
+    rating,
+    ratingDisplayLabel,
     reviewCount: row.review_count ?? 0,
 
     // 🔥 ICI LA VÉRITÉ
@@ -206,8 +221,10 @@ const mappedWithAvailability = mapped.map((d) => ({
 const effectiveSort = requestedSort ?? sort;
 if (effectiveSort === "rating,-priceMin") {
   mappedWithAvailability.sort((a, b) => {
-    if (a.rating !== b.rating) {
-      return b.rating - a.rating;
+    const rA = a.rating ?? 0;
+    const rB = b.rating ?? 0;
+    if (rA !== rB) {
+      return rB - rA;
     }
     if (a.minPrice == null) return 1;
     if (b.minPrice == null) return -1;
