@@ -1,6 +1,6 @@
 
 import { mapUserRowToDto } from "../mappers/user.mapper.js";
-import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { supabase, supabaseAdmin } from "../config/supabase.js";
 import { getCompanyReliabilityMetrics } from "../services/companyProfileStats.service.js";
 
 
@@ -361,4 +361,64 @@ export async function updateProfile(req, res) {
 
   // 5) Renvoi le profil à jour
   return await getProfile(req, res);
+}
+
+// ========= EXPORT PROFILE (RGPD – télécharger mes données) =========
+export async function exportProfileData(req, res) {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  try {
+    const { data, error } = await supabase
+      .from("users")
+      .select(`
+        id, email, phone, role, vat_number, is_vat_valid,
+        referral_code, referred_by, created_at, updated_at,
+        customer_profiles (*),
+        company_profiles (*),
+        provider_profiles (*)
+      `)
+      .eq("id", userId)
+      .single();
+    if (error) return res.status(500).json({ error: error.message });
+    const userDto = mapUserRowToDto(data);
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", "attachment; filename=\"nios-my-data.json\"");
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({ user: userDto, exportedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error("[PROFILE] export error:", err);
+    return res.status(500).json({ error: "Could not export data" });
+  }
+}
+
+// ========= DELETE ACCOUNT (RGPD – droit à l'oubli) =========
+export async function deleteAccount(req, res) {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: "Password required to delete account" });
+  }
+  try {
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: req.user.email,
+      password,
+    });
+    if (signInError) {
+      return res.status(401).json({ error: "Invalid password" });
+    }
+    const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (deleteError) {
+      console.error("[PROFILE] deleteUser error:", deleteError);
+      return res.status(500).json({ error: "Could not delete account" });
+    }
+    return res.json({ success: true, message: "Account deleted" });
+  } catch (err) {
+    console.error("[PROFILE] deleteAccount error:", err);
+    return res.status(500).json({ error: "Could not delete account" });
+  }
 }

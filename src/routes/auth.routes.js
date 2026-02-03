@@ -5,6 +5,7 @@ import {
   login,
   refreshToken,
   logout,
+  changePassword,
   verifyEmail,
   resendVerificationEmailController,
 } from "../controllers/auth.controller.js";
@@ -34,5 +35,6 @@ router.post("/apple", loginWithApple);
 router.post("/google", loginWithGoogle);
 
 router.post("/logout", requireAuth, logout);
+router.post("/change-password", requireAuth, changePassword);
 
 export default router;

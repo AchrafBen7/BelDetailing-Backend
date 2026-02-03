@@ -735,3 +735,137 @@ export async function getProviderStats(userId) {
     clientsCount: clientsSet.size,
   };
 }
+
+/**
+ * Séries temporelles pour graphiques (revenus et nombre de résas par jour/semaine/mois).
+ * period: "week" | "month" | "year"
+ */
+export async function getProviderStatsSeries(userId, period) {
+  const provider = await getProviderProfileIdForUser(userId);
+  if (!provider?.id) {
+    const err = new Error("Provider profile not found");
+    err.statusCode = 404;
+    throw err;
+  }
+  const providerId = userId;
+
+  const now = new Date();
+  let startDate;
+  let groupBy = "day";
+  let labelFormat = "d";
+
+  if (period === "week") {
+    startDate = new Date(now);
+    startDate.setDate(startDate.getDate() - 7);
+    startDate.setHours(0, 0, 0, 0);
+    groupBy = "day";
+    labelFormat = "d";
+  } else if (period === "month") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 0);
+    startDate.setMonth(startDate.getMonth() - 1);
+    startDate.setHours(0, 0, 0, 0);
+    groupBy = "day";
+    labelFormat = "d";
+  } else {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    startDate.setHours(0, 0, 0, 0);
+    groupBy = "month";
+    labelFormat = "M";
+  }
+
+  const startIso = startDate.toISOString();
+
+  const { data: bookings, error } = await supabase
+    .from("bookings")
+    .select("price, created_at")
+    .eq("provider_id", providerId)
+    .eq("payment_status", "paid")
+    .gte("created_at", startIso);
+
+  if (error) throw error;
+
+  const revenueByKey = new Map();
+  const countByKey = new Map();
+
+  (bookings || []).forEach((b) => {
+    const d = new Date(b.created_at);
+    let key;
+    if (groupBy === "day") {
+      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    } else {
+      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    }
+    revenueByKey.set(key, (revenueByKey.get(key) || 0) + Number(b.price));
+    countByKey.set(key, (countByKey.get(key) || 0) + 1);
+  });
+
+  const allKeys = new Set([...revenueByKey.keys(), ...countByKey.keys()]);
+  const sortedKeys = [...allKeys].sort();
+
+  const revenue = sortedKeys.map((key) => ({
+    label: key,
+    value: Math.round((revenueByKey.get(key) || 0) * 100) / 100,
+  }));
+  const bookingsSeries = sortedKeys.map((key) => ({
+    label: key,
+    value: countByKey.get(key) || 0,
+  }));
+
+  return { revenue, bookings: bookingsSeries };
+}
+
+/**
+ * Services les plus réservés pour le provider (avec CA estimé et nombre de résas).
+ */
+export async function getProviderPopularServices(userId, period) {
+  const provider = await getProviderProfileIdForUser(userId);
+  if (!provider?.id) {
+    const err = new Error("Provider profile not found");
+    err.statusCode = 404;
+    throw err;
+  }
+  const providerId = userId;
+
+  const now = new Date();
+  let startIso;
+  if (period === "week") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 7);
+    startIso = start.toISOString();
+  } else if (period === "month") {
+    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    startIso = start.toISOString();
+  } else {
+    const start = new Date(now.getFullYear(), 0, 1);
+    startIso = start.toISOString();
+  }
+
+  const { data: bookings, error } = await supabase
+    .from("bookings")
+    .select("service_id, service_name, price")
+    .eq("provider_id", providerId)
+    .eq("payment_status", "paid")
+    .gte("created_at", startIso);
+
+  if (error) throw error;
+
+  const byName = new Map();
+  (bookings || []).forEach((b) => {
+    const name = b.service_name || "Service";
+    const existing = byName.get(name) || { count: 0, earnings: 0 };
+    existing.count += 1;
+    existing.earnings += Number(b.price || 0);
+    byName.set(name, existing);
+  });
+
+  const popular = [...byName.entries()]
+    .map(([name, { count, earnings }]) => ({
+      name,
+      count,
+      estimatedEarnings: Math.round(earnings * 100) / 100,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  return popular;
+}

@@ -9,6 +9,8 @@ import {
   getProviderServices,
   getProviderReviews,
   getProviderStats,
+  getProviderStatsSeries,
+  getProviderPopularServices,
   getProviderProfileIdForUser,
 } from "../services/provider.service.js";
 import { getAvailableSlotsForDate } from "../services/providerAvailability.service.js";
@@ -216,6 +218,38 @@ export async function getProviderStatsController(req, res) {
 
 export async function getMyProviderStatsController(req, res) {
   return getProviderStatsController(req, res);
+}
+
+// GET /api/v1/providers/me/stats/series?period=week|month|year
+export async function getProviderStatsSeriesController(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can access stats series" });
+    }
+    const period = req.query.period || "month";
+    const series = await getProviderStatsSeries(req.user.id, period);
+    return res.json(series);
+  } catch (err) {
+    console.error("[PROVIDERS] getProviderStatsSeries error:", err);
+    const status = err.statusCode || 500;
+    return res.status(status).json({ error: "Could not fetch stats series" });
+  }
+}
+
+// GET /api/v1/providers/me/stats/popular-services?period=week|month|year
+export async function getProviderPopularServicesController(req, res) {
+  try {
+    if (req.user.role !== "provider") {
+      return res.status(403).json({ error: "Only providers can access popular services" });
+    }
+    const period = req.query.period || "month";
+    const popular = await getProviderPopularServices(req.user.id, period);
+    return res.json({ data: popular });
+  } catch (err) {
+    console.error("[PROVIDERS] getProviderPopularServices error:", err);
+    const status = err.statusCode || 500;
+    return res.status(status).json({ error: "Could not fetch popular services" });
+  }
 }
 
 // Delete a service

@@ -403,6 +403,45 @@ export async function refreshToken(req, res) {
 
 
 /* ============================================================
+   CHANGE PASSWORD (requireAuth)
+============================================================ */
+export async function changePassword(req, res) {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Missing currentPassword or newPassword" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    }
+
+    // Vérifier le mot de passe actuel
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: req.user.email,
+      password: currentPassword,
+    });
+    if (signInError) {
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+
+    // Mettre à jour le mot de passe via Admin
+    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+      req.user.id,
+      { password: newPassword }
+    );
+    if (updateError) {
+      console.error("[AUTH] changePassword update error:", updateError);
+      return res.status(500).json({ error: "Could not update password" });
+    }
+
+    return res.json({ success: true, message: "Password updated" });
+  } catch (err) {
+    console.error("[AUTH] changePassword error:", err);
+    return res.status(500).json({ error: "Could not change password" });
+  }
+}
+
+/* ============================================================
    logout
 ============================================================ */
 export async function logout(req, res) {

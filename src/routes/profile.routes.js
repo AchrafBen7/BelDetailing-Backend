@@ -3,7 +3,7 @@ import { Router } from "express";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import { validateRequest } from "../validators/index.js";
 import { updateProfileValidation } from "../validators/profile.validator.js";
-import { getProfile, updateProfile } from "../controllers/profile.controller.js";
+import { getProfile, updateProfile, exportProfileData, deleteAccount } from "../controllers/profile.controller.js";
 
 const router = Router();
 
@@ -11,5 +11,7 @@ const router = Router();
 // === PROFILE (monté sur /api/v1/profile dans app.js) ===
 router.get("/", requireAuth, getProfile);
 router.patch("/", requireAuth, updateProfileValidation, validateRequest, updateProfile);
+router.get("/export", requireAuth, exportProfileData);
+router.post("/delete-account", requireAuth, deleteAccount);
 
 export default router;
