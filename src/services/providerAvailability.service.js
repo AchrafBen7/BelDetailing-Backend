@@ -1,5 +1,6 @@
 // src/services/providerAvailability.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { listBlockedSlots } from "./blockedSlots.service.js";
 
 /** Durée minimale d'un créneau libre pour considérer le prestataire dispo (minutes) */
 const MIN_FREE_SLOT_MINUTES = 30;
@@ -261,10 +262,27 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
     return [];
   }
 
-  const bookedIntervals = (bookings || []).map((b) => [
+  let bookedIntervals = (bookings || []).map((b) => [
     timeToMinutes(b.start_time || "00:00"),
     timeToMinutes(b.end_time || "23:59"),
   ]);
+
+  // 2b) Blocked slots ce jour-là (full-day ou plage horaire)
+  try {
+    const blocked = await listBlockedSlots(lookupKey, { from: dateStr, to: dateStr });
+    for (const b of blocked) {
+      if (b.startTime == null && b.endTime == null) {
+        bookedIntervals.push([open.start, open.end]);
+      } else {
+        bookedIntervals.push([
+          timeToMinutes(b.startTime || "00:00"),
+          timeToMinutes(b.endTime || "23:59"),
+        ]);
+      }
+    }
+  } catch (err) {
+    console.warn("[providerAvailability] getAvailableSlotsForDate blocked slots error:", err?.message);
+  }
 
   const segments = freeSegments(open.start, open.end, bookedIntervals);
   const slots = [];

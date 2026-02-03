@@ -99,8 +99,31 @@ export async function getBookingDetail(id) {
     console.warn("[BOOKINGS] Error fetching booking services:", servicesError);
   }
 
+  let customer = null;
+  if (data.customer_id) {
+    const { data: custProfile } = await supabase
+      .from("customer_profiles")
+      .select("first_name, last_name")
+      .eq("user_id", data.customer_id)
+      .maybeSingle();
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("email, phone")
+      .eq("id", data.customer_id)
+      .maybeSingle();
+    if (custProfile || userRow) {
+      customer = {
+        firstName: custProfile?.first_name ?? "",
+        lastName: custProfile?.last_name ?? "",
+        email: userRow?.email ?? "",
+        phone: userRow?.phone ?? "",
+      };
+    }
+  }
+
   return {
     ...data,
+    customer,
     services: bookingServices || [],
     servicesCount: bookingServices?.length || 0,
   };
@@ -171,15 +194,19 @@ export async function updateBookingStatus(id, newStatus) {
   return data ? true : false;
 }
 
+/**
+ * Auto-decline pending bookings not accepted within 24h.
+ * Refunds preauthorized payments and sets status to "declined".
+ */
 export async function cleanupExpiredBookings() {
-  const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const { data: expiredBookings, error: fetchError } = await supabase
     .from("bookings")
     .select("id, payment_intent_id, payment_status")
     .eq("status", "pending")
     .in("payment_status", ["preauthorized", "paid"])
-    .lt("created_at", sixHoursAgo);
+    .lt("created_at", twentyFourHoursAgo);
 
   if (fetchError) throw fetchError;
   if (!expiredBookings || expiredBookings.length === 0) {
@@ -187,7 +214,7 @@ export async function cleanupExpiredBookings() {
   }
 
   for (const booking of expiredBookings) {
-    if (booking.payment_status === "paid" && booking.payment_intent_id) {
+    if (booking.payment_intent_id && (booking.payment_status === "preauthorized" || booking.payment_status === "paid")) {
       try {
         await refundPayment(booking.payment_intent_id);
       } catch (err) {
@@ -197,15 +224,15 @@ export async function cleanupExpiredBookings() {
         );
       }
     }
+
+    await supabase
+      .from("bookings")
+      .update({
+        status: "declined",
+        payment_status: booking.payment_intent_id ? "refunded" : "pending",
+      })
+      .eq("id", booking.id);
   }
 
-  const bookingIds = expiredBookings.map(booking => booking.id);
-  const { error: deleteError } = await supabase
-    .from("bookings")
-    .delete()
-    .in("id", bookingIds);
-
-  if (deleteError) throw deleteError;
-
-  return bookingIds.length;
+  return expiredBookings.length;
 }

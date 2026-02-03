@@ -13,6 +13,7 @@ import {
 } from "../services/payment.service.js";
 import { sendNotificationToUser, sendNotificationWithDeepLink } from "../services/onesignal.service.js";
 import { sendPeppolInvoice } from "../services/peppol.service.js";
+import { isSlotBlocked } from "../services/blockedSlots.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { BOOKING_COMMISSION_RATE } from "../config/commission.js";
 
@@ -323,6 +324,22 @@ export async function createBooking(req, res) {
 
     if (!provider) {
       return res.status(404).json({ error: "Provider not found" });
+    }
+
+    if (!date) {
+      return res.status(400).json({ error: "Missing date" });
+    }
+    const providerUserId = provider.user_id ?? provider_id;
+    const blocked = await isSlotBlocked(
+      providerUserId,
+      date,
+      start_time || "00:00",
+      end_time || "23:59"
+    );
+    if (blocked) {
+      return res.status(400).json({
+        error: "This slot is blocked by the provider and cannot be booked.",
+      });
     }
 
     // ✅ Vérifier le plafond annuel pour les provider_passionate
@@ -1705,8 +1722,8 @@ export async function cleanupExpiredBookingsController(req, res) {
     const deletedCount = await cleanupExpiredBookings();
     return res.json({
       success: true,
-      deleted_count: deletedCount,
-      message: `Deleted ${deletedCount} expired bookings`,
+      declined_count: deletedCount,
+      message: `Auto-declined ${deletedCount} bookings (24h without acceptance)`,
     });
   } catch (err) {
     console.error("[BOOKINGS] cleanup error:", err);

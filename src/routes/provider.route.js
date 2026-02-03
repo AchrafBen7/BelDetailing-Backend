@@ -32,8 +32,18 @@ import {
   getUnreadCount,
   updateStatus,
 } from "../controllers/providerMessage.controller.js";
+import {
+  listBlockedSlotsController,
+  createBlockedSlotController,
+  deleteBlockedSlotController,
+} from "../controllers/blockedSlots.controller.js";
 
 const router = Router();
+
+// ⭐ Blocked slots (provider only)
+router.get("/me/blocked-slots", requireAuth, listBlockedSlotsController);
+router.post("/me/blocked-slots", requireAuth, createBlockedSlotController);
+router.delete("/me/blocked-slots/:id", requireAuth, deleteBlockedSlotController);
 
 // ⭐ Routes spécifiques (doivent être avant les routes paramétrées)
 router.get("/me/services", requireAuth, getMyProviderServicesController);
