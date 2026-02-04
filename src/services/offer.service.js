@@ -185,16 +185,22 @@ export async function createOffer(payload, user) {
 
   if (error) {
     console.error("[OFFERS] Insert error:", error);
-    if (error.code === "42703") {
-      const msg = error.message || "";
-      if (msg.includes("categories")) {
-        delete insertPayload.categories;
-      }
+    const msg = error.message || "";
+    const code = error.code;
+
+    // Colonnes absentes : retry sans les champs optionnels (42703 = PostgreSQL, PGRST204 = PostgREST)
+    const isUnknownColumn = code === "42703" || code === "PGRST204";
+    if (isUnknownColumn) {
+      if (msg.includes("categories")) delete insertPayload.categories;
       if (msg.includes("vehicle_types") || msg.includes("prerequisites") || msg.includes("is_urgent") || msg.includes("intervention_mode")) {
         delete insertPayload.vehicle_types;
         delete insertPayload.prerequisites;
         delete insertPayload.is_urgent;
         delete insertPayload.intervention_mode;
+      }
+      if (msg.includes("end_date") || msg.includes("start_date")) {
+        delete insertPayload.start_date;
+        delete insertPayload.end_date;
       }
       const { data: retryData, error: retryError } = await supabase
         .from("offers")
