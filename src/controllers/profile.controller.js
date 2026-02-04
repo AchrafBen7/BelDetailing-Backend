@@ -36,7 +36,7 @@ export async function getProfile(req, res) {
   const [customerRes, companyRes, providerRes] = await Promise.all([
     supabaseAdmin.from("customer_profiles").select("first_name, last_name, default_address, preferred_city_id, vehicle_type, service_at_home, home_water, home_electricity, home_space, avatar_url").eq("user_id", userId).maybeSingle(),
     supabaseAdmin.from("company_profiles").select("legal_name, company_type_id, city, postal_code, contact_name, logo_url, commercial_name, bce_number, country, registered_address, legal_representative_name, languages_spoken, currency, sector, fleet_size, main_address, mission_zones, place_types, is_verified, payment_success_rate, late_cancellations_count, open_disputes_count, closed_disputes_count, missions_posted_count, missions_completed_count, detailer_satisfaction_rate, detailer_rating").eq("user_id", userId).maybeSingle(),
-    supabaseAdmin.from("provider_profiles").select("display_name, bio, base_city, postal_code, has_mobile_service, min_price, rating, services, company_name, lat, lng, review_count, team_size, years_of_experience, logo_url, banner_url, transport_price_per_km, transport_enabled, welcoming_offer_enabled, opening_hours, available_today").eq("user_id", userId).maybeSingle(),
+    supabaseAdmin.from("provider_profiles").select("display_name, bio, base_city, postal_code, has_mobile_service, has_garage, min_price, rating, services, company_name, lat, lng, review_count, team_size, years_of_experience, logo_url, banner_url, transport_price_per_km, transport_enabled, welcoming_offer_enabled, opening_hours, available_today").eq("user_id", userId).maybeSingle(),
   ]);
 
   if (customerRes.error) console.warn("[PROFILE] customer_profiles error:", customerRes.error.message);
@@ -270,6 +270,7 @@ export async function updateProfile(req, res) {
       baseCity,
       postalCode,
       hasMobileService,
+      hasGarage,
       minPrice,
       services,
       transportPricePerKm,
@@ -285,6 +286,7 @@ export async function updateProfile(req, res) {
       base_city: baseCity,
       postal_code: postalCode,
       has_mobile_service: hasMobileService,
+      has_garage: hasGarage,
       min_price: minPrice,
       // rating : calculé côté système → on ne le touche pas ici
       services,

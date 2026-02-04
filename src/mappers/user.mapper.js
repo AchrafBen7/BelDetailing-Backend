@@ -99,6 +99,7 @@ export function mapUserRowToDto(row) {
           baseCity: cleanNull(p.base_city),
           postalCode: cleanNull(p.postal_code),
           hasMobileService: p.has_mobile_service ?? false,
+          hasGarage: p.has_garage ?? false,
 
           minPrice: cleanNull(p.min_price),
           rating: cleanNull(p.rating),

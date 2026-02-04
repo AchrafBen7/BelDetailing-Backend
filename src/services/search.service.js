@@ -63,6 +63,7 @@ function mapProviderRow(row) {
     minPrice,
 
     hasMobileService: row.has_mobile_service ?? false,
+    hasGarage: row.has_garage ?? false,
     logoUrl: row.logo_url ?? null,
     bannerUrl: row.banner_url ?? null,
     phone: row.phone ?? null,

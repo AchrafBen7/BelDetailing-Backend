@@ -103,6 +103,7 @@ export function mapProviderRowToDetailer(row) {
     minPrice: computedMinPrice,
 
     hasMobileService: row.has_mobile_service ?? false,
+    hasGarage: row.has_garage ?? false,
     logoUrl: row.logo_url ?? null,
     bannerUrl: row.banner_url ?? null,
     serviceCategories: row.services ?? [],
@@ -648,6 +649,7 @@ export async function updateProviderProfile(userId, updates) {
     lat: updates.lat,
     lng: updates.lng,
     has_mobile_service: updates.has_mobile_service,
+    has_garage: updates.has_garage,
     min_price: updates.min_price,
     services: updates.services,
     team_size: updates.team_size,

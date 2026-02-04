@@ -262,6 +262,7 @@ export async function createBooking(req, res) {
       start_time,
       end_time,
       address,
+      service_at_provider, // true = au garage du détaileur, false = à l'adresse du client (mobile)
       payment_method,
       customer_address_lat,
       customer_address_lng,
@@ -323,6 +324,23 @@ export async function createBooking(req, res) {
 
     if (!provider) {
       return res.status(404).json({ error: "Provider not found" });
+    }
+
+    const hasGarage = provider.has_garage === true;
+    const hasMobile = provider.has_mobile_service === true;
+    let atProvider = service_at_provider === true;
+
+    if (hasGarage && !hasMobile) {
+      atProvider = true;
+    } else if (!hasGarage && hasMobile) {
+      atProvider = false;
+      if (!address || String(address).trim() === "" || String(address).toLowerCase().includes("à préciser")) {
+        return res.status(400).json({ error: "Address is required for mobile service." });
+      }
+    } else if (hasGarage && hasMobile) {
+      if (!atProvider && (!address || String(address).trim() === "" || String(address).toLowerCase().includes("à préciser"))) {
+        return res.status(400).json({ error: "Address is required when choosing mobile service." });
+      }
     }
 
     // ✅ Vérifier le plafond annuel pour les provider_passionate
@@ -394,7 +412,7 @@ export async function createBooking(req, res) {
       console.log("🔵 [BOOKINGS] createBooking - Using transport values from request");
       transportDistanceKm = Number(transport_distance_km);
       transportFee = Number(transport_fee);
-    } else if (!provider.has_mobile_service) {
+    } else if (!provider.has_mobile_service || atProvider) {
       transportDistanceKm = null;
       transportFee = 0;
     } else if (
@@ -496,6 +514,7 @@ export async function createBooking(req, res) {
         transport_fee: transportFee,
         customer_address_lat: customerAddressLat,
         customer_address_lng: customerAddressLng,
+        service_at_provider: atProvider,
         // Peppol fields
         peppol_requested: peppol_requested === true,
         peppol_status: peppol_requested === true ? "pending" : null,
