@@ -239,6 +239,11 @@ if (lat != null && lng != null) {
   let list = withDistance;
   if (rKm != null) {
     list = withDistance.filter(p => p.approxDistanceKm <= rKm);
+    // Fallback : si le rayon exclut tout le monde, on renvoie quand même la liste triée par distance
+    // pour que "Nearby" et "Disponible cette semaine" affichent des résultats.
+    if (list.length === 0) {
+      list = withDistance;
+    }
   }
   list.sort((a, b) => a.approxDistanceKm - b.approxDistanceKm);
   if (limit) {
