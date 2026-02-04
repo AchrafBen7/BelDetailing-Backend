@@ -9,14 +9,16 @@ ALTER TABLE offers
   ADD COLUMN IF NOT EXISTS start_date timestamptz DEFAULT NULL,
   ADD COLUMN IF NOT EXISTS end_date timestamptz DEFAULT NULL;
 
--- If you use a view "offers_with_counts", update it to include the new columns, e.g.:
--- DROP VIEW IF EXISTS offers_with_counts;
--- CREATE VIEW offers_with_counts AS
---   SELECT o.*, count(a.id) as applications_count, bool_or(a.status = 'accepted') as has_accepted_application
---   FROM offers o
---   LEFT JOIN applications a ON a.offer_id = o.id
---   GROUP BY o.id;
--- (Adjust according to your actual view definition.)
+-- Recreate view so it exposes all offer columns (including vehicle_types, prerequisites, etc.)
+DROP VIEW IF EXISTS offers_with_counts;
+CREATE VIEW offers_with_counts AS
+  SELECT
+    o.*,
+    count(a.id)::int AS applications_count,
+    bool_or(a.status = 'accepted') AS has_accepted_application
+  FROM offers o
+  LEFT JOIN applications a ON a.offer_id = o.id
+  GROUP BY o.id;
 
 COMMENT ON COLUMN offers.vehicle_types IS 'e.g. ["berline","suv","utilitaire"]';
 COMMENT ON COLUMN offers.prerequisites IS 'e.g. ["Expérience min 2 ans","Équipement pro"]';
