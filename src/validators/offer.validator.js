@@ -33,4 +33,8 @@ export const createOfferValidation = [
     .trim()
     .isIn(OFFER_TYPES)
     .withMessage("Invalid type"),
+  body("vehicleTypes").optional().isArray(),
+  body("prerequisites").optional().isArray(),
+  body("isUrgent").optional().isBoolean(),
+  body("interventionMode").optional().trim().isIn(["onSite", "mobile", "hybrid"]).withMessage("Invalid interventionMode"),
 ];

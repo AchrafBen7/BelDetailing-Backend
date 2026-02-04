@@ -32,9 +32,12 @@ function mapOfferRowToDto(row) {
     applicationsCount: row.applications_count ?? 0,
     // 🆕 Flag pour indiquer si une candidature est acceptée
     hasAcceptedApplication: row.has_accepted_application ?? false,
-    // 🆕 Dates optionnelles (définies lors de la création de l'offre)
     startDate: row.start_date || null,
     endDate: row.end_date || null,
+    vehicleTypes: row.vehicle_types || null,
+    prerequisites: row.prerequisites || null,
+    isUrgent: row.is_urgent ?? false,
+    interventionMode: row.intervention_mode || null,
   };
 }
 
@@ -147,9 +150,14 @@ export async function createOffer(payload, user) {
     created_by: user.id,
     company_name: companyProfile?.legal_name ?? null,
     company_logo_url: companyProfile?.logo_url ?? null,
-    // 🆕 Dates optionnelles (si définies lors de la création de l'offre)
+    // Dates optionnelles
     start_date: payload.startDate || null,
     end_date: payload.endDate || null,
+    // Types de véhicules, prérequis, urgent, mode d'intervention (optionnel)
+    vehicle_types: Array.isArray(payload.vehicleTypes) ? payload.vehicleTypes : null,
+    prerequisites: Array.isArray(payload.prerequisites) ? payload.prerequisites : null,
+    is_urgent: payload.isUrgent === true,
+    intervention_mode: payload.interventionMode || null,
   };
 
   // 🔥 Ajouter categories seulement si la colonne existe (sinon on ignore silencieusement)
@@ -177,23 +185,24 @@ export async function createOffer(payload, user) {
 
   if (error) {
     console.error("[OFFERS] Insert error:", error);
-    // Si l'erreur est due à la colonne categories qui n'existe pas, on réessaie sans
-    if (error.code === "42703" && error.message?.includes("categories")) {
-      console.warn("[OFFERS] Column 'categories' does not exist, retrying without it...");
-      delete insertPayload.categories;
+    if (error.code === "42703") {
+      const msg = error.message || "";
+      if (msg.includes("categories")) {
+        delete insertPayload.categories;
+      }
+      if (msg.includes("vehicle_types") || msg.includes("prerequisites") || msg.includes("is_urgent") || msg.includes("intervention_mode")) {
+        delete insertPayload.vehicle_types;
+        delete insertPayload.prerequisites;
+        delete insertPayload.is_urgent;
+        delete insertPayload.intervention_mode;
+      }
       const { data: retryData, error: retryError } = await supabase
         .from("offers")
         .insert(insertPayload)
         .select("*")
         .single();
-      
-      if (retryError) {
-        console.error("[OFFERS] Retry insert error:", retryError);
-        throw retryError;
-      }
-      
-      console.log("[OFFERS] Offer created successfully (without categories column)");
-      return mapOfferRowToDto(retryData);
+      if (!retryError) return mapOfferRowToDto(retryData);
+      console.error("[OFFERS] Retry insert error:", retryError);
     }
     throw error;
   }
@@ -271,9 +280,12 @@ export async function updateOffer(id, payload, user) {
     lng: payload.lng,
     type: payload.type,
     status: payload.status, // facultatif, sinon laisser comme avant côté client
-    // 🆕 Dates optionnelles (si définies lors de la mise à jour de l'offre)
     start_date: payload.startDate,
     end_date: payload.endDate,
+    vehicle_types: payload.vehicleTypes,
+    prerequisites: payload.prerequisites,
+    is_urgent: payload.isUrgent,
+    intervention_mode: payload.interventionMode,
   };
 
   // on enlève les undefined
