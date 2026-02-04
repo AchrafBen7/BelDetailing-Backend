@@ -217,27 +217,44 @@ const SLOT_STEP_MINUTES = 30;
 export async function getAvailableSlotsForDate(providerId, dateStr, durationMinutes) {
   const duration = Math.max(15, Number(durationMinutes) || 60);
 
-  // 1) Récupérer le profil (opening_hours) – essayer user_id d'abord (souvent l'app envoie user_id comme providerId)
-  let { data: profile, error: profileError } = await supabase
+  // 1) Récupérer le profil (opening_hours). Utiliser user_id et opening_hours uniquement pour éviter erreur si pas de colonne "id".
+  // L'app peut envoyer soit user_id soit provider_profiles.id selon la config.
+  let profile = null;
+  let profileError = null;
+
+  const selectCols = "user_id, opening_hours";
+
+  const byUserId = await supabase
     .from("provider_profiles")
-    .select("id, user_id, opening_hours")
+    .select(selectCols)
     .eq("user_id", providerId)
     .maybeSingle();
+  if (!byUserId.error && byUserId.data) {
+    profile = byUserId.data;
+  } else {
+    profileError = byUserId.error;
+  }
 
-  if (profileError || !profile) {
-    const { data: byId } = await supabase
+  if (!profile) {
+    const byId = await supabase
       .from("provider_profiles")
-      .select("id, user_id, opening_hours")
+      .select(selectCols)
       .eq("id", providerId)
       .maybeSingle();
-    profile = byId;
+    if (!byId.error && byId.data) {
+      profile = byId.data;
+    }
+    if (!profile) {
+      profileError = profileError || byId.error;
+    }
   }
 
   if (!profile) {
     console.warn("[providerAvailability] getAvailableSlotsForDate no profile for providerId:", providerId, "date:", dateStr, "profileError:", profileError?.message);
     return [];
   }
-  console.log("[providerAvailability] getAvailableSlotsForDate profile found providerId:", providerId, "profile.id:", profile?.id, "profile.user_id:", profile?.user_id);
+  const effectiveUserId = profile.user_id ?? profile.id ?? providerId;
+  console.log("[providerAvailability] getAvailableSlotsForDate profile found providerId:", providerId, "effectiveUserId:", effectiveUserId);
 
   let openingHoursList = parseOpeningHours(profile?.opening_hours);
   const defaultHours = defaultOpeningHours();
@@ -282,7 +299,7 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
     console.log("[providerAvailability] getAvailableSlotsForDate using default 08:00–19:00 for day", dayOfWeek, "providerId:", providerId);
   }
 
-  const providerIdKeys = [profile.id, profile.user_id].filter(Boolean);
+  const providerIdKeys = [effectiveUserId, profile.id, profile.user_id].filter(Boolean);
   const uniqueKeys = [...new Set(providerIdKeys)];
   if (uniqueKeys.length === 0) return [];
 
@@ -305,7 +322,7 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
   ]);
 
   // 2b) Blocked slots ce jour-là (full-day ou plage horaire) – provider_blocked_slots.provider_id = user_id
-  const lookupKey = profile.user_id ?? profile.id;
+  const lookupKey = effectiveUserId;
   try {
     const blocked = await listBlockedSlots(lookupKey, { from: dateStr, to: dateStr });
     for (const b of blocked) {
