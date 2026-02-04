@@ -13,7 +13,7 @@ import {
   getProviderReviewsController,
   getProviderStatsController,
   getMyProviderStatsSeriesController,
-  getMyProviderPopularServicesController,
+  getProviderPopularServicesController,
   getMyProviderReviews,
   getMyProviderServicesController,
   getMyProviderStatsController,
@@ -51,7 +51,7 @@ router.delete("/me/blocked-slots/:id", requireAuth, deleteBlockedSlotController)
 router.get("/me/services", requireAuth, getMyProviderServicesController);
 router.get("/me/reviews", requireAuth, getMyProviderReviews);
 router.get("/me/stats/series", requireAuth, getMyProviderStatsSeriesController);
-router.get("/me/stats/popular-services", requireAuth, getMyProviderPopularServicesController);
+router.get("/me/stats/popular-services", requireAuth, getProviderPopularServicesController);
 router.get("/me/stats", requireAuth, getMyProviderStatsController);
 router.patch("/me", requireAuth, updateMyProviderProfile);
 
