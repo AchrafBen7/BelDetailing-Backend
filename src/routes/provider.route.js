@@ -6,6 +6,7 @@ import {
   getProvider,
   updateMyProviderProfile,
   getAvailableSlotsController,
+  getAvailableDaysController,
   createService,
   updateService,
   deleteServiceController,
@@ -81,6 +82,7 @@ router.get("/:id/services", getProviderServicesController);
 router.get("/:id/reviews", getProviderReviewsController);
 router.get("/:id/stats", requireAuth, getProviderStatsController);
 router.get("/:id/available-slots", getAvailableSlotsController);
+router.get("/:id/available-days", getAvailableDaysController);
 // Détail d'un provider (cache 15 min)
 router.get(
   "/:id",

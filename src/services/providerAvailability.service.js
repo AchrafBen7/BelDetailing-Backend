@@ -248,26 +248,38 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
     return [];
   }
 
+  // Build byDay: if no custom hours, use defaults for all days; otherwise merge custom + defaults for gaps
   const byDay = new Map();
-  for (const oh of openingHoursList) {
-    const day = typeof oh.day === "number" ? oh.day : parseInt(oh.day, 10);
-    if (Number.isNaN(day) || day < 1 || day > 7) continue;
-    const startTime = oh.startTime || oh.start_time;
-    const endTime = oh.endTime || oh.end_time;
-    if (!startTime || !endTime) continue;
-    byDay.set(day, { start: timeToMinutes(startTime), end: timeToMinutes(endTime) });
-  }
-  for (const def of defaultHours) {
-    const d = typeof def.day === "number" ? def.day : parseInt(def.day, 10);
-    if (d >= 1 && d <= 7 && !byDay.has(d)) {
-      byDay.set(d, { start: timeToMinutes(def.startTime), end: timeToMinutes(def.endTime) });
+  if (openingHoursList.length === 0) {
+    for (const def of defaultHours) {
+      const d = typeof def.day === "number" ? def.day : parseInt(def.day, 10);
+      if (d >= 1 && d <= 7) {
+        byDay.set(d, { start: timeToMinutes(def.startTime), end: timeToMinutes(def.endTime) });
+      }
+    }
+  } else {
+    for (const oh of openingHoursList) {
+      const day = typeof oh.day === "number" ? oh.day : parseInt(oh.day, 10);
+      if (Number.isNaN(day) || day < 1 || day > 7) continue;
+      const startTime = oh.startTime || oh.start_time;
+      const endTime = oh.endTime || oh.end_time;
+      if (!startTime || !endTime) continue;
+      byDay.set(day, { start: timeToMinutes(startTime), end: timeToMinutes(endTime) });
+    }
+    for (const def of defaultHours) {
+      const d = typeof def.day === "number" ? def.day : parseInt(def.day, 10);
+      if (d >= 1 && d <= 7 && !byDay.has(d)) {
+        byDay.set(d, { start: timeToMinutes(def.startTime), end: timeToMinutes(def.endTime) });
+      }
     }
   }
 
-  const open = byDay.get(dayOfWeek);
+  // Guarantee requested day has hours (fallback to 8–19)
+  let open = byDay.get(dayOfWeek);
   if (!open || open.start >= open.end) {
-    console.warn("[providerAvailability] getAvailableSlotsForDate no opening hours for day", dayOfWeek, "providerId:", providerId, "byDayKeys:", [...byDay.keys()]);
-    return [];
+    open = { start: timeToMinutes("08:00"), end: timeToMinutes("19:00") };
+    byDay.set(dayOfWeek, open);
+    console.log("[providerAvailability] getAvailableSlotsForDate using default 08:00–19:00 for day", dayOfWeek, "providerId:", providerId);
   }
 
   const providerIdKeys = [profile.id, profile.user_id].filter(Boolean);
@@ -328,4 +340,39 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
   }
 
   return slots;
+}
+
+/**
+ * Jours (YYYY-MM-DD) où le prestataire a au moins un créneau libre dans la plage [from, to].
+ * Utilisé par Smart Booking pour n’afficher que les jours disponibles.
+ * @param {string} providerId - id ou user_id du prestataire
+ * @param {string} fromStr - YYYY-MM-DD
+ * @param {string} toStr - YYYY-MM-DD
+ * @param {number} durationMinutes
+ * @returns {Promise<string[]>}
+ */
+export async function getAvailableDaysInRange(providerId, fromStr, toStr, durationMinutes) {
+  const duration = Math.max(15, Number(durationMinutes) || 60);
+  const from = new Date(fromStr + "T12:00:00.000Z");
+  const to = new Date(toStr + "T12:00:00.000Z");
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+    return [];
+  }
+
+  const out = [];
+  const current = new Date(from);
+  current.setUTCHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setUTCHours(23, 59, 59, 999);
+
+  while (current <= end) {
+    const dateStr = current.toISOString().slice(0, 10);
+    const slots = await getAvailableSlotsForDate(providerId, dateStr, duration);
+    if (slots.length > 0) {
+      out.push(dateStr);
+    }
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  return out;
 }

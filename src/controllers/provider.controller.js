@@ -13,7 +13,7 @@ import {
   getProviderPopularServices,
   getProviderProfileIdForUser,
 } from "../services/provider.service.js";
-import { getAvailableSlotsForDate } from "../services/providerAvailability.service.js";
+import { getAvailableSlotsForDate, getAvailableDaysInRange } from "../services/providerAvailability.service.js";
 import { invalidateProviderCache } from "../middlewares/cache.middleware.js";
 
 export async function listProviders(req, res) {
@@ -81,6 +81,34 @@ export async function getAvailableSlotsController(req, res) {
   } catch (err) {
     console.error("[PROVIDERS] getAvailableSlots error:", err);
     return res.status(500).json({ error: "Could not fetch available slots" });
+  }
+}
+
+/**
+ * GET /api/v1/providers/:id/available-days?from=YYYY-MM-DD&to=YYYY-MM-DD&duration_minutes=60
+ * Jours où le prestataire a au moins un créneau (pour Smart Booking "cette semaine").
+ */
+export async function getAvailableDaysController(req, res) {
+  try {
+    const { id: providerId } = req.params;
+    const from = req.query.from;
+    const to = req.query.to;
+    const durationMinutes = req.query.duration_minutes ?? req.query.durationMinutes ?? 60;
+
+    if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return res.status(400).json({ error: "Query 'from' and 'to' (YYYY-MM-DD) are required" });
+    }
+
+    const days = await getAvailableDaysInRange(
+      providerId,
+      from,
+      to,
+      Number(durationMinutes) || 60
+    );
+    return res.json({ data: days });
+  } catch (err) {
+    console.error("[PROVIDERS] getAvailableDays error:", err);
+    return res.status(500).json({ error: "Could not fetch available days" });
   }
 }
 
