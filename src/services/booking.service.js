@@ -206,9 +206,9 @@ export async function cleanupExpiredBookings() {
 
   const { data: pendingBookings, error: fetchError } = await supabase
     .from("bookings")
-    .select("id, payment_intent_id, payment_status, acceptance_deadline, created_at, customer_id")
+    .select("id, payment_intent_id, deposit_payment_intent_id, payment_status, acceptance_deadline, created_at, customer_id")
     .eq("status", "pending")
-    .in("payment_status", ["preauthorized", "paid"]);
+    .in("payment_status", ["preauthorized", "paid", "pending"]);
 
   if (fetchError) throw fetchError;
   if (!pendingBookings || pendingBookings.length === 0) {
@@ -227,9 +227,12 @@ export async function cleanupExpiredBookings() {
   }
 
   for (const booking of expiredBookings) {
-    if (booking.payment_intent_id && (booking.payment_status === "preauthorized" || booking.payment_status === "paid")) {
+    const intentToRefund = booking.payment_intent_id || booking.deposit_payment_intent_id;
+    const shouldRefund = (booking.payment_status === "preauthorized" || booking.payment_status === "paid") && booking.payment_intent_id
+      || (booking.payment_status === "pending" && booking.deposit_payment_intent_id);
+    if (intentToRefund && shouldRefund) {
       try {
-        await refundPayment(booking.payment_intent_id);
+        await refundPayment(intentToRefund);
       } catch (err) {
         console.error(
           `[CLEANUP] Failed to refund booking ${booking.id}:`,
@@ -242,7 +245,7 @@ export async function cleanupExpiredBookings() {
       .from("bookings")
       .update({
         status: "declined",
-        payment_status: booking.payment_intent_id ? "refunded" : "pending",
+        payment_status: intentToRefund && shouldRefund ? "refunded" : "pending",
       })
       .eq("id", booking.id);
 
