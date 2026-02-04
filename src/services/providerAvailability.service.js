@@ -234,14 +234,13 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
   }
 
   if (!profile) {
-    console.warn("[providerAvailability] getAvailableSlotsForDate no profile for providerId:", providerId, "date:", dateStr);
+    console.warn("[providerAvailability] getAvailableSlotsForDate no profile for providerId:", providerId, "date:", dateStr, "profileError:", profileError?.message);
     return [];
   }
+  console.log("[providerAvailability] getAvailableSlotsForDate profile found providerId:", providerId, "profile.id:", profile?.id, "profile.user_id:", profile?.user_id);
 
   let openingHoursList = parseOpeningHours(profile?.opening_hours);
-  if (openingHoursList.length === 0) {
-    openingHoursList = defaultOpeningHours();
-  }
+  const defaultHours = defaultOpeningHours();
 
   const dayOfWeek = getDayOfWeekFromDateStr(dateStr);
   if (dayOfWeek == null) {
@@ -258,10 +257,16 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
     if (!startTime || !endTime) continue;
     byDay.set(day, { start: timeToMinutes(startTime), end: timeToMinutes(endTime) });
   }
+  for (const def of defaultHours) {
+    const d = typeof def.day === "number" ? def.day : parseInt(def.day, 10);
+    if (d >= 1 && d <= 7 && !byDay.has(d)) {
+      byDay.set(d, { start: timeToMinutes(def.startTime), end: timeToMinutes(def.endTime) });
+    }
+  }
 
   const open = byDay.get(dayOfWeek);
   if (!open || open.start >= open.end) {
-    console.warn("[providerAvailability] getAvailableSlotsForDate no opening hours for day", dayOfWeek, "providerId:", providerId);
+    console.warn("[providerAvailability] getAvailableSlotsForDate no opening hours for day", dayOfWeek, "providerId:", providerId, "byDayKeys:", [...byDay.keys()]);
     return [];
   }
 
@@ -317,7 +322,9 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
   }
 
   if (slots.length === 0) {
-    console.warn("[providerAvailability] getAvailableSlotsForDate zero slots providerId:", providerId, "date:", dateStr, "dayOfWeek:", dayOfWeek, "open:", open.start, "-", open.end, "bookings:", (bookings || []).length);
+    console.warn("[providerAvailability] getAvailableSlotsForDate zero slots providerId:", providerId, "date:", dateStr, "dayOfWeek:", dayOfWeek, "open:", open.start, "-", open.end, "bookings:", (bookings || []).length, "segments:", segments.length);
+  } else {
+    console.log("[providerAvailability] getAvailableSlotsForDate returning", slots.length, "slots for providerId:", providerId, "date:", dateStr);
   }
 
   return slots;

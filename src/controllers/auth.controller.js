@@ -190,59 +190,69 @@ export async function register(req, res) {
     }
   }
 
-  // PROVIDER (profile)
+  // PROVIDER (profile) – utilise provider_profile du body si fourni (display_name, opening_hours, etc.)
   if (finalRole === "provider") {
+    const pp = req.body.provider_profile || {};
+    const base = {
+      user_id: authUser.id,
+      display_name: pp.display_name ?? authUser.email.split("@")[0],
+      bio: pp.bio ?? "",
+      base_city: pp.base_city ?? "",
+      postal_code: pp.postal_code ?? "",
+      lat: 0,
+      lng: 0,
+      has_mobile_service: pp.has_mobile_service ?? false,
+      min_price: Number(pp.min_price) || 0,
+      rating: 0,
+      review_count: 0,
+      services: Array.isArray(pp.services) ? pp.services : [],
+      team_size: 1,
+      years_of_experience: 0,
+      logo_url: null,
+      banner_url: null,
+    };
+    if (pp.company_name != null) base.company_name = pp.company_name;
+    if (pp.opening_hours != null && pp.opening_hours !== "") base.opening_hours = pp.opening_hours;
+
     const { error: provProfileErr } = await supabaseAdmin
       .from("provider_profiles")
-      .insert({
-        user_id: authUser.id,
-        display_name: authUser.email.split("@")[0],
-        bio: "",
-        base_city: "",
-        postal_code: "",
-        lat: 0,
-        lng: 0,
-        has_mobile_service: false,
-        min_price: 0,
-        rating: 0,
-        review_count: 0,
-        services: [],
-        team_size: 1,
-        years_of_experience: 0,
-        logo_url: null,
-        banner_url: null,
-      });
+      .insert(base);
 
     if (provProfileErr) {
       return res.status(500).json({ error: provProfileErr.message });
     }
   }
 
-  // PROVIDER_PASSIONATE (profile)
+  // PROVIDER_PASSIONATE (profile) – idem avec plafond annuel
   if (finalRole === "provider_passionate") {
+    const pp = req.body.provider_profile || {};
+    const base = {
+      user_id: authUser.id,
+      display_name: pp.display_name ?? authUser.email.split("@")[0],
+      bio: pp.bio ?? "",
+      base_city: pp.base_city ?? "",
+      postal_code: pp.postal_code ?? "",
+      lat: 0,
+      lng: 0,
+      has_mobile_service: pp.has_mobile_service ?? false,
+      min_price: Number(pp.min_price) || 0,
+      rating: 0,
+      review_count: 0,
+      services: Array.isArray(pp.services) ? pp.services : [],
+      team_size: 1,
+      years_of_experience: 0,
+      logo_url: null,
+      banner_url: null,
+      annual_revenue_limit: 2000.00,
+      annual_revenue_current: 0.00,
+      annual_revenue_year: new Date().getFullYear(),
+    };
+    if (pp.company_name != null) base.company_name = pp.company_name;
+    if (pp.opening_hours != null && pp.opening_hours !== "") base.opening_hours = pp.opening_hours;
+
     const { error: provProfileErr } = await supabaseAdmin
       .from("provider_profiles")
-      .insert({
-        user_id: authUser.id,
-        display_name: authUser.email.split("@")[0],
-        bio: "",
-        base_city: "",
-        postal_code: "",
-        lat: 0,
-        lng: 0,
-        has_mobile_service: false,
-        min_price: 0,
-        rating: 0,
-        review_count: 0,
-        services: [],
-        team_size: 1,
-        years_of_experience: 0,
-        logo_url: null,
-        banner_url: null,
-        annual_revenue_limit: 2000.00, // ✅ Plafond à 2000€
-        annual_revenue_current: 0.00,
-        annual_revenue_year: new Date().getFullYear(),
-      });
+      .insert(base);
 
     if (provProfileErr) {
       return res.status(500).json({ error: provProfileErr.message });
