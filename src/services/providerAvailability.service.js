@@ -201,8 +201,8 @@ export async function getProviderIdsWithAvailabilityThisWeek(providerRows) {
   return availableIds;
 }
 
-/** Pas des créneaux proposés (minutes) */
-const SLOT_STEP_MINUTES = 30;
+/** Pas des créneaux proposés (minutes) — 1h pour éviter accumulation sur la même heure */
+const SLOT_STEP_MINUTES = 60;
 
 /**
  * Créneaux disponibles pour un prestataire à une date donnée, basés sur :

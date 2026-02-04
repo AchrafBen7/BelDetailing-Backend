@@ -481,6 +481,35 @@ export async function createBooking(req, res) {
     const paymentMethod = payment_method || "card";
     const serviceNames = services.map(service => service.name).join(", ");
 
+    // ✅ Vérifier qu'aucune réservation n'existe déjà pour ce détailleur à cette date/heure (un créneau = une résa)
+    const providerIdsToCheck = [provider_id, provider.id, provider.user_id].filter(Boolean);
+    const { data: existingSameSlot, error: overlapError } = await supabase
+      .from("bookings")
+      .select("id, start_time, end_time")
+      .in("provider_id", [...new Set(providerIdsToCheck)])
+      .eq("date", date)
+      .in("status", ["pending", "confirmed", "started", "in_progress", "ready_soon"]);
+
+    if (!overlapError && existingSameSlot && existingSameSlot.length > 0) {
+      const toMin = (t) => {
+        if (!t || typeof t !== "string") return 0;
+        const [h, m] = t.split(":").map(Number);
+        return (h || 0) * 60 + (m || 0);
+      };
+      const newStart = toMin(start_time);
+      const newEnd = toMin(end_time);
+      const overlaps = existingSameSlot.some((b) => {
+        const s = toMin(b.start_time);
+        const e = toMin(b.end_time);
+        return newStart < e && newEnd > s;
+      });
+      if (overlaps) {
+        return res.status(409).json({
+          error: "This time slot is no longer available for this provider. Please choose another date or time.",
+        });
+      }
+    }
+
     // 3) Create booking (WITHOUT payment yet)
     console.log("🔵 [BOOKINGS] createBooking - Creating booking record...");
     // 1) Insert booking
