@@ -1,6 +1,7 @@
 // src/services/booking.service.js
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { refundPayment } from "./payment.service.js";
+import { sendNotificationToUser } from "./onesignal.service.js";
 
 export async function getBookings({ userId, scope, status }) {
   console.log("🔍 [BOOKINGS SERVICE] getBookings called with:", { userId, scope, status });
@@ -195,21 +196,33 @@ export async function updateBookingStatus(id, newStatus) {
 }
 
 /**
- * Auto-decline pending bookings not accepted within 24h.
- * Refunds preauthorized payments and sets status to "declined".
+ * Auto-decline pending bookings not accepted before their acceptance_deadline.
+ * Règles NIOS: >6h → 24h pour accepter; 3h–6h → 2h; 1h–3h → 30 min.
+ * Refunds preauthorized payments, sets status to "declined", notifies customer.
  */
 export async function cleanupExpiredBookings() {
-  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const now = new Date();
+  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 
-  const { data: expiredBookings, error: fetchError } = await supabase
+  const { data: pendingBookings, error: fetchError } = await supabase
     .from("bookings")
-    .select("id, payment_intent_id, payment_status")
+    .select("id, payment_intent_id, payment_status, acceptance_deadline, created_at, customer_id")
     .eq("status", "pending")
-    .in("payment_status", ["preauthorized", "paid"])
-    .lt("created_at", twentyFourHoursAgo);
+    .in("payment_status", ["preauthorized", "paid"]);
 
   if (fetchError) throw fetchError;
-  if (!expiredBookings || expiredBookings.length === 0) {
+  if (!pendingBookings || pendingBookings.length === 0) {
+    return 0;
+  }
+
+  const expiredBookings = pendingBookings.filter((b) => {
+    if (b.acceptance_deadline) {
+      return new Date(b.acceptance_deadline) < now;
+    }
+    return new Date(b.created_at) < twentyFourHoursAgo;
+  });
+
+  if (expiredBookings.length === 0) {
     return 0;
   }
 
@@ -232,6 +245,18 @@ export async function cleanupExpiredBookings() {
         payment_status: booking.payment_intent_id ? "refunded" : "pending",
       })
       .eq("id", booking.id);
+
+    if (booking.customer_id) {
+      try {
+        await sendNotificationToUser({
+          userId: booking.customer_id,
+          title: "Réservation annulée",
+          message: "Le détaileur n'a pas pu accepter votre demande à temps. Votre préautorisation a été annulée et aucun prélèvement ne sera effectué.",
+        });
+      } catch (notifErr) {
+        console.error(`[CLEANUP] Failed to notify customer ${booking.customer_id}:`, notifErr);
+      }
+    }
   }
 
   return expiredBookings.length;

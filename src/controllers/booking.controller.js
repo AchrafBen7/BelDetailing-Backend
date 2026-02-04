@@ -60,6 +60,47 @@ function buildBookingDateTime(dateValue, timeValue) {
 }
 
 /**
+ * Règles d'acceptation NIOS (délai min, dernière minute, délai pour accepter).
+ * - < 1h avant début → interdit
+ * - 1h–3h → autorisé mais "express", délai acceptation 30 min
+ * - 3h–6h → délai acceptation 2h
+ * - > 6h → délai acceptation 24h
+ */
+function getAcceptanceRules(dateStr, startTimeStr) {
+  const serviceStart = buildBookingDateTime(dateStr, startTimeStr);
+  if (!serviceStart) {
+    return { allowed: false, errorMessage: "Date ou heure de début invalide." };
+  }
+  const now = new Date();
+  const hoursFromNow = (serviceStart.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+  if (hoursFromNow < 1) {
+    return {
+      allowed: false,
+      errorMessage: "Les réservations doivent être faites au minimum 1 heure à l'avance.",
+    };
+  }
+
+  let acceptanceDeadline;
+  let isExpressRequest = false;
+  if (hoursFromNow >= 6) {
+    acceptanceDeadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  } else if (hoursFromNow >= 3) {
+    acceptanceDeadline = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+  } else {
+    // 1h–3h: demande express, 30 min pour accepter
+    acceptanceDeadline = new Date(now.getTime() + 30 * 60 * 1000);
+    isExpressRequest = true;
+  }
+
+  return {
+    allowed: true,
+    acceptanceDeadline: acceptanceDeadline.toISOString(),
+    isExpressRequest,
+  };
+}
+
+/**
  * Calcule le montant remboursable selon la politique NIOS:
  * - Plus de 48h: 100% (tout remboursé)
  * - 24h-48h: Service + Transport - Frais NIOS (~5%)
@@ -343,6 +384,13 @@ export async function createBooking(req, res) {
       }
     }
 
+    // ✅ Règles NIOS: min 1h avant début, délai d'acceptation selon créneau (24h / 2h / 30 min)
+    const acceptanceRules = getAcceptanceRules(date, start_time);
+    if (!acceptanceRules.allowed) {
+      return res.status(400).json({ error: acceptanceRules.errorMessage });
+    }
+    const { acceptanceDeadline, isExpressRequest } = acceptanceRules;
+
     // ✅ Vérifier le plafond annuel pour les provider_passionate
     const { data: providerUser, error: providerUserError } = await supabase
       .from("users")
@@ -556,6 +604,9 @@ export async function createBooking(req, res) {
         is_first_booking: isFirstBooking,
         welcoming_offer_applied: welcomingOfferApplied,
         welcoming_offer_amount: welcomingOfferAmount,
+        // Règles d'acceptation (délai détaileur, demande express)
+        acceptance_deadline: acceptanceDeadline,
+        is_express_request: isExpressRequest,
       })
       .select(`
         id,
