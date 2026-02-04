@@ -12,9 +12,9 @@ export async function getProfile(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { data, error } = await supabase
-  .from("users")
-  .select(`
+  const { data: rows, error } = await supabase
+    .from("users")
+    .select(`
     id,
     email,
     phone,
@@ -92,18 +92,26 @@ export async function getProfile(req, res) {
       opening_hours,
       available_today
     )
-    // curated_badge : ajouter après migration run_migration_provider_curated_badge.sql sur Supabase
   `)
-  .eq("id", userId)
-  .single();
-
+    .eq("id", userId)
+    .limit(1);
 
   if (error) {
+    console.error("[PROFILE] getProfile select error:", error.message, error.code);
     return res.status(500).json({ error: error.message });
   }
 
-try {
-  const userDto = mapUserRowToDto(data);
+  const data = Array.isArray(rows) ? rows[0] : rows;
+  if (!data) {
+    return res.status(404).json({ error: "Profile not found" });
+  }
+
+  if (Array.isArray(rows) && rows.length > 1) {
+    console.warn("[PROFILE] Duplicate user rows for id:", userId, "- using first");
+  }
+
+  try {
+    const userDto = mapUserRowToDto(data);
 
   // Enrichir le profil Company avec les métriques calculées (fiabilité / historique)
   if (data.role === "company" && userDto.companyProfile) {
