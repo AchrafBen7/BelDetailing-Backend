@@ -10,6 +10,7 @@ import {
   createPaymentIntent,
   refundPayment,
   capturePayment,
+  getChargeIdFromPaymentIntent,
 } from "../services/payment.service.js";
 import { sendNotificationToUser, sendNotificationWithDeepLink } from "../services/onesignal.service.js";
 import { sendPeppolInvoice } from "../services/peppol.service.js";
@@ -17,8 +18,8 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { BOOKING_COMMISSION_RATE } from "../config/commission.js";
 
 const COMMISSION_RATE = BOOKING_COMMISSION_RATE; // 10% pour les bookings
-const NIOS_MANAGEMENT_FEE_RATE = 0.05; // 5% frais de gestion NIOS
-const NIOS_MANAGEMENT_FEE_MIN = 10.0; // Minimum 10€ de frais de gestion
+const NIOS_MANAGEMENT_FEE_RATE = 0.05; // 5% frais de gestion NIOS (annulation)
+const NIOS_MANAGEMENT_FEE_MIN = 10.0; // Minimum 10€ de frais de gestion (annulation)
 let providerProfilesSupportsIdColumn;
 
 function degreesToRadians(value) {
@@ -109,15 +110,24 @@ function getAcceptanceRules(dateStr, startTimeStr) {
 }
 
 /**
- * Calcule le montant remboursable selon la politique NIOS:
- * - Plus de 48h: 100% (tout remboursé)
- * - 24h-48h: Service + Transport - Frais NIOS (~5%)
- * - Moins de 24h: Service seulement (Transport + Frais NIOS retenus)
+ * Calcule le montant remboursable selon la politique NIOS.
+ * Frais NIOS = 5% du prix du SERVICE uniquement (pas du total), minimum 10€.
+ *
+ * - Plus de 48h: 100% remboursé.
+ * - 24h-48h: Remboursement = total - frais NIOS (5% du service, min 10€). Transport remboursé.
+ * - Moins de 24h: Transport gardé par le détaileur. Remboursement = service - frais NIOS (5% du service, min 10€).
+ *   Ex: 300€ service + 20€ transport → frais NIOS = 15€ (5% de 300), remboursé = 285€.
  */
 function calculateRefundAmount(booking, hoursUntilBooking) {
   const totalPrice = booking.price || 0;
   const transportFee = booking.transport_fee || 0;
   const servicePrice = totalPrice - transportFee;
+
+  // Frais NIOS = 5% du prix du service uniquement, minimum 10€
+  const niosFeeFromService = Math.max(
+    servicePrice * NIOS_MANAGEMENT_FEE_RATE,
+    NIOS_MANAGEMENT_FEE_MIN
+  );
 
   // 🟢 Plus de 48h avant: remboursement intégral (100%)
   if (hoursUntilBooking >= 48) {
@@ -131,38 +141,29 @@ function calculateRefundAmount(booking, hoursUntilBooking) {
     };
   }
 
-  // 🟡 Entre 24h et 48h: Service + Transport - Frais NIOS (~5%)
+  // 🟡 Entre 24h et 48h: Service + Transport - Frais NIOS (5% du service)
   if (hoursUntilBooking >= 24) {
-    // Frais NIOS = 5% du total, minimum 10€
-    const niosFee = Math.max(
-      totalPrice * NIOS_MANAGEMENT_FEE_RATE,
-      NIOS_MANAGEMENT_FEE_MIN
-    );
-    const refundAmount = totalPrice - niosFee;
+    const refundAmount = totalPrice - niosFeeFromService;
 
     return {
-      refundAmount: Math.max(0, refundAmount), // S'assurer que ce n'est pas négatif
-      retainedAmount: niosFee,
+      refundAmount: Math.max(0, refundAmount),
+      retainedAmount: niosFeeFromService,
       retainedItems: {
-        niosFee: niosFee,
-        transportFee: 0, // Transport remboursé
+        niosFee: niosFeeFromService,
+        transportFee: 0,
       },
     };
   }
 
-  // 🔴 Moins de 24h: Service seulement (Transport + Frais NIOS retenus)
-  const niosFee = Math.max(
-    totalPrice * NIOS_MANAGEMENT_FEE_RATE,
-    NIOS_MANAGEMENT_FEE_MIN
-  );
-  const refundAmount = servicePrice; // Seulement le service
+  // 🔴 Moins de 24h: Transport gardé par le détaileur. Remboursement = service - 5% du service.
+  const refundAmount = servicePrice - niosFeeFromService;
 
   return {
     refundAmount: Math.max(0, refundAmount),
-    retainedAmount: transportFee + niosFee,
+    retainedAmount: transportFee + niosFeeFromService,
     retainedItems: {
-      niosFee: niosFee,
-      transportFee: transportFee,
+      niosFee: niosFeeFromService,
+      transportFee: transportFee, // gardé par le détaileur
     },
   };
 }
@@ -744,13 +745,15 @@ export async function createBooking(req, res) {
         commissionAmount: commissionOnTotal, // ✅ 10% du prix total (pas 10% des 20% acompte)
       });
     } else {
-      console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent:", totalPrice);
+      // Carte : capture sur la plateforme, transfert au détaileur 3h après l'heure de résa (cron)
+      console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent (delayed transfer):", totalPrice);
       intent = await createPaymentIntent({
         amount: totalPrice,
         currency,
         user: customer,
-        providerStripeAccountId, // ✅ Passer le Stripe Connect account si disponible
-        commissionRate, // ✅ Commission NIOS
+        providerStripeAccountId,
+        commissionRate: COMMISSION_RATE,
+        delayTransferToProvider: true, // argent détaileur gelé jusqu'à 3h après date+heure résa
       });
     }
 
@@ -1608,10 +1611,18 @@ export async function confirmBooking(req, res) {
       });
     }
 
-    // 🔥 Capture payment on Stripe
+    // 🔥 Capture sur la plateforme (commission NIOS gardée). Transfert au détaileur 3h après l'heure de résa (cron).
     const ok = await capturePayment(booking.payment_intent_id);
     if (!ok) {
       return res.status(500).json({ error: "Could not capture payment" });
+    }
+
+    const chargeId = await getChargeIdFromPaymentIntent(booking.payment_intent_id);
+    if (chargeId) {
+      await supabase
+        .from("bookings")
+        .update({ stripe_charge_id: chargeId })
+        .eq("id", bookingId);
     }
 
     // ✅ VÉRIFIER ET MARQUER L'OFFRE DE BIENVENUE COMME UTILISÉE

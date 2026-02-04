@@ -13,6 +13,7 @@ import { captureScheduledPayments } from "./cron/captureScheduledPayments.js";
 import { retryFailedTransfers } from "./cron/retryFailedTransfers.js";
 import { captureDayOnePaymentsCron } from "./cron/captureDayOnePayments.js";
 import { runBookingStatusTransitions } from "./cron/bookingStatusTransitions.js";
+import { transferBookingToProviderCron } from "./cron/transferBookingToProvider.js";
 console.log("✅ [APP] Cron jobs loaded");
 
 console.log("🔄 [APP] Loading config and observability...");
@@ -250,6 +251,18 @@ cron.schedule("*/5 * * * *", async () => {
     await runBookingStatusTransitions();
   } catch (err) {
     console.error("❌ CRON bookingStatusTransitions error:", err);
+  }
+});
+
+// Transfert au détaileur 3h après l'heure de résa (argent gelé jusqu'à ce moment)
+cron.schedule("*/15 * * * *", async () => {
+  try {
+    const result = await transferBookingToProviderCron();
+    if (result.transferred > 0 || result.failed > 0) {
+      console.log(`✅ CRON transferBookingToProvider: ${result.transferred} transferred, ${result.failed} failed, ${result.skipped} skipped`);
+    }
+  } catch (err) {
+    console.error("❌ CRON transferBookingToProvider error:", err);
   }
 });
 

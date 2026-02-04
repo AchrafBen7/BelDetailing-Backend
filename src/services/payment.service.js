@@ -9,9 +9,9 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 /* -----------------------------------------------------
    CREATE PAYMENT INTENT — Préautorisation standard
    
-   ✅ NOUVEAU : Support pour Stripe Connect avec application_fee_amount
-   - Si providerStripeAccountId est fourni → utiliser transfer_data + application_fee_amount
-   - Commission NIOS = 10% par défaut (COMMISSION_RATE)
+   - Si delayTransferToProvider = true (bookings) : capture sur la plateforme, pas de transfer_data.
+     Le transfert au détaileur sera fait 3h après l'heure de résa (cron). Commission NIOS gardée sur la plateforme.
+   - Sinon : transfer_data + application_fee_amount (transfert immédiat au détaileur à la capture).
 ----------------------------------------------------- */
 export async function createPaymentIntent({
   amount,
@@ -19,17 +19,19 @@ export async function createPaymentIntent({
   user,
   providerStripeAccountId = null,
   commissionRate = 0.10,
-  commissionAmount = null, // ✅ Optionnel : commission en euros (ex. 10% du prix total pour cash, pas 10% de l'acompte)
+  commissionAmount = null, // Optionnel : commission en euros (ex. cash 10% du total)
+  delayTransferToProvider = false, // true = capture plateforme, transfert détaileur plus tard (3h après résa)
 }) {
   const customerId = await getOrCreateStripeCustomer(user);
 
   const amountInCents = Math.round(amount * 100);
   let applicationFeeAmount = null;
-  if (providerStripeAccountId) {
+  const useImmediateTransfer = providerStripeAccountId && !delayTransferToProvider;
+
+  if (useImmediateTransfer) {
     if (commissionAmount != null && commissionAmount > 0) {
-      // Commission sur le montant total (ex. paiement cash : 10% du total, pas de l'acompte)
       const feeCents = Math.round(commissionAmount * 100);
-      applicationFeeAmount = Math.min(feeCents, amountInCents); // ne pas dépasser le montant prélevé
+      applicationFeeAmount = Math.min(feeCents, amountInCents);
     } else {
       applicationFeeAmount = Math.round(amountInCents * commissionRate);
     }
@@ -40,7 +42,6 @@ export async function createPaymentIntent({
     currency,
     customer: customerId,
     capture_method: "manual",
-    // ✅ Utiliser automatic_payment_methods pour permettre Apple Pay natif
     automatic_payment_methods: {
       enabled: true,
     },
@@ -51,19 +52,23 @@ export async function createPaymentIntent({
     },
   };
 
-  // ✅ STRIPE CONNECT : Si le provider a un compte connecté, utiliser transfer_data + application_fee_amount
-  if (providerStripeAccountId && applicationFeeAmount > 0) {
+  // Transfert immédiat (ancien comportement) : transfer_data + application_fee
+  if (useImmediateTransfer && applicationFeeAmount > 0) {
     paymentIntentPayload.transfer_data = {
-      destination: providerStripeAccountId, // ✅ Envoyer l'argent au compte connecté du provider
+      destination: providerStripeAccountId,
     };
-    paymentIntentPayload.application_fee_amount = applicationFeeAmount; // ✅ Commission NIOS
-    
-    // Ajouter les métadonnées pour traçabilité
+    paymentIntentPayload.application_fee_amount = applicationFeeAmount;
     paymentIntentPayload.metadata.providerStripeAccountId = providerStripeAccountId;
     paymentIntentPayload.metadata.commissionAmount = applicationFeeAmount.toString();
     paymentIntentPayload.metadata.commissionRate = commissionRate.toString();
-    
-    console.log(`✅ [PAYMENT] Using Stripe Connect: destination=${providerStripeAccountId}, commission=${applicationFeeAmount} cents (${commissionRate * 100}%)`);
+    console.log(`✅ [PAYMENT] Using Stripe Connect (immediate): destination=${providerStripeAccountId}, commission=${applicationFeeAmount} cents`);
+  }
+
+  // delayTransferToProvider : pas de transfer_data → capture sur la plateforme, transfert 3h après résa (cron)
+  if (providerStripeAccountId && delayTransferToProvider) {
+    paymentIntentPayload.metadata.providerStripeAccountId = providerStripeAccountId;
+    paymentIntentPayload.metadata.delayTransferToProvider = "true";
+    console.log(`✅ [PAYMENT] Booking: capture on platform, transfer to provider 3h after booking time`);
   }
 
   const stripeIntent = await stripe.paymentIntents.create(paymentIntentPayload);
@@ -127,6 +132,20 @@ export async function capturePayment(paymentIntentId) {
   } catch (err) {
     console.error("[STRIPE ERROR - capturePayment]", err);
     return false;
+  }
+}
+
+/* -----------------------------------------------------
+   GET CHARGE ID — Pour transfert différé (bookings: transfert 3h après résa)
+----------------------------------------------------- */
+export async function getChargeIdFromPaymentIntent(paymentIntentId) {
+  try {
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const chargeId = pi.latest_charge;
+    return typeof chargeId === "string" ? chargeId : null;
+  } catch (err) {
+    console.error("[STRIPE ERROR - getChargeIdFromPaymentIntent]", err);
+    return null;
   }
 }
 
