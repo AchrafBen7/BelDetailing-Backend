@@ -12,7 +12,7 @@ import {
   getProviderServicesController,
   getProviderReviewsController,
   getProviderStatsController,
-  getMyProviderStatsSeriesController,
+  getProviderStatsSeriesController,
   getProviderPopularServicesController,
   getMyProviderReviews,
   getMyProviderServicesController,
@@ -50,7 +50,7 @@ router.delete("/me/blocked-slots/:id", requireAuth, deleteBlockedSlotController)
 // ⭐ Routes spécifiques (doivent être avant les routes paramétrées)
 router.get("/me/services", requireAuth, getMyProviderServicesController);
 router.get("/me/reviews", requireAuth, getMyProviderReviews);
-router.get("/me/stats/series", requireAuth, getMyProviderStatsSeriesController);
+router.get("/me/stats/series", requireAuth, getProviderStatsSeriesController);
 router.get("/me/stats/popular-services", requireAuth, getProviderPopularServicesController);
 router.get("/me/stats", requireAuth, getMyProviderStatsController);
 router.patch("/me", requireAuth, updateMyProviderProfile);
