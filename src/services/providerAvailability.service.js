@@ -6,12 +6,12 @@ import { listBlockedSlots } from "./blockedSlots.service.js";
 const MIN_FREE_SLOT_MINUTES = 30;
 
 /**
- * Heures par défaut quand le prestataire n'a pas défini opening_hours : Lun-Sam 9h-18h.
+ * Heures par défaut quand le prestataire n'a pas défini opening_hours : Lun-Dim 9h-18h.
  * @returns {Array<{ day: number, startTime: string, endTime: string }>}
  */
 function defaultOpeningHours() {
   const result = [];
-  for (let day = 1; day <= 6; day++) {
+  for (let day = 1; day <= 7; day++) {
     result.push({ day, startTime: "09:00", endTime: "18:00" });
   }
   return result;
@@ -53,6 +53,14 @@ function timeToMinutes(timeStr) {
 function getDayOfWeek(date) {
   const d = date.getDay();
   return d === 0 ? 7 : d;
+}
+
+/** Day of week 1-7 from calendar date string YYYY-MM-DD (timezone-safe: UTC noon so jour choisi par le client est respecté) */
+function getDayOfWeekFromDateStr(dateStr) {
+  const date = new Date(dateStr + "T12:00:00.000Z");
+  if (Number.isNaN(date.getTime())) return null;
+  const utcDay = date.getUTCDay();
+  return utcDay === 0 ? 7 : utcDay;
 }
 
 /** Minutes since midnight → "HH:mm" */
@@ -151,6 +159,7 @@ export async function getProviderIdsWithAvailabilityThisWeek(providerRows) {
     const d = new Date(now);
     d.setDate(d.getDate() + i);
     d.setHours(0, 0, 0, 0);
+    const dateStr = d.toISOString().slice(0, 10);
     weekDays.push({ date: d, dayOfWeek: getDayOfWeek(d) });
   }
 
@@ -230,9 +239,8 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
     openingHoursList = defaultOpeningHours();
   }
 
-  const date = new Date(dateStr + "T12:00:00");
-  if (Number.isNaN(date.getTime())) return [];
-  const dayOfWeek = getDayOfWeek(date);
+  const dayOfWeek = getDayOfWeekFromDateStr(dateStr);
+  if (dayOfWeek == null) return [];
 
   const byDay = new Map();
   for (const oh of openingHoursList) {
@@ -246,14 +254,14 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
   const open = byDay.get(dayOfWeek);
   if (!open || open.start >= open.end) return [];
 
-  const lookupKey = profile.user_id ?? profile.id;
-  if (!lookupKey) return [];
+  const providerIdKeys = [profile.id, profile.user_id].filter(Boolean);
+  if (providerIdKeys.length === 0) return [];
 
-  // 2) Réservations ce jour-là
+  // 2) Réservations ce jour-là (provider_id peut être id ou user_id selon le client)
   const { data: bookings, error: bookingsError } = await supabase
     .from("bookings")
     .select("start_time, end_time")
-    .eq("provider_id", lookupKey)
+    .in("provider_id", providerIdKeys)
     .eq("date", dateStr)
     .in("status", ["pending", "confirmed", "started", "in_progress", "ready_soon"]);
 
@@ -267,7 +275,8 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
     timeToMinutes(b.end_time || "23:59"),
   ]);
 
-  // 2b) Blocked slots ce jour-là (full-day ou plage horaire)
+  // 2b) Blocked slots ce jour-là (full-day ou plage horaire) – utiliser user_id (blocked_slots utilise user_id)
+  const lookupKey = profile.user_id ?? profile.id;
   try {
     const blocked = await listBlockedSlots(lookupKey, { from: dateStr, to: dateStr });
     for (const b of blocked) {
