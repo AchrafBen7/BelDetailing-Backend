@@ -5,110 +5,49 @@ import { getCompanyReliabilityMetrics } from "../services/companyProfileStats.se
 
 
 // ========= GET PROFILE =========
+// Requêtes séparées (sans jointure) pour éviter "Cannot coerce the result to a single JSON object"
+// quand des doublons existent dans les tables de profils.
 export async function getProfile(req, res) {
-  // req.user vient du middleware requireAuth (JWT Supabase)
   const userId = req.user?.id;
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { data: rows, error } = await supabase
+  const { data: userRow, error: userError } = await supabase
     .from("users")
     .select(`
-    id,
-    email,
-    phone,
-    role,
-    vat_number,
-    is_vat_valid,
-    referral_code,
-    referred_by,
-    customer_credits_eur,
-    welcoming_offer_used,
-    dismissed_first_booking_offer,
-    created_at,
-    updated_at,
-    customer_profiles (
-      first_name,
-      last_name,
-      default_address,
-      preferred_city_id,
-      vehicle_type,
-      service_at_home,
-      home_water,
-      home_electricity,
-      home_space,
-      avatar_url
-    ),
-    company_profiles (
-      legal_name,
-      company_type_id,
-      city,
-      postal_code,
-      contact_name,
-      logo_url,
-      commercial_name,
-      bce_number,
-      country,
-      registered_address,
-      legal_representative_name,
-      languages_spoken,
-      currency,
-      sector,
-      fleet_size,
-      main_address,
-      mission_zones,
-      place_types,
-      is_verified,
-      payment_success_rate,
-      late_cancellations_count,
-      open_disputes_count,
-      closed_disputes_count,
-      missions_posted_count,
-      missions_completed_count,
-      detailer_satisfaction_rate,
-      detailer_rating
-    ),
-    provider_profiles (
-      display_name,
-      bio,
-      base_city,
-      postal_code,
-      has_mobile_service,
-      min_price,
-      rating,
-      services,
-      company_name,
-      lat,
-      lng,
-      review_count,
-      team_size,
-      years_of_experience,
-      logo_url,
-      banner_url,
-      transport_price_per_km,
-      transport_enabled,
-      welcoming_offer_enabled,
-      opening_hours,
-      available_today
-    )
-  `)
+      id, email, phone, role, vat_number, is_vat_valid,
+      referral_code, referred_by, customer_credits_eur,
+      welcoming_offer_used, dismissed_first_booking_offer,
+      created_at, updated_at
+    `)
     .eq("id", userId)
-    .limit(1);
+    .maybeSingle();
 
-  if (error) {
-    console.error("[PROFILE] getProfile select error:", error.message, error.code);
-    return res.status(500).json({ error: error.message });
+  if (userError) {
+    console.error("[PROFILE] getProfile users error:", userError.message, userError.code);
+    return res.status(500).json({ error: userError.message });
   }
-
-  const data = Array.isArray(rows) ? rows[0] : rows;
-  if (!data) {
+  if (!userRow) {
     return res.status(404).json({ error: "Profile not found" });
   }
 
-  if (Array.isArray(rows) && rows.length > 1) {
-    console.warn("[PROFILE] Duplicate user rows for id:", userId, "- using first");
-  }
+  const [customerRes, companyRes, providerRes] = await Promise.all([
+    supabase.from("customer_profiles").select("first_name, last_name, default_address, preferred_city_id, vehicle_type, service_at_home, home_water, home_electricity, home_space, avatar_url").eq("user_id", userId).maybeSingle(),
+    supabase.from("company_profiles").select("legal_name, company_type_id, city, postal_code, contact_name, logo_url, commercial_name, bce_number, country, registered_address, legal_representative_name, languages_spoken, currency, sector, fleet_size, main_address, mission_zones, place_types, is_verified, payment_success_rate, late_cancellations_count, open_disputes_count, closed_disputes_count, missions_posted_count, missions_completed_count, detailer_satisfaction_rate, detailer_rating").eq("user_id", userId).maybeSingle(),
+    supabase.from("provider_profiles").select("display_name, bio, base_city, postal_code, has_mobile_service, min_price, rating, services, company_name, lat, lng, review_count, team_size, years_of_experience, logo_url, banner_url, transport_price_per_km, transport_enabled, welcoming_offer_enabled, opening_hours, available_today").eq("user_id", userId).maybeSingle(),
+  ]);
+
+  if (customerRes.error) console.warn("[PROFILE] customer_profiles error:", customerRes.error.message);
+  if (companyRes.error) console.warn("[PROFILE] company_profiles error:", companyRes.error.message);
+  if (providerRes.error) console.warn("[PROFILE] provider_profiles error:", providerRes.error.message);
+
+  const data = {
+    ...userRow,
+    customer_profiles: customerRes.data ? [customerRes.data] : [],
+    company_profiles: companyRes.data ? [companyRes.data] : [],
+    provider_profiles: providerRes.data ? [providerRes.data] : [],
+  };
 
   try {
     const userDto = mapUserRowToDto(data);
