@@ -160,28 +160,18 @@ let query = supabase
   .select("*");
 
 
-// 1) Filtre "nearby" (bounding box) si lat/lng/radius fournis
+// 1) Filtre "nearby" (bounding box) si lat/lng/radius fournis. Si lat/lng sans radius → pas de filtre (tri par distance plus bas).
 if (lat != null && lng != null && radius != null) {
-const radiusDeg = Number(radius) / 111; // 1° ≈ 111 km
-
-const minLat = Number(lat) - radiusDeg;
-
-const maxLat = Number(lat) + radiusDeg;
-
-const minLng = Number(lng) - radiusDeg;
-
-const maxLng = Number(lng) + radiusDeg;
-
-query = query
-
-  .gte("lat", minLat)
-
-  .lte("lat", maxLat)
-
-  .gte("lng", minLng)
-
-  .lte("lng", maxLng);
-
+  const radiusDeg = Number(radius) / 111; // 1° ≈ 111 km
+  const minLat = Number(lat) - radiusDeg;
+  const maxLat = Number(lat) + radiusDeg;
+  const minLng = Number(lng) - radiusDeg;
+  const maxLng = Number(lng) + radiusDeg;
+  query = query
+    .gte("lat", minLat)
+    .lte("lat", maxLat)
+    .gte("lng", minLng)
+    .lte("lng", maxLng);
 }
 
 // 2) Tri optionnel (recommandations)
@@ -189,9 +179,9 @@ if (sortForDb === "rating") {
   query = query.order("rating", { ascending: false });
 }
 
-if (limit) {
-query = query.limit(Number(limit));
-
+// Limite en DB seulement quand on ne trie pas par distance (sinon on trie puis slice après)
+if (limit && (lat == null || lng == null)) {
+  query = query.limit(Number(limit));
 }
 
 const { data, error } = await query;
@@ -233,44 +223,28 @@ if (effectiveSort === "rating,-priceMin") {
   });
 }
 
-// 3) Tri par distance approximative côté Node si lat/lng/radius fournis
-if (lat != null && lng != null && radius != null) {
-const lat0 = Number(lat);
+// 3) Tri par distance quand lat/lng fournis (avec ou sans radius : plus proches en premier)
+if (lat != null && lng != null) {
+  const lat0 = Number(lat);
+  const lng0 = Number(lng);
+  const rKm = radius != null ? Number(radius) : null; // null = pas de filtre rayon
 
-const lng0 = Number(lng);
+  const withDistance = mappedWithAvailability.map(p => {
+    const dLatKm = (p.lat - lat0) * 111;
+    const dLngKm = (p.lng - lng0) * 75;
+    const approxKm = Math.sqrt(dLatKm * dLatKm + dLngKm * dLngKm);
+    return { ...p, approxDistanceKm: approxKm };
+  });
 
-const rKm = Number(radius);
-
-
-// approx: 1° lat = 111 km, 1° lon ≈ 75 km en Belgique
-
-const withDistance = mappedWithAvailability.map(p => {
-
-  const dLatKm = (p.lat - lat0) * 111;
-
-  const dLngKm = (p.lng - lng0) * 75;
-
-  const approxKm = Math.sqrt(dLatKm * dLatKm + dLngKm * dLngKm);
-
-  return { ...p, approxDistanceKm: approxKm };
-
-});
-
-
-// Filtrer strictement <= radius
-
-const filtered = withDistance.filter(p => p.approxDistanceKm <= rKm);
-
-
-// Trier par distance croissante
-
-filtered.sort((a, b) => a.approxDistanceKm - b.approxDistanceKm);
-
-
-// Nettoyer la clé temporaire
-
-return filtered.map(({ approxDistanceKm, ...rest }) => rest);
-
+  let list = withDistance;
+  if (rKm != null) {
+    list = withDistance.filter(p => p.approxDistanceKm <= rKm);
+  }
+  list.sort((a, b) => a.approxDistanceKm - b.approxDistanceKm);
+  if (limit) {
+    list = list.slice(0, Number(limit));
+  }
+  return list.map(({ approxDistanceKm, ...rest }) => rest);
 }
 
 return mappedWithAvailability;

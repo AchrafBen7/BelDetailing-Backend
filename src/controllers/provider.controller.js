@@ -14,7 +14,38 @@ import {
   getProviderProfileIdForUser,
 } from "../services/provider.service.js";
 import { getAvailableSlotsForDate, getAvailableDaysInRange } from "../services/providerAvailability.service.js";
+import { getSmartBookingProviders } from "../services/smartBooking.service.js";
 import { invalidateProviderCache } from "../middlewares/cache.middleware.js";
+
+/**
+ * GET /api/v1/providers/smart-booking
+ * Recherche en élargissant le rayon (5→100 km) jusqu'à trouver des détaileurs dispo.
+ * Query: lat, lng, date (YYYY-MM-DD), preferred_hour (HH:mm ou "any"), service_at_provider (garage|mobile), duration_minutes
+ */
+export async function smartBookingProviders(req, res) {
+  try {
+    const lat = req.query.lat != null ? Number(req.query.lat) : null;
+    const lng = req.query.lng != null ? Number(req.query.lng) : null;
+    const date = req.query.date || null;
+    const preferredHour = req.query.preferred_hour ?? req.query.preferredHour ?? "any";
+    const serviceAtProvider = req.query.service_at_provider ?? req.query.serviceAtProvider ?? "garage";
+    const durationMinutes = req.query.duration_minutes ?? req.query.durationMinutes ?? 60;
+
+    const providers = await getSmartBookingProviders({
+      customerLat: lat,
+      customerLng: lng,
+      date,
+      preferredHour,
+      serviceAtProvider,
+      durationMinutes,
+    });
+
+    return res.json({ data: providers });
+  } catch (err) {
+    console.error("[PROVIDERS] smartBookingProviders error:", err);
+    return res.status(500).json({ error: "Could not fetch smart booking providers" });
+  }
+}
 
 export async function listProviders(req, res) {
   try {

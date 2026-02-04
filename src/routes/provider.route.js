@@ -3,6 +3,7 @@ import { requireAuth } from "../middlewares/auth.middleware.js";
 import { cacheMiddleware } from "../middlewares/cache.middleware.js";
 import {
   listProviders,
+  smartBookingProviders,
   getProvider,
   updateMyProviderProfile,
   getAvailableSlotsController,
@@ -92,6 +93,9 @@ router.get(
   }),
   getProvider
 );
+
+// ⭐ Smart Booking : recherche en élargissant le rayon (sans auth, public)
+router.get("/smart-booking", smartBookingProviders);
 
 // ⭐ Liste de tous les prestataires (doit être en dernier) - Cache 10 min
 router.get(

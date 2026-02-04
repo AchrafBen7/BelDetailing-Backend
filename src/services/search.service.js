@@ -149,27 +149,32 @@ export async function searchProviders(filters) {
   }
 
   let rows = data ?? [];
-  // Filtrage strict par distance si lat/lng/radius fournis
+  let withDistance = null;
   if (lat != null && lng != null && radius != null) {
     const lat0 = Number(lat);
     const lng0 = Number(lng);
     const rKm = Number(radius);
-    rows = rows.filter(row => {
-      const pLat = row.lat ?? 0;
-      const pLng = row.lng ?? 0;
-      const dLatKm = (pLat - lat0) * 111;
-      const dLngKm = (pLng - lng0) * 75;
-      const approxKm = Math.sqrt(dLatKm * dLatKm + dLngKm * dLngKm);
-      return approxKm <= rKm;
-    });
+    withDistance = rows
+      .map(row => {
+        const pLat = row.lat ?? 0;
+        const pLng = row.lng ?? 0;
+        const dLatKm = (pLat - lat0) * 111;
+        const dLngKm = (pLng - lng0) * 75;
+        const approxKm = Math.sqrt(dLatKm * dLatKm + dLngKm * dLngKm);
+        return { row, approxKm };
+      })
+      .filter(({ approxKm }) => approxKm <= rKm)
+      .sort((a, b) => a.approxKm - b.approxKm)
+      .map(({ row }) => row);
   }
+  const filteredRows = withDistance ?? rows;
 
   const providerIdSet = new Set();
-  rows.forEach(row => {
+  filteredRows.forEach(row => {
     getProviderIdentityKeys(row).forEach(idVal => providerIdSet.add(idVal));
   });
   const servicesMap = await fetchProviderServicesMap([...providerIdSet]);
-  const withServices = rows.map(row => ({
+  const withServices = filteredRows.map(row => ({
     ...row,
     providerServices: pickServicesForRow(row, servicesMap),
   }));

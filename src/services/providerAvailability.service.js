@@ -3,7 +3,7 @@ import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { listBlockedSlots } from "./blockedSlots.service.js";
 
 /** Durée minimale d'un créneau libre pour considérer le prestataire dispo (minutes) */
-const MIN_FREE_SLOT_MINUTES = 30;
+const MIN_FREE_SLOT_MINUTES = 60;
 
 /**
  * Heures par défaut quand le prestataire n'a pas défini opening_hours :
@@ -123,19 +123,24 @@ function providerHasFreeSlotThisWeek(providerRow, bookingsByProviderId, weekDays
   }
 
   const bookings = bookingsByProviderId.get(String(lookupKey)) ?? [];
+  const teamSize = Math.max(1, Number(providerRow.team_size) || 1);
 
   for (const { date, dayOfWeek } of weekDays) {
     const open = byDay.get(dayOfWeek);
     if (!open || open.start >= open.end) continue;
 
     const dateStr = date.toISOString().slice(0, 10);
-    const dayBookings = bookings
+    const dayBookingIntervals = bookings
       .filter((b) => (b.date || "").toString().slice(0, 10) === dateStr)
       .map((b) => [timeToMinutes(b.start_time || "00:00"), timeToMinutes(b.end_time || "23:59")]);
 
-    const gaps = freeSegments(open.start, open.end, dayBookings);
-    const hasEnoughGap = gaps.some(([start, end]) => end - start >= MIN_FREE_SLOT_MINUTES);
-    if (hasEnoughGap) return true;
+    for (let t = open.start; t + MIN_FREE_SLOT_MINUTES <= open.end; t += MIN_FREE_SLOT_MINUTES) {
+      const slotEnd = t + MIN_FREE_SLOT_MINUTES;
+      const overlappingCount = dayBookingIntervals.filter(
+        ([s, e]) => s < slotEnd && e > t
+      ).length;
+      if (overlappingCount < teamSize) return true;
+    }
   }
   return false;
 }
@@ -217,12 +222,12 @@ const SLOT_STEP_MINUTES = 60;
 export async function getAvailableSlotsForDate(providerId, dateStr, durationMinutes) {
   const duration = Math.max(15, Number(durationMinutes) || 60);
 
-  // 1) Récupérer le profil (opening_hours). Utiliser user_id et opening_hours uniquement pour éviter erreur si pas de colonne "id".
-  // L'app peut envoyer soit user_id soit provider_profiles.id selon la config.
+  // 1) Récupérer le profil (opening_hours, team_size). Utiliser user_id et opening_hours pour créneaux.
+  // team_size = nombre max de réservations simultanées (1 = un créneau bloqué par résa, 3 = max 3 résas en parallèle).
   let profile = null;
   let profileError = null;
 
-  const selectCols = "user_id, opening_hours";
+  const selectCols = "user_id, opening_hours, team_size";
 
   const byUserId = await supabase
     .from("provider_profiles")
@@ -254,7 +259,8 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
     return [];
   }
   const effectiveUserId = profile.user_id ?? profile.id ?? providerId;
-  console.log("[providerAvailability] getAvailableSlotsForDate profile found providerId:", providerId, "effectiveUserId:", effectiveUserId);
+  const teamSize = Math.max(1, Number(profile.team_size) || 1);
+  console.log("[providerAvailability] getAvailableSlotsForDate profile found providerId:", providerId, "effectiveUserId:", effectiveUserId, "teamSize:", teamSize);
 
   let openingHoursList = parseOpeningHours(profile?.opening_hours);
   const defaultHours = defaultOpeningHours();
@@ -303,7 +309,7 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
   const uniqueKeys = [...new Set(providerIdKeys)];
   if (uniqueKeys.length === 0) return [];
 
-  // 2) Réservations ce jour-là (provider_id peut être id ou user_id selon le client)
+  // 2) Réservations ce jour-là (pour compter les chevauchements selon team_size)
   const { data: bookings, error: bookingsError } = await supabase
     .from("bookings")
     .select("start_time, end_time")
@@ -316,20 +322,21 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
     return [];
   }
 
-  let bookedIntervals = (bookings || []).map((b) => [
+  const bookingIntervals = (bookings || []).map((b) => [
     timeToMinutes(b.start_time || "00:00"),
     timeToMinutes(b.end_time || "23:59"),
   ]);
 
-  // 2b) Blocked slots ce jour-là (full-day ou plage horaire) – provider_blocked_slots.provider_id = user_id
+  // 2b) Blocked slots ce jour-là = plages totalement indisponibles (journée ou plage)
+  const blockedIntervals = [];
   const lookupKey = effectiveUserId;
   try {
     const blocked = await listBlockedSlots(lookupKey, { from: dateStr, to: dateStr });
     for (const b of blocked) {
       if (b.startTime == null && b.endTime == null) {
-        bookedIntervals.push([open.start, open.end]);
+        blockedIntervals.push([open.start, open.end]);
       } else {
-        bookedIntervals.push([
+        blockedIntervals.push([
           timeToMinutes(b.startTime || "00:00"),
           timeToMinutes(b.endTime || "23:59"),
         ]);
@@ -339,13 +346,20 @@ export async function getAvailableSlotsForDate(providerId, dateStr, durationMinu
     console.warn("[providerAvailability] getAvailableSlotsForDate blocked slots error:", err?.message);
   }
 
-  const segments = freeSegments(open.start, open.end, bookedIntervals);
+  // Segments libres = horaires d'ouverture moins les blocages (sans fusionner les résas : on gère la capacité via team_size)
+  const segments = freeSegments(open.start, open.end, blockedIntervals);
   const slots = [];
 
   for (const [segStart, segEnd] of segments) {
     let t = segStart;
     while (t + duration <= segEnd) {
-      slots.push(minutesToTime(t));
+      const slotEnd = t + duration;
+      const overlappingCount = bookingIntervals.filter(
+        ([s, e]) => s < slotEnd && e > t
+      ).length;
+      if (overlappingCount < teamSize) {
+        slots.push(minutesToTime(t));
+      }
       t += SLOT_STEP_MINUTES;
     }
   }

@@ -481,7 +481,8 @@ export async function createBooking(req, res) {
     const paymentMethod = payment_method || "card";
     const serviceNames = services.map(service => service.name).join(", ");
 
-    // ✅ Vérifier qu'aucune réservation n'existe déjà pour ce détailleur à cette date/heure (un créneau = une résa)
+    // ✅ Capacité selon team_size : au plus (team_size) réservations qui se chevauchent sur ce créneau
+    const teamSize = Math.max(1, Number(provider.team_size) || 1);
     const providerIdsToCheck = [provider_id, provider.id, provider.user_id].filter(Boolean);
     const { data: existingSameSlot, error: overlapError } = await supabase
       .from("bookings")
@@ -490,7 +491,7 @@ export async function createBooking(req, res) {
       .eq("date", date)
       .in("status", ["pending", "confirmed", "started", "in_progress", "ready_soon"]);
 
-    if (!overlapError && existingSameSlot && existingSameSlot.length > 0) {
+    if (!overlapError && existingSameSlot) {
       const toMin = (t) => {
         if (!t || typeof t !== "string") return 0;
         const [h, m] = t.split(":").map(Number);
@@ -498,12 +499,12 @@ export async function createBooking(req, res) {
       };
       const newStart = toMin(start_time);
       const newEnd = toMin(end_time);
-      const overlaps = existingSameSlot.some((b) => {
+      const overlappingCount = existingSameSlot.filter((b) => {
         const s = toMin(b.start_time);
         const e = toMin(b.end_time);
         return newStart < e && newEnd > s;
-      });
-      if (overlaps) {
+      }).length;
+      if (overlappingCount >= teamSize) {
         return res.status(409).json({
           error: "This time slot is no longer available for this provider. Please choose another date or time.",
         });
