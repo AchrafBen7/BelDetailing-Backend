@@ -13,19 +13,27 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
    - Si providerStripeAccountId est fourni → utiliser transfer_data + application_fee_amount
    - Commission NIOS = 10% par défaut (COMMISSION_RATE)
 ----------------------------------------------------- */
-export async function createPaymentIntent({ 
-  amount, 
-  currency, 
+export async function createPaymentIntent({
+  amount,
+  currency,
   user,
-  providerStripeAccountId = null, // ✅ Optionnel : ID du compte Stripe Connect du provider
-  commissionRate = 0.10, // ✅ Taux de commission NIOS (10% par défaut)
+  providerStripeAccountId = null,
+  commissionRate = 0.10,
+  commissionAmount = null, // ✅ Optionnel : commission en euros (ex. 10% du prix total pour cash, pas 10% de l'acompte)
 }) {
   const customerId = await getOrCreateStripeCustomer(user);
 
   const amountInCents = Math.round(amount * 100);
-  const applicationFeeAmount = providerStripeAccountId 
-    ? Math.round(amountInCents * commissionRate) // ✅ Commission NIOS en centimes
-    : null;
+  let applicationFeeAmount = null;
+  if (providerStripeAccountId) {
+    if (commissionAmount != null && commissionAmount > 0) {
+      // Commission sur le montant total (ex. paiement cash : 10% du total, pas de l'acompte)
+      const feeCents = Math.round(commissionAmount * 100);
+      applicationFeeAmount = Math.min(feeCents, amountInCents); // ne pas dépasser le montant prélevé
+    } else {
+      applicationFeeAmount = Math.round(amountInCents * commissionRate);
+    }
+  }
 
   const paymentIntentPayload = {
     amount: amountInCents,

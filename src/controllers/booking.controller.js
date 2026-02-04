@@ -74,6 +74,14 @@ function getAcceptanceRules(dateStr, startTimeStr) {
   const now = new Date();
   const hoursFromNow = (serviceStart.getTime() - now.getTime()) / (1000 * 60 * 60);
 
+  // Date/heure déjà passée → refus explicite
+  if (hoursFromNow < 0) {
+    return {
+      allowed: false,
+      errorMessage: "La date et l'heure choisies sont déjà passées. Veuillez sélectionner un créneau à venir.",
+    };
+  }
+  // Moins d'1 h avant le début → interdit (règle NIOS)
   if (hoursFromNow < 1) {
     return {
       allowed: false,
@@ -725,13 +733,15 @@ export async function createBooking(req, res) {
     let intent = null;
     if (paymentMethod === "cash") {
       const depositAmount = Math.round(totalPrice * 0.2 * 100) / 100;
-      console.log("🔵 [BOOKINGS] createBooking - Creating deposit payment intent:", depositAmount);
+      const commissionOnTotal = Math.round(totalPrice * commissionRate * 100) / 100; // 10% du prix total, pas de l'acompte
+      console.log("🔵 [BOOKINGS] createBooking - Creating deposit payment intent:", depositAmount, "| Commission 10% sur total:", commissionOnTotal);
       intent = await createPaymentIntent({
         amount: depositAmount,
         currency,
         user: customer,
-        providerStripeAccountId, // ✅ Passer le Stripe Connect account si disponible
-        commissionRate, // ✅ Commission NIOS
+        providerStripeAccountId,
+        commissionRate,
+        commissionAmount: commissionOnTotal, // ✅ 10% du prix total (pas 10% des 20% acompte)
       });
     } else {
       console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent:", totalPrice);
