@@ -291,10 +291,11 @@ export async function getProviderServices(providerId) {
     }
   });
 
-  // 4) Ajouter reservation_count à chaque service
+  // 4) Ajouter reservation_count et garantir image_url (pour affichage page détail public)
   return services.map(service => ({
     ...service,
     reservation_count: countsMap.get(service.id) || 0,
+    image_url: service.image_url ?? null,
   }));
 }
 
