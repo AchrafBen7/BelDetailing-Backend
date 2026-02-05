@@ -10,17 +10,15 @@ import {
   createPaymentIntent,
   refundPayment,
   capturePayment,
-  getChargeIdFromPaymentIntent,
 } from "../services/payment.service.js";
 import { sendNotificationToUser, sendNotificationWithDeepLink } from "../services/onesignal.service.js";
 import { sendPeppolInvoice } from "../services/peppol.service.js";
-import { tryValidateReferralCustomerFirstPaidBooking } from "../services/referral.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { BOOKING_COMMISSION_RATE } from "../config/commission.js";
 
 const COMMISSION_RATE = BOOKING_COMMISSION_RATE; // 10% pour les bookings
-const NIOS_MANAGEMENT_FEE_RATE = 0.05; // 5% frais de gestion NIOS (annulation)
-const NIOS_MANAGEMENT_FEE_MIN = 10.0; // Minimum 10€ de frais de gestion (annulation)
+const NIOS_MANAGEMENT_FEE_RATE = 0.05; // 5% frais de gestion NIOS
+const NIOS_MANAGEMENT_FEE_MIN = 10.0; // Minimum 10€ de frais de gestion
 let providerProfilesSupportsIdColumn;
 
 function degreesToRadians(value) {
@@ -62,73 +60,15 @@ function buildBookingDateTime(dateValue, timeValue) {
 }
 
 /**
- * Règles d'acceptation NIOS (délai min, dernière minute, délai pour accepter).
- * - < 1h avant début → interdit
- * - 1h–3h → autorisé mais "express", délai acceptation 30 min
- * - 3h–6h → délai acceptation 2h
- * - > 6h → délai acceptation 24h
- */
-function getAcceptanceRules(dateStr, startTimeStr) {
-  const serviceStart = buildBookingDateTime(dateStr, startTimeStr);
-  if (!serviceStart) {
-    return { allowed: false, errorMessage: "Date ou heure de début invalide." };
-  }
-  const now = new Date();
-  const hoursFromNow = (serviceStart.getTime() - now.getTime()) / (1000 * 60 * 60);
-
-  // Date/heure déjà passée → refus explicite
-  if (hoursFromNow < 0) {
-    return {
-      allowed: false,
-      errorMessage: "La date et l'heure choisies sont déjà passées. Veuillez sélectionner un créneau à venir.",
-    };
-  }
-  // Moins d'1 h avant le début → interdit (règle NIOS)
-  if (hoursFromNow < 1) {
-    return {
-      allowed: false,
-      errorMessage: "Les réservations doivent être faites au minimum 1 heure à l'avance.",
-    };
-  }
-
-  let acceptanceDeadline;
-  let isExpressRequest = false;
-  if (hoursFromNow >= 6) {
-    acceptanceDeadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  } else if (hoursFromNow >= 3) {
-    acceptanceDeadline = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-  } else {
-    // 1h–3h: demande express, 30 min pour accepter
-    acceptanceDeadline = new Date(now.getTime() + 30 * 60 * 1000);
-    isExpressRequest = true;
-  }
-
-  return {
-    allowed: true,
-    acceptanceDeadline: acceptanceDeadline.toISOString(),
-    isExpressRequest,
-  };
-}
-
-/**
- * Calcule le montant remboursable selon la politique NIOS.
- * Frais NIOS = 5% du prix du SERVICE uniquement (pas du total), minimum 10€.
- *
- * - Plus de 48h: 100% remboursé.
- * - 24h-48h: Remboursement = total - frais NIOS (5% du service, min 10€). Transport remboursé.
- * - Moins de 24h: Transport gardé par le détaileur. Remboursement = service - frais NIOS (5% du service, min 10€).
- *   Ex: 300€ service + 20€ transport → frais NIOS = 15€ (5% de 300), remboursé = 285€.
+ * Calcule le montant remboursable selon la politique NIOS:
+ * - Plus de 48h: 100% (tout remboursé)
+ * - 24h-48h: Service + Transport - Frais NIOS (~5%)
+ * - Moins de 24h: Service seulement (Transport + Frais NIOS retenus)
  */
 function calculateRefundAmount(booking, hoursUntilBooking) {
   const totalPrice = booking.price || 0;
   const transportFee = booking.transport_fee || 0;
   const servicePrice = totalPrice - transportFee;
-
-  // Frais NIOS = 5% du prix du service uniquement, minimum 10€
-  const niosFeeFromService = Math.max(
-    servicePrice * NIOS_MANAGEMENT_FEE_RATE,
-    NIOS_MANAGEMENT_FEE_MIN
-  );
 
   // 🟢 Plus de 48h avant: remboursement intégral (100%)
   if (hoursUntilBooking >= 48) {
@@ -142,29 +82,38 @@ function calculateRefundAmount(booking, hoursUntilBooking) {
     };
   }
 
-  // 🟡 Entre 24h et 48h: Service + Transport - Frais NIOS (5% du service)
+  // 🟡 Entre 24h et 48h: Service + Transport - Frais NIOS (~5%)
   if (hoursUntilBooking >= 24) {
-    const refundAmount = totalPrice - niosFeeFromService;
+    // Frais NIOS = 5% du total, minimum 10€
+    const niosFee = Math.max(
+      totalPrice * NIOS_MANAGEMENT_FEE_RATE,
+      NIOS_MANAGEMENT_FEE_MIN
+    );
+    const refundAmount = totalPrice - niosFee;
 
     return {
-      refundAmount: Math.max(0, refundAmount),
-      retainedAmount: niosFeeFromService,
+      refundAmount: Math.max(0, refundAmount), // S'assurer que ce n'est pas négatif
+      retainedAmount: niosFee,
       retainedItems: {
-        niosFee: niosFeeFromService,
-        transportFee: 0,
+        niosFee: niosFee,
+        transportFee: 0, // Transport remboursé
       },
     };
   }
 
-  // 🔴 Moins de 24h: Transport gardé par le détaileur. Remboursement = service - 5% du service.
-  const refundAmount = servicePrice - niosFeeFromService;
+  // 🔴 Moins de 24h: Service seulement (Transport + Frais NIOS retenus)
+  const niosFee = Math.max(
+    totalPrice * NIOS_MANAGEMENT_FEE_RATE,
+    NIOS_MANAGEMENT_FEE_MIN
+  );
+  const refundAmount = servicePrice; // Seulement le service
 
   return {
     refundAmount: Math.max(0, refundAmount),
-    retainedAmount: transportFee + niosFeeFromService,
+    retainedAmount: transportFee + niosFee,
     retainedItems: {
-      niosFee: niosFeeFromService,
-      transportFee: transportFee, // gardé par le détaileur
+      niosFee: niosFee,
+      transportFee: transportFee,
     },
   };
 }
@@ -394,13 +343,6 @@ export async function createBooking(req, res) {
       }
     }
 
-    // ✅ Règles NIOS: min 1h avant début, délai d'acceptation selon créneau (24h / 2h / 30 min)
-    const acceptanceRules = getAcceptanceRules(date, start_time);
-    if (!acceptanceRules.allowed) {
-      return res.status(400).json({ error: acceptanceRules.errorMessage });
-    }
-    const { acceptanceDeadline, isExpressRequest } = acceptanceRules;
-
     // ✅ Vérifier le plafond annuel pour les provider_passionate
     const { data: providerUser, error: providerUserError } = await supabase
       .from("users")
@@ -539,8 +481,7 @@ export async function createBooking(req, res) {
     const paymentMethod = payment_method || "card";
     const serviceNames = services.map(service => service.name).join(", ");
 
-    // ✅ Capacité selon team_size : au plus (team_size) réservations qui se chevauchent sur ce créneau
-    const teamSize = Math.max(1, Number(provider.team_size) || 1);
+    // ✅ Vérifier qu'aucune réservation n'existe déjà pour ce détailleur à cette date/heure (un créneau = une résa)
     const providerIdsToCheck = [provider_id, provider.id, provider.user_id].filter(Boolean);
     const { data: existingSameSlot, error: overlapError } = await supabase
       .from("bookings")
@@ -549,7 +490,7 @@ export async function createBooking(req, res) {
       .eq("date", date)
       .in("status", ["pending", "confirmed", "started", "in_progress", "ready_soon"]);
 
-    if (!overlapError && existingSameSlot) {
+    if (!overlapError && existingSameSlot && existingSameSlot.length > 0) {
       const toMin = (t) => {
         if (!t || typeof t !== "string") return 0;
         const [h, m] = t.split(":").map(Number);
@@ -557,12 +498,12 @@ export async function createBooking(req, res) {
       };
       const newStart = toMin(start_time);
       const newEnd = toMin(end_time);
-      const overlappingCount = existingSameSlot.filter((b) => {
+      const overlaps = existingSameSlot.some((b) => {
         const s = toMin(b.start_time);
         const e = toMin(b.end_time);
         return newStart < e && newEnd > s;
-      }).length;
-      if (overlappingCount >= teamSize) {
+      });
+      if (overlaps) {
         return res.status(409).json({
           error: "This time slot is no longer available for this provider. Please choose another date or time.",
         });
@@ -614,9 +555,6 @@ export async function createBooking(req, res) {
         is_first_booking: isFirstBooking,
         welcoming_offer_applied: welcomingOfferApplied,
         welcoming_offer_amount: welcomingOfferAmount,
-        // Règles d'acceptation (délai détaileur, demande express)
-        acceptance_deadline: acceptanceDeadline,
-        is_express_request: isExpressRequest,
       })
       .select(`
         id,
@@ -735,26 +673,22 @@ export async function createBooking(req, res) {
     let intent = null;
     if (paymentMethod === "cash") {
       const depositAmount = Math.round(totalPrice * 0.2 * 100) / 100;
-      const commissionOnTotal = Math.round(totalPrice * commissionRate * 100) / 100; // 10% du prix total, pas de l'acompte
-      console.log("🔵 [BOOKINGS] createBooking - Creating deposit payment intent:", depositAmount, "| Commission 10% sur total:", commissionOnTotal);
+      console.log("🔵 [BOOKINGS] createBooking - Creating deposit payment intent:", depositAmount);
       intent = await createPaymentIntent({
         amount: depositAmount,
         currency,
         user: customer,
-        providerStripeAccountId,
-        commissionRate,
-        commissionAmount: commissionOnTotal, // ✅ 10% du prix total (pas 10% des 20% acompte)
+        providerStripeAccountId, // ✅ Passer le Stripe Connect account si disponible
+        commissionRate, // ✅ Commission NIOS
       });
     } else {
-      // Carte : capture sur la plateforme, transfert au détaileur 3h après l'heure de résa (cron)
-      console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent (delayed transfer):", totalPrice);
+      console.log("🔵 [BOOKINGS] createBooking - Creating full payment intent:", totalPrice);
       intent = await createPaymentIntent({
         amount: totalPrice,
         currency,
         user: customer,
-        providerStripeAccountId,
-        commissionRate: COMMISSION_RATE,
-        delayTransferToProvider: true, // argent détaileur gelé jusqu'à 3h après date+heure résa
+        providerStripeAccountId, // ✅ Passer le Stripe Connect account si disponible
+        commissionRate, // ✅ Commission NIOS
       });
     }
 
@@ -1612,18 +1546,10 @@ export async function confirmBooking(req, res) {
       });
     }
 
-    // 🔥 Capture sur la plateforme (commission NIOS gardée). Transfert au détaileur 3h après l'heure de résa (cron).
+    // 🔥 Capture payment on Stripe
     const ok = await capturePayment(booking.payment_intent_id);
     if (!ok) {
       return res.status(500).json({ error: "Could not capture payment" });
-    }
-
-    const chargeId = await getChargeIdFromPaymentIntent(booking.payment_intent_id);
-    if (chargeId) {
-      await supabase
-        .from("bookings")
-        .update({ stripe_charge_id: chargeId })
-        .eq("id", bookingId);
     }
 
     // ✅ VÉRIFIER ET MARQUER L'OFFRE DE BIENVENUE COMME UTILISÉE
@@ -1648,14 +1574,6 @@ export async function confirmBooking(req, res) {
       .single();
 
     if (updateErr) throw updateErr;
-
-    // ✅ Parrainage: si c'est la 1ère résa payée du customer, valider le referral (parrain crédité)
-    try {
-      await tryValidateReferralCustomerFirstPaidBooking(booking.customer_id);
-    } catch (refErr) {
-      console.error("[BOOKINGS] Referral validation failed:", refErr);
-      // ⚠️ Ne pas bloquer la confirmation si la validation parrainage échoue
-    }
 
     // ✅ ENVOYER NOTIFICATION AU CUSTOMER (réservation confirmée)
     try {
