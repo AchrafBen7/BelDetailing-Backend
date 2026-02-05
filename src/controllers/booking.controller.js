@@ -14,6 +14,7 @@ import {
 } from "../services/payment.service.js";
 import { sendNotificationToUser, sendNotificationWithDeepLink } from "../services/onesignal.service.js";
 import { sendPeppolInvoice } from "../services/peppol.service.js";
+import { tryValidateReferralCustomerFirstPaidBooking } from "../services/referral.service.js";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
 import { BOOKING_COMMISSION_RATE } from "../config/commission.js";
 
@@ -1647,6 +1648,14 @@ export async function confirmBooking(req, res) {
       .single();
 
     if (updateErr) throw updateErr;
+
+    // ✅ Parrainage: si c'est la 1ère résa payée du customer, valider le referral (parrain crédité)
+    try {
+      await tryValidateReferralCustomerFirstPaidBooking(booking.customer_id);
+    } catch (refErr) {
+      console.error("[BOOKINGS] Referral validation failed:", refErr);
+      // ⚠️ Ne pas bloquer la confirmation si la validation parrainage échoue
+    }
 
     // ✅ ENVOYER NOTIFICATION AU CUSTOMER (réservation confirmée)
     try {
