@@ -53,6 +53,8 @@ import portfolioRoutes from "./routes/portfolio.routes.js";
 import servicePhotosRoutes from "./routes/servicePhotos.routes.js";
 import noShowRoutes from "./routes/noShow.routes.js";
 import referralRoutes from "./routes/referral.routes.js";
+import reportRoutes from "./routes/report.routes.js";
+import blockedUsersRoutes from "./routes/blocked-users.routes.js";
 const routesImportTime = Date.now() - startRoutesImport;
 console.log(`✅ [APP] All routes loaded in ${routesImportTime}ms`);
 
@@ -101,6 +103,12 @@ app.use("/api/v1/profile", profileRoutes);
 
 // Parrainage (lien d'invitation, stats)
 app.use("/api/v1/referral", referralRoutes);
+
+// Signalements (Apple Guidelines compliance)
+app.use("/api/v1/reports", reportRoutes);
+
+// Blocage d'utilisateurs (Apple Guidelines compliance)
+app.use("/api/v1/users", blockedUsersRoutes);
 
 app.use("/api/v1/providers", providerRoutes);
 app.use("/api/v1/providers", portfolioRoutes);

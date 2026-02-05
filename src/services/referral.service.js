@@ -316,6 +316,119 @@ export async function validateReferralProvider(referredUserId) {
 }
 
 /**
+ * Applique un code de parrainage APRÈS inscription (si l'utilisateur a oublié lors du signup)
+ * Conditions:
+ * - L'utilisateur ne doit pas déjà avoir un parrain
+ * - Le code doit être valide
+ * - Les rôles doivent correspondre (customer→customer, provider→provider)
+ * - L'utilisateur ne doit pas avoir déjà payé de réservation (customer) ou complété de mission (provider)
+ */
+export async function applyReferralCode(userId, referralCode) {
+  // 1. Vérifier que l'utilisateur n'a pas déjà un parrain
+  const alreadyReferred = await userAlreadyReferred(userId);
+  if (alreadyReferred) {
+    const err = new Error("You already have a referrer");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 2. Récupérer l'utilisateur courant
+  const { data: currentUser, error: userError } = await supabase
+    .from("users")
+    .select("id, role")
+    .eq("id", userId)
+    .single();
+
+  if (userError || !currentUser) {
+    const err = new Error("User not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // 3. Valider le code de parrainage
+  const validation = await validateReferralCodeForSignup(referralCode, currentUser.role);
+  if (!validation) {
+    const err = new Error("Invalid referral code or role mismatch");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 4. Vérifier qu'on ne se parraine pas soi-même
+  if (validation.referrerId === userId) {
+    const err = new Error("You cannot refer yourself");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 5. Vérifier que l'utilisateur n'a pas déjà d'activité
+  if (currentUser.role === "customer") {
+    // Vérifier pas de réservation payée
+    const { count, error: bookingError } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("customer_id", userId)
+      .eq("payment_status", "paid");
+
+    if (bookingError) throw bookingError;
+
+    if (count > 0) {
+      const err = new Error("Cannot apply referral code after your first paid booking");
+      err.statusCode = 400;
+      throw err;
+    }
+  } else if (currentUser.role === "provider" || currentUser.role === "provider_passionate") {
+    // Vérifier pas de mission complétée
+    const { count, error: bookingError } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("provider_id", userId)
+      .eq("status", "completed");
+
+    if (bookingError) throw bookingError;
+
+    if (count > 0) {
+      const err = new Error("Cannot apply referral code after your first completed mission");
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
+  // 6. Créer le referral (pending)
+  const roleType = currentUser.role === "customer" ? "customer" : "detailer";
+  await createPendingReferral(validation.referrerId, userId, roleType);
+
+  // 7. Mettre à jour referred_by dans users
+  const { error: updateError } = await supabase
+    .from("users")
+    .update({ referred_by: validation.referrerId })
+    .eq("id", userId);
+
+  if (updateError) throw updateError;
+
+  // 8. Créditer le filleul (3€)
+  const { data: u } = await supabase
+    .from("users")
+    .select("customer_credits_eur")
+    .eq("id", userId)
+    .single();
+
+  const currentCredit = Number(u?.customer_credits_eur ?? 0) || 0;
+  await supabase
+    .from("users")
+    .update({ customer_credits_eur: currentCredit + REFERRAL_FILLEUL_CREDIT_EUR })
+    .eq("id", userId);
+
+  console.log(`[REFERRAL] Applied code ${referralCode} for user ${userId}, credited ${REFERRAL_FILLEUL_CREDIT_EUR}€`);
+
+  return {
+    success: true,
+    referrerId: validation.referrerId,
+    creditAwarded: REFERRAL_FILLEUL_CREDIT_EUR,
+    message: `Code de parrainage appliqué ! Vous avez reçu ${REFERRAL_FILLEUL_CREDIT_EUR}€ de crédit.`
+  };
+}
+
+/**
  * Métriques plateforme parrainage (dashboard / analytics)
  * - totalReferrals, totalPending, totalValidated
  * - signupsWithReferralLast30Days : inscriptions avec referred_by non nul sur 30j
