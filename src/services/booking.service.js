@@ -4,7 +4,10 @@ import { refundPayment } from "./payment.service.js";
 import { sendNotificationToUser } from "./onesignal.service.js";
 
 export async function getBookings({ userId, scope, status }) {
-  console.log("🔍 [BOOKINGS SERVICE] getBookings called with:", { userId, scope, status });
+  // 🔒 SECURITY: Si pas de scope, forcer le filtrage par userId pour ne pas retourner TOUS les bookings
+  if (!scope) {
+    console.warn("⚠️ [BOOKINGS SERVICE] No scope provided, defaulting to userId filter");
+  }
   
   let query = supabase.from("bookings").select("*");
 
@@ -13,11 +16,8 @@ export async function getBookings({ userId, scope, status }) {
       console.error("❌ [BOOKINGS SERVICE] userId is missing for customer scope!");
       throw new Error("userId is required for customer scope");
     }
-    console.log("✅ [BOOKINGS SERVICE] Filtering by customer_id:", userId);
     query.eq("customer_id", userId);
-  }
-
-  if (scope === "provider") {
+  } else if (scope === "provider") {
     const { data: provider, error: providerError } = await supabase
       .from("provider_profiles")
       .select("user_id")
@@ -27,6 +27,20 @@ export async function getBookings({ userId, scope, status }) {
     if (providerError) throw providerError;
     if (!provider) return [];
     query.eq("provider_id", provider.user_id);
+  } else if (userId) {
+    // 🔒 Pas de scope fourni : filtrer par customer_id OU provider_id pour cet utilisateur
+    // (ne JAMAIS retourner tous les bookings de la plateforme)
+    const { data: provider } = await supabase
+      .from("provider_profiles")
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (provider) {
+      query.or(`customer_id.eq.${userId},provider_id.eq.${provider.user_id}`);
+    } else {
+      query.eq("customer_id", userId);
+    }
   }
 
   if (status) {
@@ -231,7 +245,42 @@ export async function updateBookingService(id, dataUpdate) {
   return data;
 }
 
+// 🔒 SECURITY: State machine pour les transitions de statut autorisées
+const VALID_STATUS_TRANSITIONS = {
+  pending:      ["confirmed", "cancelled", "declined"],
+  confirmed:    ["started", "cancelled", "in_progress"],
+  started:      ["in_progress", "completed", "cancelled"],
+  in_progress:  ["completed", "cancelled"],
+  completed:    ["refunded"],
+  cancelled:    [],           // état terminal
+  declined:     [],           // état terminal
+  refunded:     [],           // état terminal
+};
+
+export function isValidStatusTransition(currentStatus, newStatus) {
+  const allowed = VALID_STATUS_TRANSITIONS[currentStatus];
+  if (!allowed) return false;
+  return allowed.includes(newStatus);
+}
+
 export async function updateBookingStatus(id, newStatus) {
+  // D'abord vérifier l'état actuel
+  const { data: current, error: fetchErr } = await supabase
+    .from("bookings")
+    .select("status")
+    .eq("id", id)
+    .single();
+
+  if (fetchErr) throw fetchErr;
+  if (!current) throw new Error("Booking not found");
+
+  // Valider la transition
+  if (!isValidStatusTransition(current.status, newStatus)) {
+    const err = new Error(`Invalid status transition: '${current.status}' → '${newStatus}'`);
+    err.statusCode = 400;
+    throw err;
+  }
+
   const { data, error } = await supabase
     .from("bookings")
     .update({ status: newStatus })

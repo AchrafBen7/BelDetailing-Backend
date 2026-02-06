@@ -26,6 +26,22 @@ export async function createReportController(req, res) {
         error: "Missing required fields: contentType, contentId, reason"
       });
     }
+
+    // 🔒 SECURITY: Valider contentType contre un enum
+    const VALID_CONTENT_TYPES = ["review", "profile", "message", "booking", "offer"];
+    if (!VALID_CONTENT_TYPES.includes(contentType)) {
+      return res.status(400).json({ error: `Invalid contentType. Must be one of: ${VALID_CONTENT_TYPES.join(", ")}` });
+    }
+
+    // 🔒 SECURITY: Valider la longueur de la description
+    if (description && typeof description === "string" && description.length > 2000) {
+      return res.status(400).json({ error: "Description too long (max 2000 characters)" });
+    }
+
+    // 🔒 SECURITY: Valider la longueur de la raison
+    if (reason && typeof reason === "string" && reason.length > 500) {
+      return res.status(400).json({ error: "Reason too long (max 500 characters)" });
+    }
     
     const report = await createReport({
       reporterId,
@@ -33,7 +49,7 @@ export async function createReportController(req, res) {
       contentType,
       contentId,
       reason,
-      description
+      description: description ? description.substring(0, 2000) : null
     });
     
     return res.status(201).json({

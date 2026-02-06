@@ -16,6 +16,16 @@ export async function blockUserController(req, res) {
     const { userId } = req.params;
     const { reason } = req.body;
     
+    // 🔒 SECURITY: Empêcher de se bloquer soi-même
+    if (blockerId === userId) {
+      return res.status(400).json({ error: "You cannot block yourself" });
+    }
+
+    // 🔒 SECURITY: Limiter la longueur de la raison
+    if (reason && typeof reason === "string" && reason.length > 500) {
+      return res.status(400).json({ error: "Reason too long (max 500 characters)" });
+    }
+    
     const result = await blockUser(blockerId, userId, reason);
     
     return res.status(201).json({

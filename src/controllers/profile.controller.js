@@ -150,7 +150,8 @@ export async function updateProfile(req, res) {
       })
       .eq("user_id", userId);
     
-    console.log(`✅ [PROFILE] Provider_passionate ${userId} upgraded to provider (VAT: ${vatNumber.trim()})`);
+    // 🔒 SECURITY: Ne pas logger le numéro de TVA complet
+    console.log(`✅ [PROFILE] Provider_passionate ${userId} upgraded to provider`);
     
     // Retourner le profil mis à jour
     return await getProfile(req, res);
@@ -174,6 +175,19 @@ export async function updateProfile(req, res) {
     if (userError) {
       return res.status(500).json({ error: userError.message });
     }
+  }
+
+  // 🔒 SECURITY: Empêcher la création de profils cross-role
+  // Un customer ne peut pas créer un providerProfile ou companyProfile, etc.
+  const userRole = currentUser?.role;
+  if (customerProfile && !["customer"].includes(userRole)) {
+    return res.status(403).json({ error: "Cannot update customer profile with your current role" });
+  }
+  if (companyProfile && !["company"].includes(userRole)) {
+    return res.status(403).json({ error: "Cannot update company profile with your current role" });
+  }
+  if (providerProfile && !["provider", "provider_passionate"].includes(userRole)) {
+    return res.status(403).json({ error: "Cannot update provider profile with your current role" });
   }
 
   // 2) Update / upsert customer_profile

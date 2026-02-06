@@ -300,6 +300,24 @@ export async function getProviderServices(providerId) {
 }
 
 export async function createProviderService(userId, service) {
+  // 🔒 SECURITY: Valider le prix et la durée
+  if (service.price != null) {
+    const price = Number(service.price);
+    if (isNaN(price) || price < 0 || price > 99999) {
+      const err = new Error("Price must be between 0 and 99999");
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+  if (service.duration_minutes != null) {
+    const duration = Number(service.duration_minutes);
+    if (isNaN(duration) || duration < 1 || duration > 1440) {
+      const err = new Error("Duration must be between 1 and 1440 minutes");
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
   const { data: provider, error: providerLookupError } = await supabase
     .from("provider_profiles")
     .select("*")

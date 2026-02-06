@@ -50,11 +50,26 @@ export async function getOrderByNumber(req, res) {
     }
 
     const order = await getOrderByOrderNumber(orderNumber);
-    return res.json({ data: order });
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    // 🔒 SECURITY: Pour le tracking public, ne renvoyer que les champs nécessaires (pas de PII)
+    return res.json({
+      data: {
+        id: order.id,
+        orderNumber: order.order_number,
+        status: order.status,
+        trackingNumber: order.tracking_number,
+        carrier: order.carrier,
+        createdAt: order.created_at,
+      },
+    });
   } catch (err) {
     console.error("[ORDERS] getByNumber error:", err);
     const status = err.statusCode || 500;
-    return res.status(status).json({ error: err.message || "Could not fetch order" });
+    return res.status(status).json({ error: "Could not fetch order" });
   }
 }
 
@@ -196,6 +211,11 @@ export async function cancelOrder(req, res) {
  */
 export async function updateOrderTrackingController(req, res) {
   try {
+    // 🔒 SECURITY: Seuls les admins et suppliers peuvent mettre à jour le tracking
+    if (req.user.role !== "admin" && req.user.role !== "supplier") {
+      return res.status(403).json({ error: "Only admins or suppliers can update tracking" });
+    }
+
     const { id } = req.params;
     const { tracking_number, carrier, supplier_id } = req.body;
 
@@ -206,9 +226,8 @@ export async function updateOrderTrackingController(req, res) {
       });
     }
 
-    // Vérifier que la commande existe et appartient au customer (ou admin)
     const order = await getOrderDetail(id, req.user.id);
-    if (!order && req.user.role !== "admin") {
+    if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
 
@@ -233,6 +252,11 @@ export async function updateOrderTrackingController(req, res) {
  */
 export async function updateOrderStatusController(req, res) {
   try {
+    // 🔒 SECURITY: Seuls les admins peuvent changer le statut d'une commande
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Only admins can update order status" });
+    }
+
     const { id } = req.params;
     const { status } = req.body;
 
@@ -246,9 +270,8 @@ export async function updateOrderStatusController(req, res) {
       return res.status(400).json({ error: "Invalid status" });
     }
 
-    // Vérifier que la commande existe et appartient au customer (ou admin)
     const order = await getOrderDetail(id, req.user.id);
-    if (!order && req.user.role !== "admin") {
+    if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
 

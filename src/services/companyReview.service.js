@@ -21,6 +21,41 @@ export async function createOrUpdateCompanyReview(detailerUserId, companyUserId,
     throw err;
   }
 
+  // 🔒 SECURITY: Limiter la longueur du commentaire
+  if (comment && typeof comment === "string" && comment.length > 2000) {
+    const err = new Error("Comment too long (max 2000 characters)");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 🔒 SECURITY: Vérifier que le detailer a une relation de mission avec cette company
+  // Le detailer ne peut noter que les companies avec qui il a travaillé
+  const { data: missions, error: missionErr } = await supabase
+    .from("mission_agreements")
+    .select("id, status")
+    .eq("provider_id", detailerUserId)
+    .eq("company_id", companyUserId)
+    .in("status", ["active", "completed"])
+    .limit(1);
+
+  if (missionErr) throw missionErr;
+
+  if (!missions || missions.length === 0) {
+    const err = new Error("You can only review companies you have worked with (active or completed mission required)");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  // Si un missionAgreementId spécifique est fourni, vérifier qu'il appartient bien à cette relation
+  if (missionAgreementId) {
+    const validMission = missions.find(m => m.id === missionAgreementId);
+    if (!validMission) {
+      const err = new Error("The specified mission does not belong to this company/detailer relationship");
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
   const { data, error } = await supabase
     .from("company_reviews")
     .upsert(

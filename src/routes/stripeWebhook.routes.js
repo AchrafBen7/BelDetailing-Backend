@@ -11,6 +11,9 @@ if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error("Missing STRIPE_SECRET_KEY for webhooks");
 }
 if (!process.env.STRIPE_WEBHOOK_SECRET) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("STRIPE_WEBHOOK_SECRET is required in production — webhooks cannot be verified without it!");
+  }
   console.warn("⚠️ STRIPE_WEBHOOK_SECRET is not set – webhooks won't be verified!");
 }
 

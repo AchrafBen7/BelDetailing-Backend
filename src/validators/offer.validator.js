@@ -22,8 +22,17 @@ export const createOfferValidation = [
     .isLength({ max: 5000 })
     .withMessage("description too long"),
   body("vehicleCount").optional().isInt({ min: 1, max: 999 }),
-  body("priceMin").optional().isFloat({ min: 0 }),
-  body("priceMax").optional().isFloat({ min: 0 }),
+  body("priceMin").optional().isFloat({ min: 0, max: 999999 }),
+  body("priceMax").optional().isFloat({ min: 0, max: 999999 })
+    .custom((value, { req }) => {
+      // 🔒 SECURITY: Vérifier que priceMax >= priceMin
+      if (req.body.priceMin != null && value != null) {
+        if (Number(value) < Number(req.body.priceMin)) {
+          throw new Error("priceMax must be greater than or equal to priceMin");
+        }
+      }
+      return true;
+    }),
   body("city").optional().trim().isLength({ max: 100 }),
   body("postalCode").optional().trim().isLength({ max: 20 }),
   body("lat").optional().isFloat({ min: -90, max: 90 }),

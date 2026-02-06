@@ -19,19 +19,29 @@ export const createBookingValidation = [
     .withMessage("date is required")
     .trim()
     .matches(/^\d{4}-\d{2}-\d{2}$/)
-    .withMessage("date must be YYYY-MM-DD"),
+    .withMessage("date must be YYYY-MM-DD")
+    .custom((value) => {
+      // 🔒 SECURITY: Empêcher les réservations dans le passé
+      const bookingDate = new Date(value + "T00:00:00");
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (bookingDate < today) {
+        throw new Error("Booking date cannot be in the past");
+      }
+      return true;
+    }),
   body("start_time")
     .notEmpty()
     .withMessage("start_time is required")
     .trim()
-    .isLength({ max: 8 })
-    .withMessage("start_time too long"),
+    .matches(/^\d{2}:\d{2}(:\d{2})?$/)
+    .withMessage("start_time must be HH:MM or HH:MM:SS"),
   body("end_time")
     .notEmpty()
     .withMessage("end_time is required")
     .trim()
-    .isLength({ max: 8 })
-    .withMessage("end_time too long"),
+    .matches(/^\d{2}:\d{2}(:\d{2})?$/)
+    .withMessage("end_time must be HH:MM or HH:MM:SS"),
   body("address")
     .optional()
     .trim()
@@ -42,6 +52,7 @@ export const createBookingValidation = [
 ];
 
 // PATCH /bookings/:id – seuls les champs autorisés, avec types/longueurs
+// 🔒 SECURITY: transport_fee et transport_distance_km retirés car calculés côté serveur
 const BOOKING_PATCH_WHITELIST = [
   "address",
   "date",
@@ -49,8 +60,6 @@ const BOOKING_PATCH_WHITELIST = [
   "end_time",
   "customer_address_lat",
   "customer_address_lng",
-  "transport_fee",
-  "transport_distance_km",
 ];
 
 export const patchBookingValidation = [
@@ -75,6 +84,4 @@ export const patchBookingValidation = [
   body("end_time").optional().trim().isLength({ max: 8 }).withMessage("end_time too long"),
   body("customer_address_lat").optional().isFloat({ min: -90, max: 90 }),
   body("customer_address_lng").optional().isFloat({ min: -180, max: 180 }),
-  body("transport_fee").optional().isFloat({ min: 0 }),
-  body("transport_distance_km").optional().isFloat({ min: 0 }),
 ];

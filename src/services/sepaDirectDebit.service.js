@@ -102,8 +102,8 @@ export async function createSepaSetupIntent(companyUserId) {
       { customer: customerId },
       { apiVersion: "2025-11-17.clover" }
     );
-    console.log("✅ [SEPA] Step 2: Ephemeral Key created:", ephemeralKey.id);
-    console.log("📦 [SEPA] Ephemeral Key secret exists:", !!ephemeralKey.secret);
+    console.log("✅ [SEPA] Step 2: Ephemeral Key created");
+    // 🔒 SECURITY: Ne pas logger les secrets Stripe en production
 
     // 3) Créer un Setup Intent pour SEPA Direct Debit
     console.log("🔄 [SEPA] Step 3: Creating Stripe Setup Intent...");
@@ -117,13 +117,13 @@ export async function createSepaSetupIntent(companyUserId) {
         source: "beldetailing-app",
       },
     };
-    console.log("📤 [SEPA] Setup Intent payload:", JSON.stringify(setupIntentPayload, null, 2));
+    // 🔒 SECURITY: Ne pas logger le payload complet en production
+    if (process.env.NODE_ENV === "development") {
+      console.log("📤 [SEPA] Setup Intent payload:", JSON.stringify(setupIntentPayload, null, 2));
+    }
     
     const setupIntent = await stripe.setupIntents.create(setupIntentPayload);
     console.log("✅ [SEPA] Step 3: Setup Intent created successfully");
-    console.log("📦 [SEPA] Setup Intent ID:", setupIntent.id);
-    console.log("📦 [SEPA] Setup Intent status:", setupIntent.status);
-    console.log("📦 [SEPA] Setup Intent client_secret exists:", !!setupIntent.client_secret);
 
     const result = {
       setupIntentClientSecret: setupIntent.client_secret,

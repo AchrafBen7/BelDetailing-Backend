@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { timingSafeEqual } from "crypto";
 import { cleanupExpiredBookings } from "../services/booking.service.js";
 import { captureScheduledPayments } from "../cron/captureScheduledPayments.js";
 import { retryFailedTransfers } from "../cron/retryFailedTransfers.js";
@@ -6,10 +7,22 @@ import { captureDayOnePaymentsCron } from "../cron/captureDayOnePayments.js";
 
 const router = Router();
 
+// 🔒 SECURITY: Timing-safe secret comparison to prevent timing attacks
+function verifyCronSecret(provided) {
+  const expected = process.env.CRON_SECRET;
+  if (!provided || !expected) return false;
+  if (provided.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
 router.post("/cleanup-bookings", async (req, res) => {
   const cronSecret = req.headers["x-cron-secret"];
 
-  if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+  if (!verifyCronSecret(cronSecret)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
@@ -39,7 +52,7 @@ router.post("/cleanup-bookings", async (req, res) => {
 router.post("/capture-scheduled-payments", async (req, res) => {
   const cronSecret = req.headers["x-cron-secret"];
 
-  if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+  if (!verifyCronSecret(cronSecret)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
@@ -74,7 +87,7 @@ router.post("/capture-scheduled-payments", async (req, res) => {
 router.post("/retry-failed-transfers", async (req, res) => {
   const cronSecret = req.headers["x-cron-secret"];
 
-  if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+  if (!verifyCronSecret(cronSecret)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
@@ -109,7 +122,7 @@ router.post("/retry-failed-transfers", async (req, res) => {
 router.post("/capture-day-one-payments", async (req, res) => {
   const cronSecret = req.headers["x-cron-secret"];
 
-  if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+  if (!verifyCronSecret(cronSecret)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 

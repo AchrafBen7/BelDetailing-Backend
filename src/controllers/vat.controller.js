@@ -37,7 +37,9 @@ export async function lookupVATController(req, res) {
 
 export async function validateVATController(req, res) {
   try {
-    const { number } = req.query;
+    // 🔒 SECURITY: Accepter le numéro depuis le body (POST) ou query (GET) pour rétro-compatibilité
+    // Le body est préféré car les query params apparaissent dans les logs serveur
+    const number = req.body?.number || req.query?.number;
 
     if (!number) {
       return res.status(400).json({ error: "Numero de TVA requis" });

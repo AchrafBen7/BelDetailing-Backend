@@ -238,7 +238,26 @@ export async function listBookings(req, res) {
 export async function getBooking(req, res) {
   try {
     const { id } = req.params;
+    const userId = req.user.id;
     const booking = await getBookingDetail(id);
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    // 🔒 SECURITY: Vérifier que le booking appartient à l'utilisateur
+    const isCustomer = booking.customer_id === userId;
+    let isProvider = false;
+    if (req.user.role === "provider") {
+      const providerProfileId = await getProviderProfileIdForUser(userId);
+      isProvider = providerProfileId
+        ? booking.provider_id === providerProfileId
+        : false;
+    }
+
+    if (!isCustomer && !isProvider && req.user.role !== "admin") {
+      return res.status(403).json({ error: "You are not authorized to view this booking" });
+    }
 
     return res.json(booking);
   } catch (err) {
@@ -252,7 +271,10 @@ export async function getBooking(req, res) {
 ----------------------------------------------------- */
 export async function createBooking(req, res) {
   try {
-    console.log("🔵 [BOOKINGS] createBooking START - Body:", JSON.stringify(req.body, null, 2));
+    // 🔒 SECURITY: Ne plus logger le body en production (peut contenir des données sensibles)
+    if (process.env.NODE_ENV === "development") {
+      console.log("🔵 [BOOKINGS] createBooking START - Body:", JSON.stringify(req.body, null, 2));
+    }
     const customerId = req.user.id;
     const {
       provider_id,

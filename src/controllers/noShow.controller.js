@@ -27,6 +27,21 @@ export async function reportNoShowController(req, res) {
       return res.status(404).json({ error: "Provider profile not found" });
     }
 
+    // 🔒 SECURITY: Vérifier que le booking appartient bien à ce provider
+    const { data: booking, error: bookingErr } = await supabase
+      .from("bookings")
+      .select("id, provider_id")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    if (bookingErr || !booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    if (booking.provider_id !== providerProfileId) {
+      return res.status(403).json({ error: "This booking does not belong to you" });
+    }
+
     const result = await reportNoShow(bookingId, providerProfileId);
 
     return res.json({

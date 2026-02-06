@@ -7,8 +7,8 @@ import { listCompanyReviewsController, createCompanyReviewController } from "../
 
 const router = Router();
 
-// GET /api/v1/company-reviews?companyId=uuid — Liste des avis reçus par une company
-router.get("/", listCompanyReviewsController);
+// 🔒 SECURITY: Require auth pour empêcher le scraping public des avis company
+router.get("/", requireAuth, listCompanyReviewsController);
 // POST /api/v1/company-reviews — Detailer soumet ou met à jour un avis sur une company
 router.post("/", requireAuth, createCompanyReviewController);
 

@@ -115,8 +115,17 @@ app.use("/api/v1/stripe", stripeWebhookRoutes);
 // ⚠️ 2) Ensuite seulement, le parser JSON pour le reste de l’API (limite 500kb)
 app.use(express.json({ limit: "500kb" }));
 
+// 🔒 SECURITY: Rate limiter strict pour les endpoints d'authentification
+const authRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // Max 20 tentatives par IP sur 15 min (login, register, social, etc.)
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many authentication attempts, please try again later" },
+});
+
 // Auth
-app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/auth", authRateLimit, authRoutes);
 
 // Profile (même router, mais route "/" dedans)
 app.use("/api/v1/profile", profileRoutes);

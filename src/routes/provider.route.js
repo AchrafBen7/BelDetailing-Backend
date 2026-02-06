@@ -63,7 +63,8 @@ router.patch("/me", requireAuth, updateMyProviderProfile);
 
 // ⭐ Routes Dopamine (tracking, favoris, messages)
 router.get("/favorites", requireAuth, listMyFavoritesController); // Customer uniquement - Liste des favoris
-router.post("/:id/track-view", trackView); // Public (peut être anonyme)
+// 🔒 SECURITY: Require auth pour éviter les écritures anonymes (spam/abus de tracking)
+router.post("/:id/track-view", requireAuth, trackView);
 router.get("/:id/views-stats", requireAuth, getViewsStats); // Provider uniquement
 router.post("/:id/favorite", requireAuth, addFavoriteController); // Customer uniquement
 router.delete("/:id/favorite", requireAuth, removeFavoriteController); // Customer uniquement
@@ -83,11 +84,12 @@ router.patch("/services/:id", requireAuth, updateService); // 🆕 Mise à jour 
 router.delete("/services/:id", requireAuth, deleteServiceController);
 
 // ⭐ Routes paramétrées (/:id/... avant /:id)
-router.get("/:id/services", getProviderServicesController);
-router.get("/:id/reviews", getProviderReviewsController);
+// 🔒 SECURITY: Require auth pour limiter le scraping et protéger les données
+router.get("/:id/services", requireAuth, getProviderServicesController);
+router.get("/:id/reviews", requireAuth, getProviderReviewsController);
 router.get("/:id/stats", requireAuth, getProviderStatsController);
-router.get("/:id/available-slots", getAvailableSlotsController);
-router.get("/:id/available-days", getAvailableDaysController);
+router.get("/:id/available-slots", requireAuth, getAvailableSlotsController);
+router.get("/:id/available-days", requireAuth, getAvailableDaysController);
 // Détail d'un provider (cache 15 min)
 router.get(
   "/:id",
