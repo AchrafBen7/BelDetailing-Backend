@@ -1,4 +1,5 @@
 import { lookupVAT, validateVATNumber } from "../services/vat.service.js";
+import { supabaseAdmin } from "../config/supabase.js";
 
 export async function lookupVATController(req, res) {
   try {
@@ -43,6 +44,19 @@ export async function validateVATController(req, res) {
     }
 
     const result = await validateVATNumber(number);
+
+    // Quand le numéro est valide, mettre à jour l’utilisateur (is_vat_valid + vat_number)
+    if (result.valid && req.user?.id) {
+      await supabaseAdmin
+        .from("users")
+        .update({
+          is_vat_valid: true,
+          vat_number: number.trim().toUpperCase(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", req.user.id);
+    }
+
     return res.json(result);
   } catch (err) {
     console.error("[VAT] validate error:", err);
