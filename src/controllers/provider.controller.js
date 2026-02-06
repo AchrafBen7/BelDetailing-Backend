@@ -327,3 +327,89 @@ export async function deleteServiceController(req, res) {
     return res.status(status).json({ error: err.message || "Could not delete service" });
   }
 }
+
+// 📊 GET /api/v1/providers/me/annual-revenue
+export async function getAnnualRevenueController(req, res) {
+  try {
+    // Vérifier que c'est un provider passionate
+    if (req.user.role !== "provider_passionate") {
+      return res.status(403).json({ 
+        error: "Only passionate providers can check annual revenue" 
+      });
+    }
+
+    const year = req.query.year || new Date().getFullYear();
+    
+    // Calculer les revenus de l'année
+    const { data, error } = await supabase
+      .from("bookings")
+      .select("price")
+      .eq("provider_id", req.user.id)
+      .eq("payment_status", "paid")
+      .gte("created_at", `${year}-01-01`)
+      .lte("created_at", `${year}-12-31`);
+
+    if (error) throw error;
+
+    const totalRevenue = data.reduce((sum, b) => sum + Number(b.price), 0);
+    const limit = 2000;
+    const remaining = Math.max(0, limit - totalRevenue);
+    const percentageUsed = (totalRevenue / limit) * 100;
+
+    return res.json({
+      year: parseInt(year),
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      limit,
+      remaining: Math.round(remaining * 100) / 100,
+      percentageUsed: Math.round(percentageUsed * 100) / 100,
+      isNearLimit: percentageUsed > 80,
+      isOverLimit: percentageUsed >= 100
+    });
+  } catch (err) {
+    console.error("[PROVIDERS] annual revenue error:", err);
+    return res.status(500).json({ error: "Could not fetch annual revenue" });
+  }
+}
+
+// 🔄 POST /api/v1/providers/me/upgrade-to-pro
+export async function upgradeToProController(req, res) {
+  try {
+    // Vérifier que c'est un provider passionate
+    if (req.user.role !== "provider_passionate") {
+      return res.status(403).json({ 
+        error: "Only passionate providers can upgrade to pro" 
+      });
+    }
+
+    const { vatNumber } = req.body;
+
+    if (!vatNumber || vatNumber.length < 8) {
+      return res.status(400).json({ 
+        error: "Valid VAT number required (min 8 characters)" 
+      });
+    }
+
+    // 1. Mettre à jour le rôle dans users
+    const { error: userError } = await supabase
+      .from("users")
+      .update({ 
+        role: "provider",
+        vat_number: vatNumber,
+        is_vat_valid: false  // À valider par l'admin ou API VIES
+      })
+      .eq("id", req.user.id);
+
+    if (userError) throw userError;
+
+    console.log(`✅ Provider ${req.user.id} upgraded from passionate to pro`);
+
+    return res.json({ 
+      success: true,
+      newRole: "provider",
+      message: "Account upgraded to Professional. You now have access to B2B offers and unlimited revenue."
+    });
+  } catch (err) {
+    console.error("[PROVIDERS] upgrade error:", err);
+    return res.status(500).json({ error: "Could not upgrade account" });
+  }
+}

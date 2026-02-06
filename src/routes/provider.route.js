@@ -19,6 +19,8 @@ import {
   getMyProviderReviews,
   getMyProviderServicesController,
   getMyProviderStatsController,
+  getAnnualRevenueController,
+  upgradeToProController,
 } from "../controllers/provider.controller.js";
 import {
   trackView,
@@ -55,6 +57,8 @@ router.get("/me/reviews", requireAuth, getMyProviderReviews);
 router.get("/me/stats/series", requireAuth, getProviderStatsSeriesController);
 router.get("/me/stats/popular-services", requireAuth, getProviderPopularServicesController);
 router.get("/me/stats", requireAuth, getMyProviderStatsController);
+router.get("/me/annual-revenue", requireAuth, getAnnualRevenueController);
+router.post("/me/upgrade-to-pro", requireAuth, upgradeToProController);
 router.patch("/me", requireAuth, updateMyProviderProfile);
 
 // ⭐ Routes Dopamine (tracking, favoris, messages)
