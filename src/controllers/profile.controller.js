@@ -33,10 +33,12 @@ export async function getProfile(req, res) {
     return res.status(404).json({ error: "Profile not found" });
   }
 
+  // limit(1) + take first row to avoid "Cannot coerce the result to a single JSON object"
+  // when duplicate profile rows exist for the same user_id
   const [customerRes, companyRes, providerRes] = await Promise.all([
-    supabaseAdmin.from("customer_profiles").select("first_name, last_name, default_address, preferred_city_id, vehicle_type, service_at_home, home_water, home_electricity, home_space, avatar_url").eq("user_id", userId).maybeSingle(),
-    supabaseAdmin.from("company_profiles").select("legal_name, company_type_id, city, postal_code, contact_name, logo_url, commercial_name, bce_number, country, registered_address, legal_representative_name, languages_spoken, currency, sector, fleet_size, main_address, mission_zones, place_types, is_verified, payment_success_rate, late_cancellations_count, open_disputes_count, closed_disputes_count, missions_posted_count, missions_completed_count, detailer_satisfaction_rate, detailer_rating").eq("user_id", userId).maybeSingle(),
-    supabaseAdmin.from("provider_profiles").select("display_name, bio, base_city, postal_code, has_mobile_service, has_garage, min_price, rating, services, company_name, lat, lng, review_count, team_size, years_of_experience, logo_url, banner_url, transport_price_per_km, transport_enabled, welcoming_offer_enabled, opening_hours, available_today").eq("user_id", userId).maybeSingle(),
+    supabaseAdmin.from("customer_profiles").select("first_name, last_name, default_address, preferred_city_id, vehicle_type, service_at_home, home_water, home_electricity, home_space, avatar_url").eq("user_id", userId).limit(1),
+    supabaseAdmin.from("company_profiles").select("legal_name, company_type_id, city, postal_code, contact_name, logo_url, commercial_name, bce_number, country, registered_address, legal_representative_name, languages_spoken, currency, sector, fleet_size, main_address, mission_zones, place_types, is_verified, payment_success_rate, late_cancellations_count, open_disputes_count, closed_disputes_count, missions_posted_count, missions_completed_count, detailer_satisfaction_rate, detailer_rating").eq("user_id", userId).limit(1),
+    supabaseAdmin.from("provider_profiles").select("display_name, bio, base_city, postal_code, has_mobile_service, has_garage, min_price, rating, services, company_name, lat, lng, review_count, team_size, years_of_experience, logo_url, banner_url, transport_price_per_km, transport_enabled, welcoming_offer_enabled, opening_hours, available_today").eq("user_id", userId).limit(1),
   ]);
 
   if (customerRes.error) console.warn("[PROFILE] customer_profiles error:", customerRes.error.message);
@@ -45,9 +47,9 @@ export async function getProfile(req, res) {
 
   const data = {
     ...userRow,
-    customer_profiles: customerRes.data ? [customerRes.data] : [],
-    company_profiles: companyRes.data ? [companyRes.data] : [],
-    provider_profiles: providerRes.data ? [providerRes.data] : [],
+    customer_profiles: customerRes.data?.length ? [customerRes.data[0]] : [],
+    company_profiles: companyRes.data?.length ? [companyRes.data[0]] : [],
+    provider_profiles: providerRes.data?.length ? [providerRes.data[0]] : [],
   };
 
   try {
@@ -314,24 +316,38 @@ export async function updateProfile(req, res) {
 }
 
 // ========= EXPORT PROFILE (RGPD – télécharger mes données) =========
+// Même logique que getProfile : requêtes séparées + limit(1) pour éviter "Cannot coerce"
 export async function exportProfileData(req, res) {
   const userId = req.user?.id;
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
-    const { data, error } = await supabase
+    const { data: userRow, error: userError } = await supabaseAdmin
       .from("users")
       .select(`
         id, email, phone, role, vat_number, is_vat_valid,
-        referral_code, referred_by, created_at, updated_at,
-        customer_profiles (*),
-        company_profiles (*),
-        provider_profiles (*)
+        referral_code, referred_by, customer_credits_eur,
+        welcoming_offer_used, dismissed_first_booking_offer,
+        created_at, updated_at
       `)
       .eq("id", userId)
-      .single();
-    if (error) return res.status(500).json({ error: error.message });
+      .maybeSingle();
+    if (userError) return res.status(500).json({ error: userError.message });
+    if (!userRow) return res.status(404).json({ error: "Profile not found" });
+
+    const [customerRes, companyRes, providerRes] = await Promise.all([
+      supabaseAdmin.from("customer_profiles").select("first_name, last_name, default_address, preferred_city_id, vehicle_type, service_at_home, home_water, home_electricity, home_space, avatar_url").eq("user_id", userId).limit(1),
+      supabaseAdmin.from("company_profiles").select("legal_name, company_type_id, city, postal_code, contact_name, logo_url, commercial_name, bce_number, country, registered_address, legal_representative_name, languages_spoken, currency, sector, fleet_size, main_address, mission_zones, place_types, is_verified, payment_success_rate, late_cancellations_count, open_disputes_count, closed_disputes_count, missions_posted_count, missions_completed_count, detailer_satisfaction_rate, detailer_rating").eq("user_id", userId).limit(1),
+      supabaseAdmin.from("provider_profiles").select("display_name, bio, base_city, postal_code, has_mobile_service, has_garage, min_price, rating, services, company_name, lat, lng, review_count, team_size, years_of_experience, logo_url, banner_url, transport_price_per_km, transport_enabled, welcoming_offer_enabled, opening_hours, available_today").eq("user_id", userId).limit(1),
+    ]);
+
+    const data = {
+      ...userRow,
+      customer_profiles: customerRes.data?.length ? [customerRes.data[0]] : [],
+      company_profiles: companyRes.data?.length ? [companyRes.data[0]] : [],
+      provider_profiles: providerRes.data?.length ? [providerRes.data[0]] : [],
+    };
     const userDto = mapUserRowToDto(data);
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Content-Disposition", "attachment; filename=\"nios-my-data.json\"");
