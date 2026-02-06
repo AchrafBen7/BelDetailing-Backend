@@ -33,8 +33,8 @@ export async function addPortfolioPhoto(providerId, payload) {
 
   if (countError) throw countError;
 
-  if (typeof count === "number" && count >= 10) {
-    throw toError("Maximum 10 photos allowed per provider portfolio", 400);
+  if (typeof count === "number" && count >= 12) {
+    throw toError("Maximum 12 photos allowed per provider portfolio", 400);
   }
 
   const { data, error } = await supabase

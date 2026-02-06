@@ -72,13 +72,22 @@ app.set("trust proxy", 1);
 app.use(helmet());
 
 // 🛡️ SÉCURITÉ : CORS strict avec origin explicite (pas origin: true en prod)
+// ℹ️ NOTE : CORS ne s'applique PAS aux apps natives iOS/Android (URLSession bypass CORS)
+// Cette protection est seulement pour les navigateurs web (ex: dashboard admin)
 const corsOrigin = process.env.CORS_ORIGIN;
+
 if (!corsOrigin && process.env.NODE_ENV === "production") {
-  console.warn("⚠️ [SECURITY] CORS_ORIGIN non défini en production ! Risque de sécurité.");
+  console.log("ℹ️ [CORS] CORS_ORIGIN non défini → Bloque les navigateurs web, autorise les apps natives");
 }
+
 app.use(
   cors({
-    origin: corsOrigin ? corsOrigin.split(",").map((o) => o.trim()) : (process.env.NODE_ENV === "production" ? false : true),
+    // Si CORS_ORIGIN défini → whitelist stricte
+    // Sinon en prod → false (bloque navigateurs web, apps natives OK)
+    // Sinon en dev → true (permissif pour debug)
+    origin: corsOrigin 
+      ? corsOrigin.split(",").map((o) => o.trim()) 
+      : (process.env.NODE_ENV === "production" ? false : true),
     credentials: true,
   })
 );
