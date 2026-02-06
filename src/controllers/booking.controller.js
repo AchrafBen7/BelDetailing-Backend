@@ -1522,10 +1522,28 @@ export async function confirmBooking(req, res) {
       });
     }
 
-    // Payment must exist
-    if (!booking.payment_intent_id) {
-      return res.status(400).json({
-        error: "No payment intent for this booking",
+    const createdAt = new Date(booking.created_at);
+    const hoursSinceCreation = (Date.now() - createdAt.getTime()) / 1000 / 3600;
+    const isExpired = hoursSinceCreation > 24 || !booking.payment_intent_id;
+
+    // Si la demande a plus de 24h ou pas de payment intent : annulation automatique (disparaît du calendrier)
+    if (isExpired) {
+      if (booking.payment_intent_id && booking.payment_status === "preauthorized") {
+        try {
+          await refundPayment(booking.payment_intent_id);
+        } catch (refundErr) {
+          console.error("[BOOKINGS] Auto-cancel refund error:", refundErr);
+        }
+      }
+      const updated = await updateBookingService(bookingId, {
+        status: "cancelled",
+        payment_status: booking.payment_intent_id ? "refunded" : "pending",
+      });
+      return res.status(200).json({
+        success: true,
+        expiredAndCancelled: true,
+        message: "Cette réservation a expiré et a été annulée automatiquement.",
+        data: updated,
       });
     }
 
@@ -1533,16 +1551,6 @@ export async function confirmBooking(req, res) {
     if (booking.payment_status !== "preauthorized") {
       return res.status(400).json({
         error: "Booking is not in preauthorized state",
-      });
-    }
-
-    // Optional check: confirm only if booking is <24h old
-    const createdAt = new Date(booking.created_at);
-    const hoursSinceCreation = (Date.now() - createdAt.getTime()) / 1000 / 3600;
-
-    if (hoursSinceCreation > 24) {
-      return res.status(400).json({
-        error: "Confirmation window expired (24h)",
       });
     }
 
