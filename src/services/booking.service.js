@@ -33,10 +33,19 @@ export async function getBookings({ userId, scope, status }) {
     query.eq("status", status);
   }
 
-  const { data, error } = await query.order("created_at", { ascending: false });
+  const { data: rawData, error } = await query.order("created_at", { ascending: false });
   if (error) throw error;
 
-  console.log(`✅ [BOOKINGS SERVICE] Found ${data?.length || 0} bookings for userId: ${userId}, scope: ${scope}`);
+  // Exclure les bookings "fantômes" : pending avec payment_status pending ou failed
+  // Ce sont des réservations où le paiement n'a jamais abouti (abandon Apple Pay, etc.)
+  const data = (rawData || []).filter(booking => {
+    if (booking.status === "pending" && (booking.payment_status === "pending" || booking.payment_status === "failed")) {
+      return false; // Exclure
+    }
+    return true;
+  });
+
+  console.log(`✅ [BOOKINGS SERVICE] Found ${data.length} bookings for userId: ${userId}, scope: ${scope} (filtered from ${rawData?.length || 0})`);
   if (data && data.length > 0 && scope === "customer") {
     // Vérifier que toutes les réservations appartiennent bien au customer
     const allBelongToCustomer = data.every(booking => booking.customer_id === userId);

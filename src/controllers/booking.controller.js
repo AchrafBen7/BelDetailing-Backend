@@ -1118,34 +1118,42 @@ export async function cancelBooking(req, res) {
       return res.status(403).json({ error: "You are not allowed to cancel this booking" });
     }
 
-    // ✅ NOUVEAU SYSTÈME: Calcul du remboursement selon politique NIOS
-    if (booking.payment_intent_id && booking.payment_status === "paid") {
-      const bookingDateTime = buildBookingDateTime(
-        booking.date,
-        booking.start_time
-      );
-      const hoursUntilBooking = bookingDateTime
-        ? (bookingDateTime.getTime() - Date.now()) / 1000 / 3600
-        : null;
+    // ✅ Gestion du remboursement selon le statut du paiement
+    if (booking.payment_intent_id) {
+      if (booking.payment_status === "preauthorized") {
+        // Pré-autorisation → annuler la pré-autorisation (cancel le PaymentIntent)
+        try {
+          await refundPayment(booking.payment_intent_id);
+          console.log(`💰 [CANCEL] Booking ${bookingId}: Preauthorization cancelled`);
+        } catch (refundErr) {
+          console.warn(`⚠️ [CANCEL] Could not cancel preauth for ${bookingId}:`, refundErr.message);
+        }
+      } else if (booking.payment_status === "paid") {
+        // Paiement capturé → calcul du remboursement selon politique NIOS
+        const bookingDateTime = buildBookingDateTime(
+          booking.date,
+          booking.start_time
+        );
+        const hoursUntilBooking = bookingDateTime
+          ? (bookingDateTime.getTime() - Date.now()) / 1000 / 3600
+          : null;
 
-      if (hoursUntilBooking != null) {
-        const { refundAmount, retainedAmount, retainedItems } = 
-          calculateRefundAmount(booking, hoursUntilBooking);
+        if (hoursUntilBooking != null) {
+          const { refundAmount, retainedAmount, retainedItems } = 
+            calculateRefundAmount(booking, hoursUntilBooking);
 
-        // Effectuer le remboursement partiel (si montant < total)
-        if (refundAmount > 0 && refundAmount < booking.price) {
-          await refundPayment(booking.payment_intent_id, refundAmount);
-        } else if (refundAmount >= booking.price) {
-          // Remboursement intégral
+          if (refundAmount > 0 && refundAmount < booking.price) {
+            await refundPayment(booking.payment_intent_id, refundAmount);
+          } else if (refundAmount >= booking.price) {
+            await refundPayment(booking.payment_intent_id);
+          }
+
+          console.log(`💰 [CANCEL] Booking ${bookingId}: Refund ${refundAmount.toFixed(2)}€, Retained: ${retainedAmount.toFixed(2)}€ (NIOS: ${retainedItems.niosFee.toFixed(2)}€, Transport: ${retainedItems.transportFee.toFixed(2)}€)`);
+        } else {
           await refundPayment(booking.payment_intent_id);
         }
-        // Si refundAmount = 0, pas de remboursement (ne devrait pas arriver selon les règles)
-
-        console.log(`💰 [CANCEL] Booking ${bookingId}: Refund ${refundAmount.toFixed(2)}€, Retained: ${retainedAmount.toFixed(2)}€ (NIOS: ${retainedItems.niosFee.toFixed(2)}€, Transport: ${retainedItems.transportFee.toFixed(2)}€)`);
-      } else {
-        // Si on ne peut pas calculer les heures, remboursement intégral par sécurité
-        await refundPayment(booking.payment_intent_id);
       }
+      // Si payment_status === "pending" ou "failed", rien à rembourser
     }
 
     const ok = await updateBookingStatus(bookingId, "cancelled");

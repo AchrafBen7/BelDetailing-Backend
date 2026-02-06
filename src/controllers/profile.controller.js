@@ -3,6 +3,10 @@ import { mapUserRowToDto } from "../mappers/user.mapper.js";
 import { supabase, supabaseAdmin } from "../config/supabase.js";
 import { getCompanyReliabilityMetrics } from "../services/companyProfileStats.service.js";
 
+// ⚠️ Toutes les opérations DB dans ce fichier utilisent supabaseAdmin (service role)
+// pour contourner RLS et éviter "Cannot coerce" errors.
+// supabase (anon) est réservé à l'authentification (signIn, etc.).
+
 
 // ========= GET PROFILE =========
 // Requêtes séparées (sans jointure) pour éviter "Cannot coerce the result to a single JSON object"
@@ -89,7 +93,7 @@ export async function updateProfile(req, res) {
   }
 
   // ✅ Récupérer le rôle actuel de l'utilisateur
-  const { data: currentUser, error: currentUserError } = await supabase
+  const { data: currentUser, error: currentUserError } = await supabaseAdmin
     .from("users")
     .select("role")
     .eq("id", userId)
@@ -123,7 +127,7 @@ export async function updateProfile(req, res) {
     }
     
     // Mettre à jour le rôle vers "provider"
-    const { error: roleError } = await supabase
+    const { error: roleError } = await supabaseAdmin
       .from("users")
       .update({
         role: "provider",
@@ -137,7 +141,7 @@ export async function updateProfile(req, res) {
     }
     
     // Réinitialiser le plafond (plus nécessaire pour les Pros)
-    await supabase
+    await supabaseAdmin
       .from("provider_profiles")
       .update({
         annual_revenue_limit: null,
@@ -160,7 +164,7 @@ export async function updateProfile(req, res) {
   if (dismissedFirstBookingOffer !== undefined) userUpdate.dismissed_first_booking_offer = dismissedFirstBookingOffer === true;
 
   if (Object.keys(userUpdate).length > 0) {
-    const { error: userError } = await supabase
+    const { error: userError } = await supabaseAdmin
       .from("users")
       .update(userUpdate)
       .eq("id", userId);
@@ -185,7 +189,7 @@ export async function updateProfile(req, res) {
       avatarUrl,
     } = customerProfile;
 
-    const { error: customerError } = await supabase
+    const { error: customerError } = await supabaseAdmin
       .from("customer_profiles")
       .upsert(
         {
@@ -232,7 +236,7 @@ export async function updateProfile(req, res) {
       placeTypes,
     } = companyProfile;
 
-    const { error: companyError } = await supabase
+    const { error: companyError } = await supabaseAdmin
       .from("company_profiles")
       .upsert(
         {
@@ -302,7 +306,7 @@ export async function updateProfile(req, res) {
       providerUpdate.welcoming_offer_enabled = welcomingOfferEnabled;
     }
 
-    const { error: providerError } = await supabase
+    const { error: providerError } = await supabaseAdmin
       .from("provider_profiles")
       .upsert(providerUpdate, { onConflict: "user_id" });
 
