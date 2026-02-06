@@ -57,7 +57,11 @@ export async function lookupVAT(vatNumber) {
 </soap:Envelope>`;
 
   try {
-    console.log(`🔍 [VAT] Calling VIES for ${countryCode}${number}`);
+    // 🛡️ SÉCURITÉ : Masquer le numéro TVA (PII) en production
+    const maskedNumber = process.env.NODE_ENV === "production" 
+      ? `${countryCode}${number.slice(0, 4)}****` 
+      : `${countryCode}${number}`;
+    console.log(`🔍 [VAT] Calling VIES for ${maskedNumber}`);
 
     const response = await axios.post(VIES_URL, soapBody, {
       headers: {
@@ -139,7 +143,12 @@ export async function lookupVAT(vatNumber) {
       checkVatResponse.address ||
       null;
 
-    console.log(`✅ [VAT] Valid: ${valid}, Name: ${name}, Address: ${address}`);
+    // 🛡️ SÉCURITÉ : Masquer les infos personnelles (nom, adresse) en production
+    if (process.env.NODE_ENV === "production") {
+      console.log(`✅ [VAT] Valid: ${valid}`);
+    } else {
+      console.log(`✅ [VAT] Valid: ${valid}, Name: ${name}, Address: ${address}`);
+    }
 
     if (!valid) {
       return {

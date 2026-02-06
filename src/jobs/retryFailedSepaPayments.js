@@ -1,6 +1,7 @@
 // src/jobs/retryFailedSepaPayments.js
 import cron from "node-cron";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { withCronLock } from "../utils/cronLock.js";
 
 /**
  * 🔄 CRON JOB : Retry automatique des paiements SEPA échoués
@@ -190,17 +191,22 @@ async function retryFailedPayments() {
  * Configuration du cron
  * - Toutes les 6 heures
  * - Format : "minute hour day month weekday"
+ * - 🛡️ SÉCURITÉ : Verrou DB pour éviter double exécution en multi-instances
  */
 export function startSepaRetryJobCron() {
   console.log("✅ [RETRY] SEPA retry job initialized (runs every 6 hours)");
   
-  // Toutes les 6 heures (00:00, 06:00, 12:00, 18:00)
-  cron.schedule("0 */6 * * *", retryFailedPayments, {
+  // Toutes les 6 heures (00:00, 06:00, 12:00, 18:00) avec verrou DB
+  cron.schedule("0 */6 * * *", async () => {
+    await withCronLock("retry-failed-sepa-payments", retryFailedPayments, 600); // TTL 10min
+  }, {
     timezone: "Europe/Brussels",
   });
   
   // ⚠️ POUR TESTS : Décommenter pour exécuter toutes les 10 minutes
-  // cron.schedule("*/10 * * * *", retryFailedPayments, {
+  // cron.schedule("*/10 * * * *", async () => {
+  //   await withCronLock("retry-failed-sepa-payments", retryFailedPayments, 600);
+  // }, {
   //   timezone: "Europe/Brussels",
   // });
 }

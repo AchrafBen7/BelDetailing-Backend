@@ -65,12 +65,20 @@ console.log("🔄 [APP] Creating Express app...");
 const app = express();
 console.log("✅ [APP] Express app created");
 
+// 🛡️ SÉCURITÉ : Trust proxy si derrière un reverse proxy (Railway, Heroku, Nginx)
+// Permet au rate limiting de voir la vraie IP du client (pas celle du proxy)
+app.set("trust proxy", 1);
+
 app.use(helmet());
 
+// 🛡️ SÉCURITÉ : CORS strict avec origin explicite (pas origin: true en prod)
 const corsOrigin = process.env.CORS_ORIGIN;
+if (!corsOrigin && process.env.NODE_ENV === "production") {
+  console.warn("⚠️ [SECURITY] CORS_ORIGIN non défini en production ! Risque de sécurité.");
+}
 app.use(
   cors({
-    origin: corsOrigin ? corsOrigin.split(",").map((o) => o.trim()) : true,
+    origin: corsOrigin ? corsOrigin.split(",").map((o) => o.trim()) : (process.env.NODE_ENV === "production" ? false : true),
     credentials: true,
   })
 );
@@ -178,7 +186,23 @@ app.use("/api/v1/vat", vatRoutes);
 app.use("/api/v1/chat", chatRoutes);
 app.use("/api/v1/reviews", googleReviewRoutes);
 
-app.get("/metrics", metricsEndpoint);
+// 🛡️ SÉCURITÉ : Protéger /metrics en production avec un secret
+app.get("/metrics", (req, res, next) => {
+  if (process.env.NODE_ENV === "production") {
+    const secret = req.headers["x-metrics-secret"];
+    const expectedSecret = process.env.METRICS_SECRET;
+    
+    if (!expectedSecret) {
+      console.warn("⚠️ [SECURITY] METRICS_SECRET non défini en production ! Endpoint /metrics désactivé.");
+      return res.status(403).json({ error: "Metrics endpoint disabled" });
+    }
+    
+    if (secret !== expectedSecret) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+  }
+  next();
+}, metricsEndpoint);
 
 // Healthcheck
 app.get("/api/v1/health", async (req, res) => {

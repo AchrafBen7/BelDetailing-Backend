@@ -9,9 +9,12 @@ export async function uploadMedia(req, res) {
     }
 
     const file = req.file;
+    const userId = req.user.id;
     const ext = file.originalname.split(".").pop();
     const id = nanoid();
-    const path = `${id}.${ext}`; // ex: abcd1234.jpeg
+    
+    // 🛡️ SÉCURITÉ : Path avec préfixe user pour ownership et isolation
+    const path = `${userId}/${id}.${ext}`; // ex: user123/abcd1234.jpeg
 
     const { data, error } = await supabaseAdmin.storage
       .from("media")
@@ -30,6 +33,24 @@ export async function uploadMedia(req, res) {
       data: { publicUrl },
     } = supabaseAdmin.storage.from("media").getPublicUrl(path);
 
+    // 🛡️ SÉCURITÉ : Tracker l'upload dans la DB pour ownership
+    const { error: dbError } = await supabaseAdmin
+      .from("media_uploads")
+      .insert({
+        id,
+        user_id: userId,
+        storage_path: path,
+        file_name: file.originalname,
+        mime_type: file.mimetype,
+        file_size: file.size,
+        public_url: publicUrl,
+      });
+
+    if (dbError) {
+      console.warn("[MEDIA] DB tracking failed (non-blocking):", dbError);
+      // Non-bloquant : l'upload a réussi même si le tracking échoue
+    }
+
     return res.status(201).json({
       id,
       url: publicUrl,
@@ -45,18 +66,53 @@ export async function uploadMedia(req, res) {
 export async function deleteMedia(req, res) {
   try {
     const { id } = req.params;
+    const userId = req.user.id;
+
     if (!id) {
       return res.status(400).json({ error: "Missing id" });
     }
 
-    const { error } = await supabaseAdmin
+    // 🛡️ SÉCURITÉ : Vérifier ownership avant suppression
+    const { data: upload, error: fetchError } = await supabaseAdmin
+      .from("media_uploads")
+      .select("storage_path, user_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error("[MEDIA] ownership check error:", fetchError);
+      return res.status(500).json({ error: "Could not verify ownership" });
+    }
+
+    if (!upload) {
+      return res.status(404).json({ error: "Media not found" });
+    }
+
+    // 🛡️ SÉCURITÉ : Seul le propriétaire peut supprimer
+    if (upload.user_id !== userId) {
+      return res.status(403).json({ error: "Forbidden: you don't own this media" });
+    }
+
+    // Suppression du fichier dans Supabase Storage
+    const { error: storageError } = await supabaseAdmin
       .storage
       .from("media")
-      .remove([id]);            // on supprime le fichier "id.ext"
+      .remove([upload.storage_path]);
 
-    if (error) {
-      console.error("[MEDIA] delete error:", error);
-      return res.status(500).json({ error: "Could not delete file" });
+    if (storageError) {
+      console.error("[MEDIA] storage delete error:", storageError);
+      return res.status(500).json({ error: "Could not delete file from storage" });
+    }
+
+    // Suppression de l'entrée DB
+    const { error: dbError } = await supabaseAdmin
+      .from("media_uploads")
+      .delete()
+      .eq("id", id);
+
+    if (dbError) {
+      console.warn("[MEDIA] DB cleanup failed (non-blocking):", dbError);
+      // Non-bloquant : le fichier est supprimé même si la DB échoue
     }
 
     return res.json({ success: true });

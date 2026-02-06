@@ -1,6 +1,7 @@
 // src/jobs/captureMissionPayments.js
 import cron from "node-cron";
 import { supabaseAdmin as supabase } from "../config/supabase.js";
+import { withCronLock } from "../utils/cronLock.js";
 
 /**
  * 🔄 CRON JOB : Capture automatique des paiements mensuels programmés
@@ -135,17 +136,22 @@ async function captureScheduledPayments() {
  * Configuration du cron
  * - Tous les jours à 9h (Europe/Brussels)
  * - Format : "minute hour day month weekday"
+ * - 🛡️ SÉCURITÉ : Verrou DB pour éviter double exécution en multi-instances
  */
 export function startMissionPaymentsCron() {
   console.log("✅ [CRON] Mission payments capture job initialized (runs daily at 9:00 AM)");
   
-  // Tous les jours à 9h
-  cron.schedule("0 9 * * *", captureScheduledPayments, {
+  // Tous les jours à 9h avec verrou DB
+  cron.schedule("0 9 * * *", async () => {
+    await withCronLock("capture-mission-payments", captureScheduledPayments, 600); // TTL 10min
+  }, {
     timezone: "Europe/Brussels",
   });
   
   // ⚠️ POUR TESTS : Décommenter pour exécuter toutes les 5 minutes
-  // cron.schedule("*/5 * * * *", captureScheduledPayments, {
+  // cron.schedule("*/5 * * * *", async () => {
+  //   await withCronLock("capture-mission-payments", captureScheduledPayments, 600);
+  // }, {
   //   timezone: "Europe/Brussels",
   // });
 }
