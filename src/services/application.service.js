@@ -38,6 +38,19 @@ const MAX_APPLICATIONS_PER_OFFER = 50;
 
 // 🟦 APPLY – POST /offers/:offerId/apply (provider)
 export async function applyToOffer(offerId, payload, user) {
+  // 🚨 BLOQUER provider_passionate (B2B interdit pour les passionnés sans TVA)
+  // Les providers passionate (max 2000€/an, sans TVA) ne peuvent travailler qu'avec des particuliers (B2C)
+  // Ils ne peuvent PAS facturer des entreprises (B2B) pour des raisons légales et fiscales
+  if (user.role === "provider_passionate") {
+    const err = new Error(
+      "Passionate providers cannot apply to B2B offers. " +
+      "Only Professional providers with VAT can work with companies. " +
+      "Please upgrade to Pro account (VAT required) in Profile > Edit Profile."
+    );
+    err.statusCode = 403;
+    throw err;
+  }
+
   // 0) Vérifier que l'offre existe et est encore "open"
   const { data: offerRow, error: offerError } = await supabase
     .from("offers")

@@ -14,6 +14,9 @@ import { retryFailedTransfers } from "./cron/retryFailedTransfers.js";
 import { captureDayOnePaymentsCron } from "./cron/captureDayOnePayments.js";
 import { runBookingStatusTransitions } from "./cron/bookingStatusTransitions.js";
 import { transferBookingToProviderCron } from "./cron/transferBookingToProvider.js";
+// 🆕 Nouveaux crons pour missions B2B
+import { startMissionPaymentsCron } from "./jobs/captureMissionPayments.js";
+import { startSepaRetryJobCron } from "./jobs/retryFailedSepaPayments.js";
 console.log("✅ [APP] Cron jobs loaded");
 
 console.log("🔄 [APP] Loading config and observability...");
@@ -273,5 +276,15 @@ cron.schedule("*/15 * * * *", async () => {
     console.error("❌ CRON transferBookingToProvider error:", err);
   }
 });
+
+// 🆕 Capture automatique des paiements mensuels programmés (missions B2B)
+// S'exécute tous les jours à 9h (Europe/Brussels)
+console.log("✅ [CRON] Initializing mission payments capture job...");
+startMissionPaymentsCron();
+
+// 🆕 Retry automatique des paiements SEPA échoués (missions B2B)
+// S'exécute toutes les 6 heures (00:00, 06:00, 12:00, 18:00)
+console.log("✅ [CRON] Initializing SEPA retry job...");
+startSepaRetryJobCron();
 
 export default app;
