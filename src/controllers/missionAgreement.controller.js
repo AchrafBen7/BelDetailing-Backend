@@ -18,6 +18,13 @@ import {
   createIntelligentPaymentSchedule,
   getPaymentScheduleSummary,
 } from "../services/missionPaymentScheduleIntelligent.service.js";
+import {
+  confirmMissionStart,
+  confirmMissionEnd,
+  suspendMission,
+  resumeMission,
+  getConfirmationStatus,
+} from "../services/missionConfirmation.service.js";
 
 /**
  * 🔹 GET /api/v1/mission-agreements/:id
@@ -429,54 +436,25 @@ export async function createMissionPaymentsController(req, res) {
       });
     }
 
-    // 1) Créer le plan de paiement intelligent
-    const paymentSchedule = await createIntelligentPaymentSchedule(id, false); // authorizeAll = false car on va créer les paiements immédiatement
+    // 1) Créer le plan de paiement intelligent (monthly/final payments only)
+    // NOTE: Les paiements J1 (commission + deposit) seront créés UNIQUEMENT quand
+    // les deux parties auront confirmé le démarrage de la mission via confirm-start
+    const paymentSchedule = await createIntelligentPaymentSchedule(id, false);
 
-    // 2) ✅ CRÉER ET CONFIRMER IMMÉDIATEMENT les paiements du jour 1 (commission + acompte)
-    // Pour SEPA, les PaymentIntents sont créés avec confirm: true et seront en "processing"
-    // Le statut sera mis à jour à "succeeded" via webhook (2-5 jours)
-    const { createDayOnePayments, captureDayOnePayments } = await import("../services/missionPaymentDayOne.service.js");
-    
-    console.log("🔄 [CREATE PAYMENTS] Creating and confirming day one payments (commission + deposit)...");
-    const createResult = await createDayOnePayments(id);
-    
-    let captureResult = { commissionCaptured: 0, depositCaptured: 0, totalCaptured: 0 };
-    
-    if (!createResult.alreadyCreated) {
-      console.log("🔄 [CREATE PAYMENTS] Day one payments created, checking status...");
-      // ✅ Pour SEPA, les PaymentIntents sont déjà confirmés (confirm: true)
-      // On vérifie leur statut et on met à jour les paiements en conséquence
-      captureResult = await captureDayOnePayments(id);
-      console.log(`✅ [CREATE PAYMENTS] Day one payments status updated: commission=${captureResult.commissionCaptured}€, deposit=${captureResult.depositCaptured}€, total=${captureResult.totalCaptured}€`);
-    } else {
-      console.log("ℹ️ [CREATE PAYMENTS] Day one payments already created, checking current status...");
-      // Vérifier le statut actuel des paiements existants
-      try {
-        captureResult = await captureDayOnePayments(id);
-      } catch (err) {
-        console.warn("⚠️ [CREATE PAYMENTS] Could not check payment status:", err.message);
-      }
-    }
+    // 2) Mettre à jour le statut à "payment_scheduled"
+    // Les paiements J1 ne sont PAS déclenchés maintenant.
+    // Ils le seront quand company + detailer confirment le démarrage (confirm-start).
+    await updateMissionAgreementStatus(id, "payment_scheduled");
 
-    // 3) Mettre à jour le statut à "active" (paiements initiaux créés et confirmés)
-    await updateMissionAgreementStatus(id, "active");
-
-    // ✅ Message adapté selon le statut des paiements
-    const message = captureResult.totalCaptured > 0
-      ? "Payment schedule created and initial payments captured successfully"
-      : "Payment schedule created. Initial payments (commission + deposit) are being processed via SEPA Direct Debit (2-5 business days)";
+    console.log(`[CREATE PAYMENTS] Payment schedule created for ${id}. Status → payment_scheduled. Waiting for mutual start confirmation.`);
 
     return res.json({
       data: {
         agreementId: id,
         schedule: paymentSchedule,
-        message,
-        initialPayments: {
-          commission: captureResult.commissionCaptured || 0,
-          deposit: captureResult.depositCaptured || 0,
-          total: captureResult.totalCaptured || 0,
-          status: captureResult.totalCaptured > 0 ? "captured" : "processing", // ✅ Indiquer si en processing
-        },
+        message: "Plan de paiement créé. Les deux parties doivent maintenant confirmer le démarrage de la mission pour déclencher les paiements du jour 1.",
+        status: "payment_scheduled",
+        nextStep: "confirm_start",
       },
     });
   } catch (err) {
@@ -544,5 +522,141 @@ export async function getPaymentScheduleController(req, res) {
   } catch (err) {
     console.error("[MISSION AGREEMENT] get payment schedule error:", err);
     return res.status(500).json({ error: err.message || "Could not fetch payment schedule" });
+  }
+}
+
+// ============================================================
+// MUTUAL CONFIRMATION ENDPOINTS
+// ============================================================
+
+/**
+ * POST /api/v1/mission-agreements/:id/confirm-start
+ * Company ou detailer confirme le démarrage de la mission.
+ * Quand les deux ont confirmé → déclenche paiements J1 → status = active
+ */
+export async function confirmMissionStartController(req, res) {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    if (userRole !== "company" && userRole !== "provider") {
+      return res.status(403).json({ error: "Only companies and providers can confirm mission start" });
+    }
+
+    const result = await confirmMissionStart(id, userId, userRole);
+
+    return res.json({ data: result });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] confirm start error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not confirm mission start" });
+  }
+}
+
+/**
+ * POST /api/v1/mission-agreements/:id/confirm-end
+ * Company ou detailer confirme la fin de la mission.
+ * Quand les deux ont confirmé → déclenche paiement final → status = completed
+ */
+export async function confirmMissionEndController(req, res) {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    if (userRole !== "company" && userRole !== "provider") {
+      return res.status(403).json({ error: "Only companies and providers can confirm mission end" });
+    }
+
+    const result = await confirmMissionEnd(id, userId, userRole);
+
+    return res.json({ data: result });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] confirm end error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not confirm mission end" });
+  }
+}
+
+/**
+ * POST /api/v1/mission-agreements/:id/suspend
+ * Suspendre une mission active (met les paiements en pause)
+ */
+export async function suspendMissionController(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    if (userRole !== "company" && userRole !== "provider" && userRole !== "admin") {
+      return res.status(403).json({ error: "Only companies, providers, or admins can suspend missions" });
+    }
+
+    const result = await suspendMission(id, userId, userRole, reason);
+
+    return res.json({ data: result });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] suspend error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not suspend mission" });
+  }
+}
+
+/**
+ * POST /api/v1/mission-agreements/:id/resume
+ * Reprendre une mission suspendue
+ */
+export async function resumeMissionController(req, res) {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    if (userRole !== "company" && userRole !== "provider" && userRole !== "admin") {
+      return res.status(403).json({ error: "Only companies, providers, or admins can resume missions" });
+    }
+
+    const result = await resumeMission(id, userId, userRole);
+
+    return res.json({ data: result });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] resume error:", err);
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({ error: err.message || "Could not resume mission" });
+  }
+}
+
+/**
+ * GET /api/v1/mission-agreements/:id/confirmation-status
+ * Récupérer le statut de confirmation de démarrage/fin
+ */
+export async function getConfirmationStatusController(req, res) {
+  try {
+    const { id } = req.params;
+
+    // Vérifier que l'agreement existe et que l'utilisateur a le droit
+    const agreement = await getMissionAgreementById(id);
+    if (!agreement) {
+      return res.status(404).json({ error: "Mission Agreement not found" });
+    }
+
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    if (userRole === "company" && agreement.companyId !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    if (userRole === "provider" && agreement.detailerId !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const status = await getConfirmationStatus(id);
+
+    return res.json({ data: status });
+  } catch (err) {
+    console.error("[MISSION AGREEMENT] get confirmation status error:", err);
+    return res.status(500).json({ error: "Could not fetch confirmation status" });
   }
 }

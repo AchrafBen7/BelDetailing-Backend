@@ -15,6 +15,12 @@ import {
   cancelMissionAgreementController,
   createMissionPaymentsController,
   getPaymentScheduleController,
+  // Mutual Confirmation
+  confirmMissionStartController,
+  confirmMissionEndController,
+  suspendMissionController,
+  resumeMissionController,
+  getConfirmationStatusController,
 } from "../controllers/missionAgreement.controller.js";
 import {
   getInitialPaymentsController,
@@ -81,5 +87,24 @@ router.get("/:id/initial-payments", getInitialPaymentsController);
 
 // POST /api/v1/mission-agreements/:id/initial-payments/create (créer les paiements initiaux si manquants)
 router.post("/:id/initial-payments/create", createInitialPaymentsController);
+
+// ============================================================
+// MUTUAL CONFIRMATION ROUTES
+// ============================================================
+
+// POST /api/v1/mission-agreements/:id/confirm-start (company ou detailer confirme le démarrage)
+router.post("/:id/confirm-start", confirmMissionStartController);
+
+// POST /api/v1/mission-agreements/:id/confirm-end (company ou detailer confirme la fin)
+router.post("/:id/confirm-end", confirmMissionEndController);
+
+// POST /api/v1/mission-agreements/:id/suspend (suspendre la mission)
+router.post("/:id/suspend", suspendMissionController);
+
+// POST /api/v1/mission-agreements/:id/resume (reprendre la mission)
+router.post("/:id/resume", resumeMissionController);
+
+// GET /api/v1/mission-agreements/:id/confirmation-status (statut de confirmation)
+router.get("/:id/confirmation-status", getConfirmationStatusController);
 
 export default router;

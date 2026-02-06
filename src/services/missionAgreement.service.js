@@ -73,6 +73,18 @@ export function mapMissionAgreementRowToDto(row) {
     companyAcceptedAt: row.company_accepted_at,
     detailerAcceptedAt: row.detailer_accepted_at,
     contractVersionAtAcceptance: row.contract_version_at_acceptance,
+    
+    // 6️⃣ Mutual Confirmation (démarrage / fin)
+    companyConfirmedStartAt: row.company_confirmed_start_at || null,
+    detailerConfirmedStartAt: row.detailer_confirmed_start_at || null,
+    companyConfirmedEndAt: row.company_confirmed_end_at || null,
+    detailerConfirmedEndAt: row.detailer_confirmed_end_at || null,
+    
+    // 7️⃣ Suspension
+    suspendedAt: row.suspended_at || null,
+    resumedAt: row.resumed_at || null,
+    suspensionReason: row.suspension_reason || null,
+    suspendedBy: row.suspended_by || null,
   };
 }
 
@@ -360,10 +372,14 @@ export async function updateMissionAgreementStatus(id, newStatus) {
     "draft", 
     "waiting_for_detailer_confirmation", 
     "agreement_fully_confirmed",
-    "active", 
+    "payment_scheduled",
+    "awaiting_start",
+    "active",
+    "awaiting_end",
     "completed", 
     "cancelled", 
-    "suspended"
+    "suspended",
+    "on_hold",
   ];
   if (!validStatuses.includes(newStatus)) {
     throw new Error(`Invalid status. Must be one of: ${validStatuses.join(", ")}`);
