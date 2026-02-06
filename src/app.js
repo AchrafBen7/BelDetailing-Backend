@@ -58,6 +58,7 @@ import noShowRoutes from "./routes/noShow.routes.js";
 import referralRoutes from "./routes/referral.routes.js";
 import reportRoutes from "./routes/report.routes.js";
 import blockedUsersRoutes from "./routes/blocked-users.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
 const routesImportTime = Date.now() - startRoutesImport;
 console.log(`✅ [APP] All routes loaded in ${routesImportTime}ms`);
 
@@ -204,6 +205,9 @@ app.use("/api/v1/vat", vatRoutes);
 app.use("/api/v1/chat", chatRoutes);
 app.use("/api/v1/reviews", googleReviewRoutes);
 
+// Admin Dashboard
+app.use("/api/v1/admin", adminRoutes);
+
 // 🛡️ SÉCURITÉ : Protéger /metrics en production avec un secret
 app.get("/metrics", (req, res, next) => {
   if (process.env.NODE_ENV === "production") {
@@ -222,102 +226,174 @@ app.get("/metrics", (req, res, next) => {
   next();
 }, metricsEndpoint);
 
-// Healthcheck
+// ============================================================
+// HEALTHCHECK — Basic (rapide, pour load balancer / uptime robot)
+// ============================================================
 app.get("/api/v1/health", async (req, res) => {
   try {
     const { error } = await supabase
-      .from("provider_profiles")
+      .from("users")
       .select("id")
       .limit(1);
+
+    const uptime = process.uptime();
+    const memUsage = process.memoryUsage();
 
     if (error) {
       return res.status(503).json({
         status: "degraded",
-        timestamp: Date.now(),
+        version: process.env.npm_package_version || "1.0.0",
+        uptime: Math.round(uptime),
+        timestamp: new Date().toISOString(),
         db: "unhealthy",
       });
     }
 
     return res.json({
       status: "ok",
-      timestamp: Date.now(),
+      version: process.env.npm_package_version || "1.0.0",
+      uptime: Math.round(uptime),
+      timestamp: new Date().toISOString(),
       db: "healthy",
+      memory: {
+        rss: Math.round(memUsage.rss / 1024 / 1024),
+        heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
+        heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
+      },
     });
   } catch (err) {
     return res.status(503).json({
-      status: "degraded",
-      timestamp: Date.now(),
-      db: "unhealthy",
+      status: "error",
+      timestamp: new Date().toISOString(),
+      db: "unreachable",
     });
   }
 });
 
+// ============================================================
+// DEEP HEALTHCHECK — Teste chaque dependance (admin / monitoring)
+// ============================================================
+app.get("/api/v1/health/deep", async (req, res) => {
+  const checks = {};
+  let overallStatus = "ok";
 
-// Tâche cron pour capturer automatiquement les paiements des bookings terminés
-cron.schedule("*/10 * * * *", async () => {
-  console.log("CRON running autoCapture...");
-  await autoCaptureBookings();
-});
-
-// Tâche cron pour capturer automatiquement les paiements programmés de missions
-// S'exécute toutes les heures (à la minute 0 de chaque heure)
-cron.schedule("0 * * * *", async () => {
-  console.log("CRON running captureScheduledPayments...");
+  // 1) Supabase DB
   try {
-    const result = await captureScheduledPayments();
-    console.log(`✅ CRON captureScheduledPayments completed: ${result.captured} captured, ${result.failed} failed, ${result.skipped} skipped`);
+    const start = Date.now();
+    const { error } = await supabase.from("users").select("id").limit(1);
+    checks.supabase = {
+      status: error ? "unhealthy" : "healthy",
+      latencyMs: Date.now() - start,
+      error: error?.message || null,
+    };
+    if (error) overallStatus = "degraded";
   } catch (err) {
-    console.error("❌ CRON captureScheduledPayments error:", err);
+    checks.supabase = { status: "unreachable", error: err.message };
+    overallStatus = "degraded";
   }
-});
 
-// Tâche cron pour retenter automatiquement les transferts échoués
-// S'exécute toutes les 6 heures (à la minute 0 de chaque 6ème heure: 0, 6, 12, 18)
-cron.schedule("0 */6 * * *", async () => {
-  console.log("CRON running retryFailedTransfers...");
+  // 2) Redis
   try {
-    const result = await retryFailedTransfers(10); // Limite de 10 transferts par exécution
-    console.log(`✅ CRON retryFailedTransfers completed: ${result.succeeded} succeeded, ${result.failed} failed out of ${result.total} total`);
+    const { getRedisClient } = await import("./config/redis.js");
+    const redis = getRedisClient();
+    const start = Date.now();
+    await redis.ping();
+    checks.redis = { status: "healthy", latencyMs: Date.now() - start };
   } catch (err) {
-    console.error("❌ CRON retryFailedTransfers error:", err);
+    checks.redis = { status: "unavailable", error: err.message };
+    // Redis est optionnel, on ne degrade pas le status global
   }
+
+  // 3) Stripe
+  try {
+    const Stripe = (await import("stripe")).default;
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+    const start = Date.now();
+    await stripe.balance.retrieve();
+    checks.stripe = { status: "healthy", latencyMs: Date.now() - start };
+  } catch (err) {
+    checks.stripe = { status: "unhealthy", error: err.message };
+    overallStatus = "degraded";
+  }
+
+  // 4) Cron jobs (derniere execution via cron_locks)
+  try {
+    const { data: locks } = await supabase
+      .from("cron_locks")
+      .select("job_name, locked_at, locked_by")
+      .order("locked_at", { ascending: false })
+      .limit(20);
+
+    checks.cronJobs = (locks || []).map((l) => ({
+      job: l.job_name,
+      lastRun: l.locked_at,
+      instance: l.locked_by,
+    }));
+  } catch (err) {
+    checks.cronJobs = { status: "unknown", error: err.message };
+  }
+
+  // 5) Uptime & Memory
+  checks.system = {
+    uptime: Math.round(process.uptime()),
+    nodeVersion: process.version,
+    memory: {
+      rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    },
+    env: process.env.NODE_ENV || "development",
+  };
+
+  const statusCode = overallStatus === "ok" ? 200 : 503;
+  return res.status(statusCode).json({
+    status: overallStatus,
+    timestamp: new Date().toISOString(),
+    checks,
+  });
 });
 
-// Tâche cron pour libérer les acomptes à J+1 (jour après le premier jour de mission)
-// S'exécute toutes les heures (à la minute 0 de chaque heure)
-// Libère les acomptes capturés pour les missions dont le startDate était hier
+
+// ============================================================
+// CRON JOBS — avec logging structuré (Pino)
+// ============================================================
+import { logger } from "./observability/logger.js";
 import { releaseDepositsAtJPlusOneCron } from "./cron/releaseDepositsAtJPlusOne.js";
-cron.schedule("0 * * * *", async () => {
-  console.log("CRON running releaseDepositsAtJPlusOne...");
-  try {
-    const result = await releaseDepositsAtJPlusOneCron();
-    console.log(`✅ CRON releaseDepositsAtJPlusOne completed: ${result.released} released, ${result.failed} failed, ${result.skipped} skipped`);
-  } catch (err) {
-    console.error("❌ CRON releaseDepositsAtJPlusOne error:", err);
-  }
-});
 
-// Transitions de statut des bookings : confirmed → ready_soon (-15 min), ready_soon → started (à l'heure)
-// S'exécute toutes les 5 minutes
-cron.schedule("*/5 * * * *", async () => {
-  try {
-    await runBookingStatusTransitions();
-  } catch (err) {
-    console.error("❌ CRON bookingStatusTransitions error:", err);
-  }
-});
+const cronLogger = logger.child({ module: "cron" });
 
-// Transfert au détaileur 3h après l'heure de résa (argent gelé jusqu'à ce moment)
-cron.schedule("*/15 * * * *", async () => {
+// Helper : wrapper cron avec logging structuré
+async function runCron(name, fn) {
+  const start = Date.now();
+  cronLogger.info({ job: name }, `CRON ${name} started`);
   try {
-    const result = await transferBookingToProviderCron();
-    if (result.transferred > 0 || result.failed > 0) {
-      console.log(`✅ CRON transferBookingToProvider: ${result.transferred} transferred, ${result.failed} failed, ${result.skipped} skipped`);
-    }
+    const result = await fn();
+    const durationMs = Date.now() - start;
+    cronLogger.info({ job: name, durationMs, result }, `CRON ${name} completed`);
+    return result;
   } catch (err) {
-    console.error("❌ CRON transferBookingToProvider error:", err);
+    const durationMs = Date.now() - start;
+    cronLogger.error({ job: name, durationMs, err: err.message, stack: err.stack }, `CRON ${name} FAILED`);
+    return null;
   }
-});
+}
+
+// autoCapture — toutes les 10 minutes
+cron.schedule("*/10 * * * *", () => runCron("autoCapture", autoCaptureBookings));
+
+// captureScheduledPayments — toutes les heures
+cron.schedule("0 * * * *", () => runCron("captureScheduledPayments", captureScheduledPayments));
+
+// retryFailedTransfers — toutes les 6 heures
+cron.schedule("0 */6 * * *", () => runCron("retryFailedTransfers", () => retryFailedTransfers(10)));
+
+// releaseDepositsAtJPlusOne — toutes les heures
+cron.schedule("0 * * * *", () => runCron("releaseDepositsAtJPlusOne", releaseDepositsAtJPlusOneCron));
+
+// bookingStatusTransitions — toutes les 5 minutes
+cron.schedule("*/5 * * * *", () => runCron("bookingStatusTransitions", runBookingStatusTransitions));
+
+// transferBookingToProvider — toutes les 15 minutes
+cron.schedule("*/15 * * * *", () => runCron("transferBookingToProvider", transferBookingToProviderCron));
 
 // 🆕 Capture automatique des paiements mensuels programmés (missions B2B)
 // S'exécute tous les jours à 9h (Europe/Brussels)

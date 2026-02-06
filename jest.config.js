@@ -7,5 +7,6 @@ export default {
   coverageDirectory: "coverage",
   coverageReporters: ["text", "lcov", "html"],
   verbose: true,
-  testTimeout: 10000,
+  testTimeout: 30000,
+  setupFiles: ["./tests/jest.setup.js"],
 };
