@@ -287,10 +287,11 @@ export async function validateExistingSepaAccountController(req, res) {
       });
     }
     
+    // 🔒 SECURITY: Ne pas exposer les détails d'erreurs internes
     return res.status(500).json({ 
-      error: err.message || "Could not validate existing SEPA account",
+      error: "Could not validate existing SEPA account",
       code: "SEPA_VALIDATION_ERROR",
-      details: err.message,
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 }
@@ -351,10 +352,11 @@ export async function confirmValidationPaymentController(req, res) {
       });
     }
     
+    // 🔒 SECURITY: Ne pas exposer les détails d'erreurs internes
     return res.status(400).json({ 
-      error: err.message || "Could not confirm validation payment",
+      error: "Could not confirm validation payment",
       code: "SEPA_VALIDATION_CONFIRM_ERROR",
-      details: err.message,
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 }

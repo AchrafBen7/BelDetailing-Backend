@@ -30,6 +30,11 @@ export async function getReferralInfoController(req, res) {
  */
 export async function getReferralStatsController(req, res) {
   try {
+    // 🔒 SECURITY: Les stats de la plateforme ne sont accessibles qu'aux admins
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
     const stats = await getReferralPlatformStats();
     return res.json(stats);
   } catch (err) {

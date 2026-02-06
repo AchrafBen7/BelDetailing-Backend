@@ -47,6 +47,7 @@ export async function createPaymentIntentController(req, res) {
 
 /* -----------------------------------------------------
    CAPTURE PAYMENT — Provider accepte la réservation
+   🔒 SECURITY: Vérifie que le PaymentIntent appartient à un booking du user
 ----------------------------------------------------- */
 export async function capturePaymentController(req, res) {
   try {
@@ -54,6 +55,21 @@ export async function capturePaymentController(req, res) {
 
     if (!paymentIntentId) {
       return res.status(400).json({ error: "Missing paymentIntentId" });
+    }
+
+    // 🔒 Vérifier que le PaymentIntent appartient à un booking du provider
+    const { data: booking, error: bookingErr } = await supabase
+      .from("bookings")
+      .select("id, provider_id, customer_id")
+      .eq("payment_intent_id", paymentIntentId)
+      .maybeSingle();
+
+    if (bookingErr || !booking) {
+      return res.status(404).json({ error: "Booking not found for this payment" });
+    }
+
+    if (booking.provider_id !== req.user.id && booking.customer_id !== req.user.id) {
+      return res.status(403).json({ error: "You are not authorized for this payment" });
     }
 
     const ok = await capturePayment(paymentIntentId);
@@ -66,6 +82,7 @@ export async function capturePaymentController(req, res) {
 
 /* -----------------------------------------------------
    REFUND PAYMENT — annulation / refus
+   🔒 SECURITY: Vérifie que le PaymentIntent appartient à un booking du user
 ----------------------------------------------------- */
 export async function refundPaymentController(req, res) {
   try {
@@ -73,6 +90,21 @@ export async function refundPaymentController(req, res) {
 
     if (!paymentIntentId) {
       return res.status(400).json({ error: "Missing paymentIntentId" });
+    }
+
+    // 🔒 Vérifier que le PaymentIntent appartient à un booking du user
+    const { data: booking, error: bookingErr } = await supabase
+      .from("bookings")
+      .select("id, provider_id, customer_id")
+      .eq("payment_intent_id", paymentIntentId)
+      .maybeSingle();
+
+    if (bookingErr || !booking) {
+      return res.status(404).json({ error: "Booking not found for this payment" });
+    }
+
+    if (booking.provider_id !== req.user.id && booking.customer_id !== req.user.id) {
+      return res.status(403).json({ error: "You are not authorized for this payment" });
     }
 
     const ok = await refundPayment(paymentIntentId);
@@ -128,10 +160,22 @@ export async function listTransactionsController(req, res) {
 export async function deletePaymentMethodController(req, res) {
   try {
     const { paymentMethodId } = req.params;
-    await detachPaymentMethod(req.user, paymentMethodId);
+
+    // 🔒 Fetch le user complet avec stripe_customer_id (req.user n'a que id/email/role)
+    const { data: fullUser, error: userErr } = await supabase
+      .from("users")
+      .select("id, email, stripe_customer_id")
+      .eq("id", req.user.id)
+      .single();
+
+    if (userErr || !fullUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    await detachPaymentMethod(fullUser, paymentMethodId);
     return res.json({ success: true });
   } catch (err) {
     console.error("[PAYMENT] delete method error", err);
-    return res.status(400).json({ error: err.message });
+    return res.status(400).json({ error: "Could not delete payment method" });
   }
 }

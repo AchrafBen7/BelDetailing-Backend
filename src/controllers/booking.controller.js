@@ -407,12 +407,9 @@ export async function createBooking(req, res) {
     let transportDistanceKm = null;
     let transportFee = 0;
 
-    // ⚠️ Utiliser les valeurs envoyées par l'app si présentes, sinon calculer
-    if (transport_distance_km != null && transport_fee != null) {
-      console.log("🔵 [BOOKINGS] createBooking - Using transport values from request");
-      transportDistanceKm = Number(transport_distance_km);
-      transportFee = Number(transport_fee);
-    } else if (!provider.has_mobile_service || atProvider) {
+    // 🔒 SECURITY: Toujours recalculer le transport côté serveur.
+    //    Ne JAMAIS faire confiance aux valeurs envoyées par le client (manipulation possible).
+    if (!provider.has_mobile_service || atProvider) {
       transportDistanceKm = null;
       transportFee = 0;
     } else if (
@@ -791,11 +788,10 @@ export async function createBooking(req, res) {
     console.error("[BOOKINGS] createBooking error:", err);
     console.error("[BOOKINGS] createBooking error stack:", err.stack);
     console.error("[BOOKINGS] createBooking error message:", err.message);
+    // 🔒 SECURITY: Ne pas exposer les détails d'erreurs internes au client
     return res.status(500).json({ 
       error: "Could not create booking",
-      details: err.message,
-      // ⚠️ En production, ne pas exposer le stack, mais pour debug c'est utile
-      // stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 }
@@ -1086,7 +1082,35 @@ export async function completeService(req, res) {
 ----------------------------------------------------- */
 export async function updateBooking(req, res) {
   try {
-    const booking = await updateBookingService(req.params.id, req.body);
+    const bookingId = req.params.id;
+    const userId = req.user.id;
+
+    // 🔒 SECURITY: Vérifier que le booking appartient à l'utilisateur
+    const existing = await getBookingDetail(bookingId);
+    if (!existing) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const isCustomer = existing.customer_id === userId;
+    let isProvider = false;
+    if (req.user.role === "provider") {
+      const providerProfileId = await getProviderProfileIdForUser(userId);
+      isProvider = providerProfileId
+        ? existing.provider_id === providerProfileId
+        : false;
+    }
+
+    if (!isCustomer && !isProvider) {
+      return res.status(403).json({ error: "You are not allowed to update this booking" });
+    }
+
+    // 🔒 Vérifier que le booking est dans un état modifiable
+    const nonUpdatableStatuses = ["completed", "cancelled", "refunded"];
+    if (nonUpdatableStatuses.includes(existing.status)) {
+      return res.status(400).json({ error: `Cannot update a booking in '${existing.status}' status` });
+    }
+
+    const booking = await updateBookingService(bookingId, req.body);
     return res.json(booking);
   } catch (err) {
     console.error("[BOOKINGS] update error:", err);
@@ -1766,6 +1790,11 @@ export async function refundBooking(req, res) {
 
 export async function cleanupExpiredBookingsController(req, res) {
   try {
+    // 🔒 SECURITY: Seuls les admins peuvent déclencher le nettoyage manuellement
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Only admins can trigger cleanup" });
+    }
+
     const deletedCount = await cleanupExpiredBookings();
     return res.json({
       success: true,

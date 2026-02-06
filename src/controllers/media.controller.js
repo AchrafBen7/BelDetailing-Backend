@@ -10,7 +10,21 @@ export async function uploadMedia(req, res) {
 
     const file = req.file;
     const userId = req.user.id;
-    const ext = file.originalname.split(".").pop();
+    const rawExt = (file.originalname.split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    // 🔒 SECURITY: Whitelist des extensions autorisées
+    const ALLOWED_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "mp4", "mov", "pdf"]);
+    if (!ALLOWED_EXTENSIONS.has(rawExt)) {
+      return res.status(400).json({ error: `File type '.${rawExt}' is not allowed` });
+    }
+
+    // 🔒 SECURITY: Limiter la taille du fichier (10 MB max)
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+    if (file.size > MAX_FILE_SIZE) {
+      return res.status(400).json({ error: "File too large (max 10 MB)" });
+    }
+
+    const ext = rawExt;
     const id = nanoid();
     
     // 🛡️ SÉCURITÉ : Path avec préfixe user pour ownership et isolation

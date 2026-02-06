@@ -157,10 +157,12 @@ export async function updateProfile(req, res) {
   }
 
   // 1) Update table users (role non modifiable ici – uniquement via transition provider_passionate → provider ci-dessus)
+  // 🔒 SECURITY: isVatValid ne doit JAMAIS être modifiable par l'utilisateur.
+  //    Seul le backend VAT validation peut le setter.
   const userUpdate = {};
   if (phone !== undefined) userUpdate.phone = phone;
   if (vatNumber !== undefined) userUpdate.vat_number = vatNumber;
-  if (isVatValid !== undefined) userUpdate.is_vat_valid = isVatValid;
+  // isVatValid intentionnellement exclu — seul le service de validation TVA peut le modifier
   if (dismissedFirstBookingOffer !== undefined) userUpdate.dismissed_first_booking_offer = dismissedFirstBookingOffer === true;
 
   if (Object.keys(userUpdate).length > 0) {

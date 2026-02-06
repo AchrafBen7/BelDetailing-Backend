@@ -121,9 +121,11 @@ export async function searchProviders(filters) {
   }
 
   // 🔍 Search by city or postal
+  // 🔒 SECURITY: Sanitize city pour éviter injection de filtre PostgREST
   if (city) {
+    const safeCity = city.replace(/[.,()]/g, "");
     query = query.or(
-      `base_city.ilike.%${city}%,postal_code.ilike.%${city}%`
+      `base_city.ilike.%${safeCity}%,postal_code.ilike.%${safeCity}%`
     );
   }
 

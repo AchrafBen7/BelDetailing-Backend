@@ -96,9 +96,10 @@ export async function listFavoritesController(req, res) {
       details: err.details,
       hint: err.hint,
     });
+    // 🔒 SECURITY: Ne pas exposer les détails d'erreurs internes
     return res.status(500).json({ 
       error: "Could not fetch favorites",
-      details: err.message 
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 }

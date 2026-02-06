@@ -46,12 +46,25 @@ export async function lookupVAT(vatNumber) {
 
   const { countryCode, number } = normalized;
 
+  // 🔒 SECURITY: Échapper les caractères spéciaux XML pour éviter l'injection SOAP
+  function escapeXml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  const safeCountryCode = escapeXml(countryCode);
+  const safeNumber = escapeXml(number);
+
   const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
     <checkVat xmlns="urn:ec.europa.eu:taxud:vies:services:checkVat:types">
-      <countryCode>${countryCode}</countryCode>
-      <vatNumber>${number}</vatNumber>
+      <countryCode>${safeCountryCode}</countryCode>
+      <vatNumber>${safeNumber}</vatNumber>
     </checkVat>
   </soap:Body>
 </soap:Envelope>`;

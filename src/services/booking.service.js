@@ -179,10 +179,50 @@ export async function createBookingService(payload, customer) {
 
 
 
+// 🔒 SECURITY: Whitelist des champs autorisés pour les mises à jour externes
+const BOOKING_UPDATABLE_FIELDS = new Set([
+  "status",
+  "payment_status",
+  "payment_intent_id",
+  "deposit_payment_intent_id",
+  "date",
+  "start_time",
+  "end_time",
+  "address",
+  "invoice_sent",
+  "acceptance_deadline",
+  "customer_address_lat",
+  "customer_address_lng",
+  "at_provider",
+  "notes",
+]);
+
+// Champs INTERDITS (ne doivent jamais être modifiables via PATCH public) :
+// price, total_price, commission_rate, commission_amount, transport_fee,
+// transport_distance_km, provider_id, customer_id, service_id
+
 export async function updateBookingService(id, dataUpdate) {
+  // 🔒 Filtrer uniquement les champs autorisés
+  const sanitized = {};
+  for (const [key, value] of Object.entries(dataUpdate)) {
+    if (BOOKING_UPDATABLE_FIELDS.has(key)) {
+      sanitized[key] = value;
+    }
+  }
+
+  if (Object.keys(sanitized).length === 0) {
+    // Rien à mettre à jour après filtrage
+    const { data } = await supabase
+      .from("bookings")
+      .select("*")
+      .eq("id", id)
+      .single();
+    return data;
+  }
+
   const { data, error } = await supabase
     .from("bookings")
-    .update(dataUpdate)
+    .update(sanitized)
     .eq("id", id)
     .select("*")
     .single();

@@ -1,4 +1,5 @@
 // src/controllers/auth.controller.js
+import { randomInt } from "crypto";
 import { supabase, supabaseAdmin } from "../config/supabase.js";
 import {
   resendVerificationEmail,
@@ -62,8 +63,9 @@ function mapUserRowToDto(row) {
   };
 }
 
+// 🔒 SECURITY: Utiliser crypto.randomInt au lieu de Math.random()
 function generateVerificationCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return randomInt(100000, 1000000).toString();
 }
 
 /* ============================================================
@@ -516,10 +518,7 @@ export async function verifyEmail(req, res) {
       return res.status(400).json({ error: "Email already verified" });
     }
 
-    if (user.email_verification_code !== code) {
-      return res.status(400).json({ error: "Invalid verification code" });
-    }
-
+    // 🔒 SECURITY: Vérifier expiration AVANT de tester le code
     if (user.email_verification_code_expires_at) {
       const expiresAt = new Date(user.email_verification_code_expires_at);
       if (expiresAt < new Date()) {
@@ -529,12 +528,42 @@ export async function verifyEmail(req, res) {
       }
     }
 
+    if (user.email_verification_code !== code) {
+      // 🔒 SECURITY: Incrémenter le compteur de tentatives
+      const attempts = (user.email_verification_attempts || 0) + 1;
+      const updatePayload = { email_verification_attempts: attempts };
+
+      // Après 5 tentatives échouées, invalider le code
+      if (attempts >= 5) {
+        updatePayload.email_verification_code = null;
+        updatePayload.email_verification_code_expires_at = null;
+        updatePayload.email_verification_attempts = 0;
+
+        await supabaseAdmin
+          .from("users")
+          .update(updatePayload)
+          .eq("id", user.id);
+
+        return res.status(400).json({
+          error: "Too many failed attempts. Please request a new verification code.",
+        });
+      }
+
+      await supabaseAdmin
+        .from("users")
+        .update(updatePayload)
+        .eq("id", user.id);
+
+      return res.status(400).json({ error: "Invalid verification code" });
+    }
+
     const { error: updateError } = await supabaseAdmin
       .from("users")
       .update({
         email_verified: true,
         email_verification_code: null,
         email_verification_code_expires_at: null,
+        email_verification_attempts: 0,
       })
       .eq("id", user.id);
 

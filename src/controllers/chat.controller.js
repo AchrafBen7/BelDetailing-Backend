@@ -441,6 +441,11 @@ export async function sendMessageController(req, res) {
       return res.status(400).json({ error: "Message content is required" });
     }
 
+    // 🔒 SECURITY: Limiter la taille des messages
+    if (content.length > 5000) {
+      return res.status(400).json({ error: "Message too long (max 5000 characters)" });
+    }
+
     console.log("🔄 [CHAT CONTROLLER] Fetching conversation...");
     const { data: conversation, error: convError } = await supabase
       .from("conversations")
@@ -530,9 +535,10 @@ export async function sendMessageController(req, res) {
       });
     }
     
+    // 🔒 SECURITY: Ne pas exposer les détails d'erreurs internes
     return res.status(500).json({ 
       error: "Could not send message",
-      details: err.message,
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 }
