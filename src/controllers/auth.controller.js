@@ -81,8 +81,22 @@ export async function register(req, res) {
 
   const finalRole = (role || "customer").toLowerCase();
 
-  // 🔒 Admin : autoriser uniquement le premier compte admin (bootstrap)
+  // 🔒 Admin : secret requis + uniquement le premier compte (bootstrap)
   if (finalRole === "admin") {
+    const adminSecret = process.env.ADMIN_REGISTRATION_SECRET;
+    const providedSecret = req.body.admin_secret;
+
+    if (!adminSecret) {
+      return res.status(503).json({
+        error: "Admin registration is not configured (ADMIN_REGISTRATION_SECRET missing).",
+      });
+    }
+    if (providedSecret !== adminSecret) {
+      return res.status(403).json({
+        error: "Invalid or missing admin_secret. Admin registration requires the correct secret.",
+      });
+    }
+
     const { count, error: countError } = await supabaseAdmin
       .from("users")
       .select("id", { count: "exact", head: true })

@@ -34,6 +34,11 @@ export const registerValidation = [
     .trim()
     .isLength({ max: 64 })
     .withMessage("VAT number too long"),
+  body("admin_secret")
+    .optional()
+    .trim()
+    .isLength({ max: 256 })
+    .withMessage("admin_secret too long"),
 ];
 
 export const loginValidation = [
