@@ -1,7 +1,7 @@
 // src/validators/auth.validator.js
 import { body } from "express-validator";
 
-const ROLE_VALUES = ["customer", "provider", "company", "provider_passionate"];
+const ROLE_VALUES = ["customer", "provider", "company", "provider_passionate", "admin"];
 
 export const registerValidation = [
   body("email")

@@ -81,6 +81,22 @@ export async function register(req, res) {
 
   const finalRole = (role || "customer").toLowerCase();
 
+  // 🔒 Admin : autoriser uniquement le premier compte admin (bootstrap)
+  if (finalRole === "admin") {
+    const { count, error: countError } = await supabaseAdmin
+      .from("users")
+      .select("id", { count: "exact", head: true })
+      .eq("role", "admin");
+    if (countError) {
+      return res.status(500).json({ error: "Unable to verify admin count" });
+    }
+    if (count > 0) {
+      return res.status(403).json({
+        error: "Admin registration is disabled. An admin account already exists.",
+      });
+    }
+  }
+
   // 🌟 RÈGLE : VAT obligatoire pour provider/company (mais PAS pour provider_passionate)
   // ✅ provider_passionate n'a PAS besoin de TVA
   if (finalRole === "provider_passionate") {
