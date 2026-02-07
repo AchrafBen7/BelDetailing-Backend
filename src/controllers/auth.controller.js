@@ -558,7 +558,9 @@ export async function verifyEmail(req, res) {
       }
     }
 
-    if (user.email_verification_code !== code) {
+    const codeStr = String(code).trim();
+    const storedCode = user.email_verification_code != null ? String(user.email_verification_code).trim() : "";
+    if (storedCode !== codeStr) {
       // 🔒 SECURITY: Incrémenter le compteur de tentatives
       const attempts = (user.email_verification_attempts || 0) + 1;
       const updatePayload = { email_verification_attempts: attempts };
@@ -599,7 +601,10 @@ export async function verifyEmail(req, res) {
 
     if (updateError) {
       console.error("❌ [AUTH] verifyEmail update error:", updateError);
-      return res.status(500).json({ error: "Could not verify email" });
+      return res.status(500).json({
+        error: "Could not verify email",
+        details: updateError.message,
+      });
     }
 
     console.log("✅ [AUTH] Email verified for:", user.email);
