@@ -73,7 +73,7 @@ export async function buildDocumentsList(userId, month, role = "provider") {
       documents.push({
         id: `${month}-beldetailing`,
         type: "belDetailingInvoice",
-        title: "Facture BelDetailing",
+        title: "Facture NIOS",
         subtitle: `${month} • Commission mensuelle`,
         amount: summary.commissions,
         currency: "eur",
@@ -208,7 +208,7 @@ export async function generateDocumentPDF(providerUserId, documentId) {
   doc.on("data", c => chunks.push(c));
   doc.on("end", () => {});
 
-  doc.fontSize(20).text("BelDetailing", { align: "center" });
+  doc.fontSize(20).text("NIOS", { align: "center" });
   doc.moveDown();
 
   doc.fontSize(14).text(`Document: ${documentId}`);

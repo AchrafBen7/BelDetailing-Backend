@@ -24,7 +24,7 @@ export async function generateDocumentPDF(providerUserId, documentId) {
     html = `
       <html>
         <body>
-          <h1>Facture BelDetailing</h1>
+          <h1>Facture NIOS</h1>
           <p>Période: ${month}</p>
           <p>Services: ${summary.servicesCount}</p>
           <p>Revenus: ${summary.revenue}€</p>

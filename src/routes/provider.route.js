@@ -84,9 +84,10 @@ router.patch("/services/:id", requireAuth, updateService); // 🆕 Mise à jour 
 router.delete("/services/:id", requireAuth, deleteServiceController);
 
 // ⭐ Routes paramétrées (/:id/... avant /:id)
-// 🔒 SECURITY: Require auth pour limiter le scraping et protéger les données
-router.get("/:id/services", requireAuth, getProviderServicesController);
-router.get("/:id/reviews", requireAuth, getProviderReviewsController);
+// Public : services et reviews sont consultables sans auth (App Clip, visiteurs)
+router.get("/:id/services", getProviderServicesController);
+router.get("/:id/reviews", getProviderReviewsController);
+// 🔒 Stats et disponibilités restent protégées
 router.get("/:id/stats", requireAuth, getProviderStatsController);
 router.get("/:id/available-slots", requireAuth, getAvailableSlotsController);
 router.get("/:id/available-days", requireAuth, getAvailableDaysController);

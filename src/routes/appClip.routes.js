@@ -52,7 +52,7 @@ router.get("/clip/:providerId", async (req, res) => {
   const { providerId } = req.params;
 
   // Tenter de charger les infos du provider pour afficher son nom
-  let providerName = "BelDetailing";
+  let providerName = "NIOS";
   let providerCity = "";
 
   try {
@@ -80,7 +80,7 @@ router.get("/clip/:providerId", async (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${providerName} — BelDetailing</title>
+    <title>${providerName} — NIOS</title>
     
     <!-- Apple App Clip Meta Tags -->
     <meta name="apple-itunes-app" 
