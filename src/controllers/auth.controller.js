@@ -484,6 +484,53 @@ export async function changePassword(req, res) {
 }
 
 /* ============================================================
+   FORGOT PASSWORD — Envoi d'un email de reset via Supabase
+   POST /api/v1/auth/forgot-password
+   Body: { email }
+============================================================ */
+export async function forgotPassword(req, res) {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // redirectTo pointe vers la page /reset-password sur notre propre backend
+    const baseUrl = process.env.RESET_PASSWORD_REDIRECT_URL
+      || process.env.FRONTEND_BASE_URL
+      || "https://api.xn--nos-zma.com";
+    const redirectTo = `${baseUrl}/reset-password`;
+
+    // Supabase envoie un email avec un lien qui redirige vers redirectTo avec les tokens
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo,
+    });
+
+    if (error) {
+      console.error("[AUTH] forgotPassword supabase error:", error);
+      // On ne révèle pas si le mail existe ou non (sécurité)
+      return res.json({
+        success: true,
+        message: "Si un compte existe avec cet email, un lien de réinitialisation a été envoyé.",
+      });
+    }
+
+    console.log("✅ [AUTH] Password reset email sent to:", normalizedEmail);
+
+    return res.json({
+      success: true,
+      message: "Si un compte existe avec cet email, un lien de réinitialisation a été envoyé.",
+    });
+  } catch (err) {
+    console.error("[AUTH] forgotPassword exception:", err);
+    return res.status(500).json({ error: "Could not process request" });
+  }
+}
+
+
+/* ============================================================
    logout
 ============================================================ */
 export async function logout(req, res) {
@@ -679,5 +726,131 @@ export async function resendVerificationEmailController(req, res) {
   } catch (err) {
     console.error("❌ [AUTH] resendVerificationEmail exception:", err);
     return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+
+/* ============================================================
+   CLIP REGISTER — Auto-inscription rapide depuis l'App Clip
+   POST /api/v1/auth/clip-register
+   Body: { email, phone, name }
+   Retourne un accessToken immédiatement.
+   Si l'email existe déjà → tente un login (le user doit alors
+   utiliser son vrai mot de passe via le formulaire classique).
+============================================================ */
+export async function clipRegister(req, res) {
+  try {
+    const { email, phone, name } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // 1) Vérifier si l'utilisateur existe déjà
+    const { data: existingUser } = await supabaseAdmin
+      .from("users")
+      .select("id, email")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    if (existingUser) {
+      return res.status(409).json({
+        error: "Un compte existe déjà avec cet email. Connectez-vous.",
+        code: "EMAIL_EXISTS",
+      });
+    }
+
+    // 2) Générer un mot de passe aléatoire sécurisé
+    const crypto = await import("crypto");
+    const randomPassword = crypto.randomBytes(20).toString("hex");
+
+    // 3) Créer l'utilisateur dans Supabase Auth
+    const { data: signUpData, error: signUpError } =
+      await supabase.auth.signUp({
+        email: normalizedEmail,
+        password: randomPassword,
+        options: {
+          data: {
+            role: "customer",
+            phone: phone || "",
+            clip_registration: true,
+          },
+        },
+      });
+
+    if (signUpError) {
+      console.error("❌ [CLIP] signUp error:", signUpError);
+      return res.status(400).json({ error: signUpError.message });
+    }
+
+    const authUser = signUpData.user;
+    if (!authUser) {
+      return res
+        .status(500)
+        .json({ error: "No user returned from Supabase" });
+    }
+
+    // 4) Créer la ligne dans public.users
+    const { error: insertError } = await supabaseAdmin.from("users").insert({
+      id: authUser.id,
+      email: normalizedEmail,
+      phone: phone || "",
+      role: "customer",
+    });
+
+    if (insertError) {
+      console.error("❌ [CLIP] users insert error:", insertError);
+      // On continue — l'auth user existe déjà
+    }
+
+    // 5) Créer le profil customer
+    const firstName = (name || "").split(" ")[0] || "";
+    const lastName = (name || "").split(" ").slice(1).join(" ") || "";
+
+    const { error: custError } = await supabaseAdmin
+      .from("customer_profiles")
+      .insert({
+        user_id: authUser.id,
+        first_name: firstName,
+        last_name: lastName,
+        default_address: "",
+        preferred_city_id: null,
+      });
+
+    if (custError) {
+      console.error("❌ [CLIP] customer_profiles insert error:", custError);
+    }
+
+    // 6) Login automatique pour récupérer le token
+    const { data: loginData, error: loginError } =
+      await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: randomPassword,
+      });
+
+    if (loginError) {
+      console.error("❌ [CLIP] auto-login error:", loginError);
+      return res.status(500).json({ error: "Auto-login failed" });
+    }
+
+    const { session } = loginData;
+
+    console.log("✅ [CLIP] User registered & logged in:", normalizedEmail);
+
+    return res.status(201).json({
+      user: {
+        id: authUser.id,
+        email: normalizedEmail,
+        role: "customer",
+        phone: phone || "",
+      },
+      accessToken: session.access_token,
+      refreshToken: session.refresh_token,
+    });
+  } catch (err) {
+    console.error("❌ [CLIP] clipRegister exception:", err);
+    return res.status(500).json({ error: "Could not create account" });
   }
 }

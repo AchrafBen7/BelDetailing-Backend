@@ -35,9 +35,9 @@ export function validatePersonalInfo(content) {
       regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
       name: "adresse email",
     },
-    // URLs externes (sauf nios.app, beldetailing.com, etc.)
+    // URLs externes (sauf nïos.com, beldetailing.com, etc.)
     {
-      regex: /https?:\/\/(?!.*(nios\.app|beldetailing\.com|localhost))[^\s]+/gi,
+      regex: /https?:\/\/(?!.*(n[ïi]os\.com|xn--nos-zma\.com|beldetailing\.com|localhost))[^\s]+/gi,
       name: "lien externe",
     },
     // WhatsApp links

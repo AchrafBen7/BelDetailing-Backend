@@ -170,7 +170,7 @@ export async function getReferralInfo(userId) {
     }
   }
 
-  const baseUrl = process.env.FRONTEND_BASE_URL || "https://nios.app";
+  const baseUrl = process.env.FRONTEND_BASE_URL || "https://xn--nos-zma.com";
   const inviteLink = referralCode ? `${baseUrl}/invite/${referralCode}` : null;
 
   const { data: asReferrer } = await supabase

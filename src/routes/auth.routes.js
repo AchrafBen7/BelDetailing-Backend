@@ -6,8 +6,10 @@ import {
   refreshToken,
   logout,
   changePassword,
+  forgotPassword,
   verifyEmail,
   resendVerificationEmailController,
+  clipRegister,
 } from "../controllers/auth.controller.js";
 import {
   loginWithApple,
@@ -33,6 +35,12 @@ router.post("/resend-verification-email", resendVerificationEmailController);
 // === SOCIAL AUTH ===
 router.post("/apple", loginWithApple);
 router.post("/google", loginWithGoogle);
+
+// === PASSWORD RESET ===
+router.post("/forgot-password", forgotPassword);
+
+// === APP CLIP ===
+router.post("/clip-register", clipRegister);
 
 router.post("/logout", requireAuth, logout);
 router.post("/change-password", requireAuth, changePassword);
