@@ -348,6 +348,12 @@ export async function createBooking(req, res) {
       return res.status(404).json({ error: "Provider not found" });
     }
 
+    // 🔒 SECURITY: Block self-booking — a provider cannot book their own services
+    const providerUserId = provider.user_id ?? provider_id;
+    if (customerId === providerUserId || customerId === provider_id) {
+      return res.status(400).json({ error: "You cannot book your own services" });
+    }
+
     const hasGarage = provider.has_garage === true;
     const hasMobile = provider.has_mobile_service === true;
     let atProvider = service_at_provider === true;
