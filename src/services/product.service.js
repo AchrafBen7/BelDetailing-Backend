@@ -11,7 +11,6 @@ function mapProductRowToDto(row) {
     price: row.price,
     promoPrice: row.promo_price,
     imageUrl: row.image_url,
-    affiliateUrl: row.affiliate_url,
     partnerName: row.partner_name,
     rating: row.rating,
     reviewCount: row.review_count,

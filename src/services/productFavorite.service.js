@@ -86,7 +86,7 @@ export async function getUserFavorites(userId) {
     // Récupérer les produits correspondants
     const { data: productsData, error: productsError } = await supabase
       .from("products")
-      .select("id, name, description, category, level, price, promo_price, image_url, affiliate_url, partner_name, rating, review_count")
+      .select("id, name, description, category, level, price, promo_price, image_url, partner_name, rating, review_count")
       .in("id", productIds);
 
     if (productsError) {
