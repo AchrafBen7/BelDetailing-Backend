@@ -59,6 +59,7 @@ import referralRoutes from "./routes/referral.routes.js";
 import reportRoutes from "./routes/report.routes.js";
 import blockedUsersRoutes from "./routes/blocked-users.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import appClipRoutes from "./routes/appClip.routes.js";
 const routesImportTime = Date.now() - startRoutesImport;
 console.log(`✅ [APP] All routes loaded in ${routesImportTime}ms`);
 
@@ -207,6 +208,10 @@ app.use("/api/v1/reviews", googleReviewRoutes);
 
 // Admin Dashboard
 app.use("/api/v1/admin", adminRoutes);
+
+// App Clip — AASA + Landing page + QR data
+// IMPORTANT: Les routes AASA et /clip/ sont montées à la racine (pas sous /api/v1/)
+app.use("/", appClipRoutes);
 
 // 🛡️ SÉCURITÉ : Protéger /metrics en production avec un secret
 app.get("/metrics", (req, res, next) => {
